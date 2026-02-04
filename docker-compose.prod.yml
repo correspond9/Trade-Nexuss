@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/trading_terminal
+      - LOG_LEVEL=WARNING
+      - ENVIRONMENT=production
+      - DEBUG=false
+    env_file:
+      - .env.production
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./logs:/app/logs
+      - ./ssl:/app/ssl
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=trading_terminal
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    command: redis-server --appendonly yes
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - backend
+    restart: always
+
+volumes:
+  postgres_data:
+  redis_data:

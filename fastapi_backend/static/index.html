@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Dhan Live Data Test</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+    .container { max-width: 700px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    h2 { color: #333; border-bottom: 2px solid #0066cc; padding-bottom: 10px; }
+    h3 { color: #555; margin-top: 20px; }
+    input { width: 100%; padding: 8px; margin: 5px 0; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
+    button { width: 100%; padding: 10px; margin: 10px 0; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    button:hover { background: #0052a3; }
+    .price-box { padding: 15px; margin: 10px 0; background: #f9f9f9; border-left: 4px solid #0066cc; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+    .price-label { font-size: 14px; color: #666; }
+    .price-value { font-size: 28px; font-weight: bold; color: #0066cc; }
+    .price-symbol { font-size: 12px; color: #999; }
+    .status { padding: 12px; margin: 10px 0; border-radius: 4px; font-weight: bold; }
+    .status.connected { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .status.disconnected { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .status.loading { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+    .status.mock { background: #e7f3ff; color: #004085; border: 1px solid #b8daff; }
+    .debug-info { background: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 4px; font-size: 12px; color: #666; max-height: 150px; overflow-y: auto; }
+    .data-mode { text-align: right; font-size: 12px; color: #999; margin: 10px 0; padding: 8px; background: #f5f5f5; border-radius: 4px; }
+    .data-mode.mock { color: #ff9800; font-weight: bold; }
+    .data-mode.live { color: #4caf50; font-weight: bold; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h2>Dhan Live Data – Test UI</h2>
+  <div id="dataMode" class="data-mode live">Mode: LIVE DATA</div>
+
+  <h3>Credentials</h3>
+  <input id="client_id" placeholder="Client ID"><br>
+  <input id="api_key" placeholder="API Key (optional)"><br>
+  <input id="api_secret" placeholder="API Secret (optional)"><br>
+  <input id="auth_token" placeholder="Auth Token (REQUIRED)"><br>
+  <button onclick="save()">Save Credentials - Switch to LIVE</button>
+
+  <h3>Live Prices</h3>
+  <div id="status" class="status loading">Connecting to live data...</div>
+  
+  <div class="price-box">
+    <div>
+      <div class="price-label">NIFTY 50 Index</div>
+      <div class="price-symbol">NSE (Closed)</div>
+    </div>
+    <div class="price-value" id="nifty">--</div>
+  </div>
+  
+  <div class="price-box">
+    <div>
+      <div class="price-label">SENSEX Index</div>
+      <div class="price-symbol">BSE (Closed)</div>
+    </div>
+    <div class="price-value" id="sensex">--</div>
+  </div>
+  
+  <div class="price-box">
+    <div>
+      <div class="price-label">CRUDE OIL Futures</div>
+      <div class="price-symbol">MCX (Live)</div>
+    </div>
+    <div class="price-value" id="crude">--</div>
+  </div>
+
+  <h3>API Status</h3>
+  <button onclick="testREST()">Test REST API (/prices)</button>
+  <div id="rest_result" style="margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px; display: none;"></div>
+
+  <div class="debug-info" id="debug">
+    <strong>Debug Log:</strong><br>
+    <div id="debug_log"></div>
+  </div>
+</div>
+
+<script>
+const DEBUG_LOG = document.getElementById('debug_log');
+const MAX_LOGS = 50;
+let logs = [];
+let isLiveMode = false;
+
+function addDebugLog(msg) {
+  const timestamp = new Date().toLocaleTimeString();
+  const logEntry = `[${timestamp}] ${msg}`;
+  logs.push(logEntry);
+  if (logs.length > MAX_LOGS) logs.shift();
+  DEBUG_LOG.innerHTML = logs.join('<br>');
+  DEBUG_LOG.scrollTop = DEBUG_LOG.scrollHeight;
+}
+
+addDebugLog('Page loaded');
+
+async function save(){
+  const client_id = document.getElementById('client_id').value;
+  const auth_token = document.getElementById('auth_token').value;
+  
+  if (!client_id || !auth_token) {
+    alert('Client ID and Auth Token are required');
+    return;
+  }
+  
+  addDebugLog('Saving credentials...');
+  try {
+    const r = await fetch('/test/credentials',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        client_id: client_id,
+        api_key: document.getElementById('api_key').value,
+        api_secret: document.getElementById('api_secret').value,
+        auth_token: auth_token
+      })
+    });
+    const data = await r.json();
+    addDebugLog('Credentials saved - switching to LIVE Dhan feed');
+    document.getElementById('dataMode').textContent = 'Mode: LIVE DATA';
+    document.getElementById('dataMode').className = 'data-mode live';
+    document.getElementById('status').className = 'status loading';
+    document.getElementById('status').innerHTML = 'Connecting to LIVE Dhan feed...';
+    isLiveMode = true;
+  } catch(e) {
+    addDebugLog('Error: ' + e);
+  }
+}
+
+async function load(){
+  addDebugLog('Loading credentials...');
+  try {
+    const r = await fetch('/test/credentials');
+    const c = await r.json();
+    if(c.client_id){
+      document.getElementById('client_id').value = c.client_id;
+      document.getElementById('auth_token').value = c.auth_token || '';
+      addDebugLog('Credentials loaded - using LIVE feed');
+      document.getElementById('dataMode').textContent = 'Mode: LIVE DATA';
+      document.getElementById('dataMode').className = 'data-mode live';
+      isLiveMode = true;
+    } else {
+      addDebugLog('No saved credentials - using MOCK data');
+    }
+  } catch(e) {
+    addDebugLog('Load error: ' + e);
+  }
+}
+
+async function testREST() {
+  const result = document.getElementById('rest_result');
+  result.style.display = 'block';
+  result.innerHTML = 'Testing...';
+  
+  try {
+    const r = await fetch('/prices');
+    const data = await r.json();
+    result.innerHTML = '<strong>REST Response:</strong><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+    addDebugLog('REST API working');
+  } catch(e) {
+    result.innerHTML = '<strong>Error:</strong><pre>' + e + '</pre>';
+    addDebugLog('REST API error: ' + e);
+  }
+}
+
+load();
+addDebugLog('Connecting WebSocket...');
+
+const ws = new WebSocket("ws://127.0.0.1:8000/ws/prices");
+
+ws.onopen = () => {
+  addDebugLog('WebSocket connected');
+  if (!isLiveMode) {
+    document.getElementById('status').className = 'status mock';
+    document.getElementById('status').innerHTML = 'MOCK DATA - Showing test prices';
+  } else {
+    document.getElementById('status').className = 'status connected';
+    document.getElementById('status').innerHTML = 'LIVE - Connected to Dhan';
+  }
+};
+
+ws.onerror = (e) => {
+  addDebugLog('WebSocket error: ' + e);
+};
+
+ws.onclose = () => {
+  addDebugLog('WebSocket disconnected');
+};
+
+ws.onmessage = (e) => {
+  const d = JSON.parse(e.data);
+
+  if (typeof d.NIFTY === "number" && d.NIFTY > 0) {
+    const nifty = d.NIFTY.toFixed(2);
+    document.getElementById('nifty').innerText = nifty;
+  }
+
+  if (typeof d.SENSEX === "number" && d.SENSEX > 0) {
+    const sensex = d.SENSEX.toFixed(2);
+    document.getElementById('sensex').innerText = sensex;
+  }
+
+  if (typeof d.CRUDEOIL === "number" && d.CRUDEOIL > 0) {
+    const crude = d.CRUDEOIL.toFixed(2);
+    document.getElementById('crude').innerText = crude;
+  }
+};
+</script>
+</body>
+</html>
+  
+  <div class="price-box">
+    NIFTY 50
+    <div class="price-value" id="nifty">--</div>
+  </div>
+  
+  <div class="price-box">
+    SENSEX
+    <div class="price-value" id="sensex">--</div>
+  </div>
+  
+  <div class="price-box">
+    CRUDE OIL
+    <div class="price-value" id="crude">--</div>
+  </div>
+
+  <h3>🔍 API Status</h3>
+  <button onclick="testREST()">Test REST API (/prices)</button>
+  <div id="rest_result" style="margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px; display: none;"></div>
+
+  <div class="debug-info" id="debug">
+    <strong>Debug Log:</strong><br>
+    <div id="debug_log"></div>
+  </div>
+</div>
+
+<script>
+const DEBUG_LOG = document.getElementById('debug_log');
+const MAX_LOGS = 50;
+let logs = [];
+
+function addDebugLog(msg) {
+  const timestamp = new Date().toLocaleTimeString();
+  const logEntry = `[${timestamp}] ${msg}`;
+  logs.push(logEntry);
+  if (logs.length > MAX_LOGS) logs.shift();
+  DEBUG_LOG.innerHTML = logs.join('<br>');
+  DEBUG_LOG.scrollTop = DEBUG_LOG.scrollHeight;
+}
+
+addDebugLog('✅ Page loaded');
+
+async function save(){
+  const client_id = document.getElementById('client_id').value;
+  const auth_token = document.getElementById('auth_token').value;
+  
+  if (!client_id || !auth_token) {
+    alert('❌ Client ID and Auth Token are required');
+    return;
+  }
+  
+  addDebugLog('💾 Saving credentials...');
+  try {
+    const r = await fetch('/test/credentials',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        client_id: client_id,
+        api_key: document.getElementById('api_key').value,
+        api_secret: document.getElementById('api_secret').value,
+        auth_token: auth_token
+      })
+    });
+    const data = await r.json();
+    addDebugLog('✅ Credentials saved: ' + data.status);
+    alert('✅ Credentials saved! Feed should connect in a few seconds.');
+  } catch(e) {
+    addDebugLog('❌ Save error: ' + e);
+    alert('❌ Error saving credentials');
+  }
+}
+
+async function load(){
+  addDebugLog('📥 Loading credentials...');
+  try {
+    const r = await fetch('/test/credentials');
+    const c = await r.json();
+    if(c.client_id){
+      document.getElementById('client_id').value = c.client_id;
+      document.getElementById('auth_token').value = c.auth_token || '';
+      addDebugLog('✅ Credentials loaded');
+    } else {
+      addDebugLog('⚠️  No credentials in database');
+    }
+  } catch(e) {
+    addDebugLog('❌ Load error: ' + e);
+  }
+}
+
+async function testREST() {
+  const result = document.getElementById('rest_result');
+  result.style.display = 'block';
+  result.innerHTML = '⏳ Testing REST API...';
+  
+  try {
+    const r = await fetch('/prices');
+    const data = await r.json();
+    result.innerHTML = '<strong>✅ REST API Response:</strong><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+    addDebugLog('✅ REST API /prices working');
+  } catch(e) {
+    result.innerHTML = '<strong>❌ REST API Error:</strong><pre>' + e + '</pre>';
+    addDebugLog('❌ REST API error: ' + e);
+  }
+}
+
+load();
+addDebugLog('🔗 Connecting to WebSocket...');
+
+const ws = new WebSocket("ws://127.0.0.1:8000/ws/prices");
+
+ws.onopen = () => {
+  addDebugLog('✅ WebSocket connected');
+  document.getElementById('status').className = 'status connected';
+  document.getElementById('status').innerHTML = '✅ Connected - Receiving prices';
+};
+
+ws.onerror = (e) => {
+  addDebugLog('❌ WebSocket error: ' + e);
+  document.getElementById('status').className = 'status disconnected';
+  document.getElementById('status').innerHTML = '❌ Connection error';
+};
+
+ws.onclose = () => {
+  addDebugLog('⚠️  WebSocket disconnected');
+  document.getElementById('status').className = 'status disconnected';
+  document.getElementById('status').innerHTML = '⚠️  Disconnected - Check credentials';
+};
+
+ws.onmessage = (e) => {
+  const d = JSON.parse(e.data);
+
+  if (typeof d.NIFTY === "number") {
+    const nifty = d.NIFTY.toFixed(2);
+    document.getElementById('nifty').innerText = nifty;
+    if (d.NIFTY > 0) addDebugLog(`📈 NIFTY: ${nifty}`);
+  }
+
+  if (typeof d.SENSEX === "number") {
+    const sensex = d.SENSEX.toFixed(2);
+    document.getElementById('sensex').innerText = sensex;
+    if (d.SENSEX > 0) addDebugLog(`📈 SENSEX: ${sensex}`);
+  }
+
+  if (typeof d.CRUDEOIL === "number") {
+    const crude = d.CRUDEOIL.toFixed(2);
+    document.getElementById('crude').innerText = crude;
+    if (d.CRUDEOIL > 0) addDebugLog(`📈 CRUDE: ${crude}`);
+  }
+};
+</script>
+</body>
+</html>

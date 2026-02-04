@@ -1,0 +1,148 @@
+You are fixing an existing FRONTEND Straddly (Straddle Matrix) feature.
+
+Current issue:
+- When market is closed, UI shows “Market closed / N/A”
+- CE / PE prices are not populated
+- Center (ATM) strike becomes incorrect
+- Strike list appears irrelevant
+
+This behavior is WRONG.
+
+====================================================
+CORE PRINCIPLE (MANDATORY)
+====================================================
+
+Market CLOSED does NOT mean price UNKNOWN.
+
+When market is closed:
+- Last traded prices (previous close) MUST be used
+- ATM and straddle logic MUST still function
+- UI must remain meaningful and stable
+
+====================================================
+PRICE SOURCE PRIORITY (CRITICAL FIX)
+====================================================
+
+For each option leg (CE / PE), resolve price in this order:
+
+1️⃣ LIVE PRICE
+- Use LTP from OptionPriceStore (WebSocket)
+- Valid only if timestamp is within market session
+
+2️⃣ LAST CACHED PRICE (MANDATORY FALLBACK)
+- Use last known LTP stored in backend cache
+- This value represents previous close
+- Must be used when market is closed
+
+3️⃣ INVALID
+- Only if neither live nor cached price exists
+
+ABSOLUTE RULE:
+❌ Never show “Market closed” if a cached price exists
+
+====================================================
+BACKEND DATA ASSUMPTION
+====================================================
+
+Assume backend already:
+- Stores last known LTP per instrument
+- Persists it across market close
+- Sends it in option chain snapshot API
+
+Frontend MUST:
+- Read and trust cached prices
+- NOT block computation due to market state
+
+====================================================
+STRADDLE COMPUTATION (UPDATED)
+====================================================
+
+For each strike:
+
+CE_price =
+- live CE LTP if market open
+- else cached CE last price
+
+PE_price =
+- live PE LTP if market open
+- else cached PE last price
+
+If both exist:
+- straddle = CE_price + PE_price
+Else:
+- mark straddle INVALID
+
+====================================================
+CENTER STRIKE (ATM) SELECTION — FIX
+====================================================
+
+Center strike selection logic remains SAME:
+
+- Center strike = LOWEST VALID straddle premium
+- Computed from displayed strikes only
+
+Additional rule:
+- When market is closed:
+  → Compute center strike ONCE using cached prices
+  → Freeze center strike until market reopens
+
+DO NOT:
+- Use underlying LTP
+- Disable ATM logic
+- Default to middle strike blindly
+
+====================================================
+STRIKE LIST SELECTION (IMPORTANT)
+====================================================
+
+Strike list must ALWAYS be selected using:
+- Option chain skeleton
+- Cached prices (live or last-known)
+
+DO NOT:
+- Reduce strike range
+- Shift strikes due to market closed
+- Display arbitrary ranges
+
+If ATM is computed from cached data:
+- Build 12 below / 12 above normally
+
+====================================================
+UI DISPLAY RULES (FIX)
+====================================================
+
+When market is closed:
+- Show straddle prices using last known values
+- Show a subtle label:
+  “Based on previous close”
+- DO NOT replace prices with “Market closed”
+- BUY / SELL buttons may remain disabled (optional)
+
+====================================================
+ERROR CONDITIONS (ONLY VALID ONES)
+====================================================
+
+Show “N/A” ONLY IF:
+- CE price missing AND
+- PE price missing AND
+- No cached values exist
+
+====================================================
+ABSOLUTE PROHIBITIONS
+====================================================
+
+- DO NOT skip price computation due to market state
+- DO NOT depend on REST calls
+- DO NOT hide straddle prices unnecessarily
+- DO NOT change backend logic
+- DO NOT change subscription logic
+
+====================================================
+SUCCESS CRITERIA
+====================================================
+
+After fix:
+- Market closed screen still shows valid straddles
+- ATM / center strike is logical and stable
+- Strike list looks correct and relevant
+- No “Market closed” text replaces valid prices

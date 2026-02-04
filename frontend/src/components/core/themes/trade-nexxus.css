@@ -1,0 +1,9 @@
+/* Trade Nexxus Theme - Trade Nexxus Neumorphic System */
+
+.theme-tradenexxus {
+    --nui-bg-color: #0a0e27 !important;
+    --nui-text-color: #e4e4e7 !important;
+    --nui-lights: #1e293b !important;
+    --nui-shadows: #0f172a !important;
+    --nui-border-color: #1e40af !important;
+}

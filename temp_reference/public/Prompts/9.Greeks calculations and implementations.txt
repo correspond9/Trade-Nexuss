@@ -1,0 +1,205 @@
+PART A — EXACT GREEK FORMULAS & UPDATE RULES
+(what the system must do, unambiguously)
+This is model-level truth. Your agents must not improvise here.
+________________________________________
+A1 Core assumptions (lock these first)
+These are non-negotiable defaults unless you explicitly change them later.
+•	Model: Black–Scholes (European options)
+•	Underlying price (S):
+→ WebSocket LTP of underlying (index / stock)
+•	Option price (C / P):
+→ mid-price = (best_bid + best_ask) / 2
+•	Strike (K): REST instrument master
+•	Time to expiry (T):
+•	T = (expiry_datetime - current_datetime) / 365
+•	Risk-free rate (r):
+→ Static config (e.g. 6.5% or 0.065)
+•	Volatility (σ):
+→ Implied volatility (derived, not fixed)
+________________________________________
+A2 Black–Scholes primitives
+d1 and d2 (foundation)
+d1 = [ ln(S / K) + (r + 0.5 σ²) T ] / (σ √T)
+d2 = d1 − σ √T
+Where:
+•	ln = natural log
+•	√ = square root
+________________________________________
+A3 Option price formulas (for IV solving)
+Call price
+C = S·N(d1) − K·e^(−rT)·N(d2)
+Put price
+P = K·e^(−rT)·N(−d2) − S·N(−d1)
+N(x) = standard normal CDF
+________________________________________
+A4 Implied Volatility (MANDATORY)
+Rule
+IV must be solved numerically from market price
+Use:
+•	Newton–Raphson (preferred)
+•	OR bisection fallback (safe)
+Inputs:
+•	market option price (mid-price)
+•	S, K, r, T
+Bounds:
+σ_min = 0.01   (1%)
+σ_max = 3.00   (300%)
+Stop conditions:
+•	price error < ₹0.01
+•	OR max 50 iterations
+⚠️ If IV does not converge:
+•	mark Greeks as LOW confidence
+•	reuse last stable IV
+________________________________________
+A5 Greek formulas (FINAL, USE EXACTLY)
+Let φ(x) = standard normal PDF.
+________________________________________
+✅ Delta
+Call
+Δ_call = N(d1)
+Put
+Δ_put = N(d1) − 1
+________________________________________
+✅ Gamma (same for call & put)
+Γ = φ(d1) / (S σ √T)
+________________________________________
+✅ Theta (per DAY, not per year)
+Call
+Θ_call = [
+ − (S φ(d1) σ) / (2 √T)
+ − r K e^(−rT) N(d2)
+] / 365
+Put
+Θ_put = [
+ − (S φ(d1) σ) / (2 √T)
+ + r K e^(−rT) N(−d2)
+] / 365
+________________________________________
+✅ Vega (per 1% volatility change)
+Vega = S φ(d1) √T / 100
+________________________________________
+A6 Greeks update rules (THIS IS CRITICAL)
+Your system must not recompute Greeks blindly.
+Greeks recompute ONLY when:
+•	underlying price changes
+•	option bid/ask changes
+•	time-to-expiry crosses a minute boundary
+•	IV changes beyond tolerance (e.g. 0.1%)
+________________________________________
+Greeks MUST NOT recompute when:
+•	margin API refresh happens
+•	fallback REST price is used
+•	data confidence is LOW
+•	WebSocket feed is stale
+________________________________________
+A7 Greek confidence tagging (MANDATORY)
+Every Greek output must include:
+greek_confidence ∈ { HIGH, MEDIUM, LOW }
+Rules:
+•	HIGH
+o	WS live
+o	IV converged
+o	bid–ask spread reasonable
+•	MEDIUM
+o	WS live
+o	IV reused from cache
+•	LOW
+o	fallback price
+o	IV failed
+o	stale ticks
+⚠️ Algos must read this flag.
+
+
+
+
+
+PART B — PROMPTS FOR YOUR AI AGENT TEAM
+(copy–paste safe)
+You asked for agent prompts — here they are, structured and precise.
+________________________________________
+🔹 PROMPT 1 — Greeks Engine Agent
+You are implementing the Greeks computation engine.
+
+STRICT RULES:
+- Use Black–Scholes European formulas only.
+- Do NOT modify SPAN or margin logic.
+- Greeks are analytical outputs, not execution inputs.
+
+IMPLEMENT:
+1. Compute d1, d2 exactly as defined.
+2. Solve implied volatility from option mid-price using:
+   - Newton–Raphson with bisection fallback.
+3. Compute Delta, Gamma, Theta (per day), Vega (per 1% vol).
+4. Attach Greeks to OptionPriceStore[token].
+
+UPDATE RULES:
+- Recompute Greeks only on:
+  price change, underlying change, or time decay.
+- Freeze Greeks if WebSocket feed is down.
+- Never compute Greeks from REST fallback prices.
+
+OUTPUT FORMAT:
+{
+  delta,
+  gamma,
+  theta,
+  vega,
+  iv,
+  greek_confidence,
+  last_updated_timestamp
+}
+________________________________________
+🔹 PROMPT 2 — Data Integrity & Confidence Agent
+You are responsible for Greek confidence and data integrity.
+
+IMPLEMENT:
+- Confidence tagging: HIGH / MEDIUM / LOW.
+- Monitor WebSocket tick freshness.
+- Mark Greeks LOW confidence if:
+  - tick gap > threshold
+  - IV fails to converge
+  - fallback feed active
+
+DO NOT:
+- Smooth Greeks aggressively.
+- Interpolate across missing ticks.
+- Average across instruments.
+
+Ensure:
+- Algos can query greek_confidence.
+- UI displays confidence state visibly.
+________________________________________
+🔹 PROMPT 3 — Algo Safety Agent
+You enforce safe algorithm behavior using Greeks.
+
+RULES:
+- Algorithms must NOT place trades if greek_confidence = LOW.
+- Greeks must be used only for:
+  strategy selection, hedging logic, risk analysis.
+- Margin decisions remain REST-authoritative.
+
+IMPLEMENT:
+- Pre-trade checks using bid/ask + Greeks.
+- Kill-switch if Greeks freeze or confidence drops.
+________________________________________
+🔹 PROMPT 4 — Performance & Stability Agent
+You optimize performance without altering math.
+
+GOALS:
+- Avoid recomputing Greeks per tick unnecessarily.
+- Cache IV per instrument.
+- Trigger recompute only on meaningful price moves.
+
+ENSURE:
+- No memory leaks.
+- No blocking calls in WebSocket thread.
+- Greek computation isolated from order execution.
+________________________________________
+FINAL LOCK-IN STATEMENT (IMPORTANT)
+If your agents implement exactly what’s above:
+•	Greeks will match real broker terminals
+•	Algo behavior will survive live deployment
+•	No false PnL due to math shortcuts
+•	SPAN integrity remains intact
+This is institution-grade correctness, not hobby logic.
+

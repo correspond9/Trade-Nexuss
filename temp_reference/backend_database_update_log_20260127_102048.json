@@ -1,0 +1,100 @@
+{
+  "timestamp": "2026-01-27T10:20:48.271498",
+  "operation": "backend_database_update",
+  "old_name": "openalgo.db",
+  "new_name": "trading_terminal.db",
+  "files_processed": 18,
+  "updates": [
+    {
+      "file": "upgrade/migrate_security_columns.py",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.252869"
+    },
+    {
+      "file": "upgrade/migrate_telegram_bot.py",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.253515"
+    },
+    {
+      "file": "fix_broker.py",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.253970"
+    },
+    {
+      "file": "fix_broker_sandbox.py",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.254480"
+    },
+    {
+      "file": "test/test_master_contract_instrumenttype.py",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.254980"
+    },
+    {
+      "file": "STATIC_IP_DEPLOYMENT_GUIDE.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.255499"
+    },
+    {
+      "file": "start.sh",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.256070"
+    },
+    {
+      "file": "design/01_architecture.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.256780"
+    },
+    {
+      "file": "design/04_database_layer.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.257529"
+    },
+    {
+      "file": "design/07_configuration.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.258098"
+    },
+    {
+      "file": "design/10_logging_system.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.259065"
+    },
+    {
+      "file": "design/12_deployment_architecture.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.260166"
+    },
+    {
+      "file": "docs/CACHE_ARCHITECTURE_AND_PLUGGABLE_SYSTEM.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.261544"
+    },
+    {
+      "file": "docs/docker.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.262222"
+    },
+    {
+      "file": "docs/PASSWORD_RESET.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.263061"
+    },
+    {
+      "file": "docs/SCHEDULED_ALERTS_PRD.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.264316"
+    },
+    {
+      "file": "docs/rust/13-CONFIGURATION.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.265078"
+    },
+    {
+      "file": "docs/rust/17-ZERO-CONFIG-ARCHITECTURE.md",
+      "changes_count": 1,
+      "timestamp": "2026-01-27T10:20:48.265862"
+    }
+  ],
+  "verification": true
+}

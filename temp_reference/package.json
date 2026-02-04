@@ -1,0 +1,35 @@
+{
+  "name": "broking-terminal",
+  "version": "1.0.0",
+  "description": "Advanced Trading Terminal with Real-time Market Data",
+  "main": "comprehensive-api-integration.js",
+  "scripts": {
+    "start": "node comprehensive-api-integration.js",
+    "dev": "nodemon comprehensive-api-integration.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "security-check": "node -e \"require('./utils/security-config').checkProductionSecurity()\"",
+    "install-security": "npm install helmet express-rate-limit express-validator",
+    "audit": "npm audit",
+    "audit:fix": "npm audit fix"
+  },
+  "keywords": ["trading", "terminal", "dhan", "options", "greeks", "real-time"],
+  "author": "Trading Terminal Team",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.13.2",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "ws": "^8.19.0",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3"
+  }
+}

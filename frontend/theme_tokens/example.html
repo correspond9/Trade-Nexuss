@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trade Nexxus Theme - Example Usage</title>
+    
+    <!-- Include the theme CSS -->
+    <link rel="stylesheet" href="neumorphic-theme.css">
+    
+    <!-- Include individual theme files -->
+    <link rel="stylesheet" href="themes/default.css">
+    <link rel="stylesheet" href="themes/ocean.css">
+    <link rel="stylesheet" href="themes/cloud.css">
+    <link rel="stylesheet" href="themes/trade-nexxus.css">
+    
+    <style>
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .demo-section {
+            margin: 2rem 0;
+        }
+        
+        .theme-selector {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .theme-btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: var(--nui-border-radius);
+            background: var(--nui-bg-color);
+            color: var(--nui-text-color);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+        }
+        
+        .theme-btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .theme-btn.active {
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+        }
+        
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .status {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: var(--nui-border-radius);
+            background: var(--nui-bg-color);
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="nui-neuromorphic p-6 mb-6">
+            <h1 class="text-2xl font-bold mb-2">Trade Nexxus Theme System</h1>
+            <p class="text-lg">Example usage of the neumorphic design system</p>
+        </header>
+        
+        <!-- Theme Selector -->
+        <section class="demo-section">
+            <h2 class="text-xl font-bold mb-4">Theme Switcher</h2>
+            <div class="theme-selector nui-neuromorphic p-4">
+                <button class="theme-btn" data-theme="default">Default</button>
+                <button class="theme-btn" data-theme="ocean">Ocean</button>
+                <button class="theme-btn" data-theme="cloud">Cloud</button>
+                <button class="theme-btn" data-theme="trade-nexxus">Trade Nexxus</button>
+            </div>
+            <div class="status">
+                <strong>Current Theme:</strong> <span id="current-theme">default</span>
+            </div>
+        </section>
+        
+        <!-- Buttons Demo -->
+        <section class="demo-section">
+            <h2 class="text-xl font-bold mb-4">Buttons</h2>
+            <div class="nui-neuromorphic p-6">
+                <div class="button-grid">
+                    <div class="text-center">
+                        <h3 class="font-semibold mb-3">Standard</h3>
+                        <button class="nui-neuromorphic nui-clickable w-full p-3 mb-2">Click Me</button>
+                        <button class="nui-neuromorphic-inset nui-clickable w-full p-3">Pressed</button>
+                    </div>
+                    <div class="text-center">
+                        <h3 class="font-semibold mb-3">Trading</h3>
+                        <button class="nui-neuromorphic nui-buy nui-clickable w-full p-3 mb-2">BUY</button>
+                        <button class="nui-neuromorphic nui-sell nui-clickable w-full p-3">SELL</button>
+                    </div>
+                    <div class="text-center">
+                        <h3 class="font-semibold mb-3">P&L</h3>
+                        <button class="nui-neuromorphic nui-profit nui-clickable w-full p-3 mb-2">PROFIT</button>
+                        <button class="nui-neuromorphic nui-loss nui-clickable w-full p-3">LOSS</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Forms Demo -->
+        <section class="demo-section">
+            <h2 class="text-xl font-bold mb-4">Form Elements</h2>
+            <div class="nui-neuromorphic p-6">
+                <div class="form-grid">
+                    <div>
+                        <h3 class="font-semibold mb-3">Input Fields</h3>
+                        <div class="space-y-4">
+                            <input type="text" class="nui-input w-full" placeholder="Enter text...">
+                            <input type="email" class="nui-input w-full" placeholder="Email address...">
+                            <input type="password" class="nui-input w-full" placeholder="Password...">
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold mb-3">Other Elements</h3>
+                        <div class="space-y-4">
+                            <select class="nui-input w-full">
+                                <option>Select option...</option>
+                                <option>Option 1</option>
+                                <option>Option 2</option>
+                            </select>
+                            <textarea class="nui-input w-full" rows="3" placeholder="Textarea..."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Cards Demo -->
+        <section class="demo-section">
+            <h2 class="text-xl font-bold mb-4">Cards</h2>
+            <div class="card-grid">
+                <div class="nui-neuromorphic p-6">
+                    <h3 class="text-xl font-bold mb-3">Trading Card</h3>
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span>NIFTY 50</span>
+                            <span class="font-bold">23,456.80</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Change</span>
+                            <span class="nui-profit font-bold">+156.40</span>
+                        </div>
+                        <div class="flex gap-2 mt-4">
+                            <button class="nui-neuromorphic nui-buy nui-clickable flex-1 p-2">BUY</button>
+                            <button class="nui-neuromorphic nui-sell nui-clickable flex-1 p-2">SELL</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="nui-neuromorphic p-6">
+                    <h3 class="text-xl font-bold mb-3">Profile Card</h3>
+                    <div class="text-center">
+                        <div class="w-20 h-20 mx-auto mb-4 rounded-full nui-neuromorphic"></div>
+                        <h4 class="font-semibold mb-2">John Trader</h4>
+                        <p class="text-sm mb-4">Professional Trader</p>
+                        <button class="nui-neuromorphic nui-clickable p-2">View Profile</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Interactive Demo -->
+        <section class="demo-section">
+            <h2 class="text-xl font-bold mb-4">Interactive Demo</h2>
+            <div class="nui-neuromorphic p-6">
+                <div class="text-center">
+                    <p class="mb-4">Click the buttons below to see press states and hover effects!</p>
+                    <div class="flex gap-4 justify-center">
+                        <button id="demo-btn1" class="nui-neuromorphic nui-neuromorphic-concave">Hover Me</button>
+                        <button id="demo-btn2" class="nui-neuromorphic nui-buy nui-neuromorphic-concave">Click Me</button>
+                        <button id="demo-btn3" class="nui-neuromorphic nui-sell nui-neuromorphic-concave">Press Me</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Export Section -->
+        <section class="demo-section">
+            <h2 class="text-xl font-bold mb-4">Export Theme</h2>
+            <div class="nui-neuromorphic p-6">
+                <p class="mb-4">Export the current theme as CSS for use in other projects:</p>
+                <button id="export-btn" class="nui-neuromorphic nui-primary nui-clickable p-3">Export Current Theme</button>
+            </div>
+        </section>
+    </div>
+    
+    <!-- Include the theme components JavaScript -->
+    <script src="theme-components.js"></script>
+    
+    <script>
+        // Update current theme display
+        function updateThemeDisplay() {
+            const currentTheme = TradeNexxusTheme.getCurrentTheme();
+            document.getElementById('current-theme').textContent = currentTheme;
+        }
+        
+        // Listen for theme changes
+        document.addEventListener('themeChanged', (event) => {
+            updateThemeDisplay();
+        });
+        
+        // Export button handler
+        document.getElementById('export-btn').addEventListener('click', () => {
+            TradeNexxusTheme.exportTheme();
+        });
+        
+        // Initialize theme display
+        updateThemeDisplay();
+    </script>
+</body>
+</html>

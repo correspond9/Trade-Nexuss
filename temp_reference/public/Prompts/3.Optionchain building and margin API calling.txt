@@ -1,0 +1,167 @@
+REAL-TIME OPTION CHAIN (THE RIGHT WAY)
+First: kill a dangerous misconception
+
+❌ “Option chain comes from a single API”
+That’s false in live systems.
+
+In reality:
+Option chain = structure (REST)
+Option prices = ticks (WebSocket)
+
+What we should have:
+
+instrument master handling
+symbol ↔ token mapping
+WebSocket tick ingestion logic
+LTP update handling
+
+You will reuse this.
+What you need to ADD (conceptually)
+1️⃣ Pre-build the option chain skeleton (REST, once)
+At market open (or app start):
+From REST:
+Fetch instruments for:
+underlying (e.g. NIFTY)
+expiry
+all strikes (CE + PE)
+
+Store this as:
+OptionChainSkeleton {
+  underlying
+  expiry
+  strike
+  option_type (CE / PE)
+  instrument_token
+}
+
+
+👉 This never changes intraday.
+
+
+2️⃣ Subscribe to WebSocket ticks ONLY for relevant tokens
+
+From the skeleton:
+Extract all instrument_tokens
+Subscribe once via WebSocket
+Only once per expiry set
+
+3️⃣ Maintain a LIVE option price store (in memory)
+
+As ticks arrive:
+For each token update:
+OptionPriceStore[token] = {
+  ltp,
+  best_bid,
+  best_ask,
+  bid_qty,
+  ask_qty,
+  timestamp
+}
+
+
+This store is:
+global
+real-time
+
+4️⃣ Assemble the option chain ON DEMAND (fast)
+
+When frontend requests option chain:
+You do NOT call Dhan.
+
+You:
+iterate through OptionChainSkeleton
+attach live prices from OptionPriceStore
+
+This gives:
+real-time option chain
+real bid/ask
+zero extra API calls
+
+Why this works (important)
+WebSocket gives price truth
+REST gives contract truth
+Your server merges them
+This is exactly how brokers do it.
+
+Performance note (don’t skip)
+We need Index and Stocks full chain.
+
+For NSE and BSE Exchanges: [INDEX]
+Limited to only  SENSEX, NIFTY AND BANKNIFTY (Banknifty has only monthly expiry)
+3 Expiries- Current weekly  and Next two weekly (one of these could be monthly) expiries
+
+
+For NSE and BSE Exchanges: [Above INDEXES + ALL  STOCKS in F&O list]
+5 Expiries- Current monthly, Next Monthly,  Immidiate 3 quarterly (this might be included in current/next month) expiries
+
+
+
+Updates are incremental
+Frontend only requests JSON snapshots
+WebSocket load is constant
+
+
+
+PART 3 — SYNCING WEBSOCKET PRICES WITH REST MARGINS (SAFELY)
+
+This is subtle, and most people get it wrong.
+
+First: understand the nature of margin data
+Margin / SPAN from Dhan:
+is NOT tick-sensitive
+is recalculated:
+when price moves significantly
+when volatility changes
+when positions change
+
+So:
+
+You should NEVER recalc margin on every tick
+That would be wrong and inefficient.
+
+Correct mental model:
+
+Data	Source:				Frequency:
+Price / bid / ask			WebSocket	continuous
+Margin / SPAN	REST		event-based
+Exposure rules	REST		static / daily
+
+Correct margin sync strategy (THIS IS KEY)
+1️⃣ Use WebSocket price ONLY for feasibility checks
+
+Before placing paper order:
+use best bid / ask
+check spread
+check liquidity
+
+Do NOT recalc margin yet.
+
+2️⃣ Use REST margin ONLY at decision points
+Call margin API ONLY when:
+
+user places an order
+position changes
+quantity changes
+strategy is deployed / modified
+
+Not on every tick.
+
+
+3️⃣ Cache margin results per position set
+
+Example:
+
+MarginCache[user_id][strategy_hash] = {
+  required_margin,
+  timestamp
+}
+
+
+STABILITY & ANTI-DRIFT RULES (CRITICAL)
+• Do NOT auto-expand strikes
+• Do NOT reduce strike counts
+• Do NOT add extra expiries
+• Do NOT drop weekly options
+• Do NOT regenerate strikes intraday
+• Do NOT infer universe from search UI
+• Do NOT optimize for “performance”

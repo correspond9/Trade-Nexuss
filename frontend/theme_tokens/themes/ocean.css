@@ -1,0 +1,9 @@
+/* Ocean Theme - Trade Nexxus Neumorphic System */
+
+.theme-ocean {
+    --nui-bg-color: #e8f3ff !important;
+    --nui-text-color: #2b3645 !important;
+    --nui-lights: #fff !important;
+    --nui-shadows: #b3c7e6 !important;
+    --nui-border-color: #2563eb !important;
+}

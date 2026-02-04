@@ -1,0 +1,100 @@
+You are implementing Dhan WebSocket Data API V2 authentication.
+
+There are EXACTLY TWO supported authentication modes. 
+They are mutually exclusive and must NOT be mixed.
+
+Do NOT invent headers, query params, or alternate key names.
+Do NOT use Authorization headers or Bearer tokens.
+Do NOT change field casing.
+
+====================================================
+MODE A — TOKEN BASED AUTH (24 HOURS VALIDITY)
+====================================================
+
+Connection:
+- Open WebSocket to:
+  wss://api.dhan.co/marketdata/v2
+
+Authentication message (MUST be first message after socket open):
+
+{
+  "type": "auth",
+  "access-token": "<DHAN_24H_AUTH_TOKEN>"
+}
+
+STRICT RULES:
+- Key name MUST be exactly: "access-token"
+- Token must be inside the JSON payload
+- Do NOT send token in headers
+- Do NOT send token in URL
+- Do NOT send Bearer
+- Do NOT use access_token or Authorization
+- Do NOT nest inside another object
+
+Expected success response:
+{
+  "type": "auth",
+  "status": "success"
+}
+
+====================================================
+MODE B — CLIENT ID + API KEY + API SECRET (STATIC IP)
+====================================================
+
+This mode MUST be implemented SERVER-SIDE ONLY.
+Frontend/browser must NEVER send apiSecret.
+
+Connection:
+- Backend opens WebSocket to:
+  wss://api.dhan.co/marketdata/v2
+
+Authentication message (MUST be first message after socket open):
+
+{
+  "type": "auth",
+  "clientId": "<DHAN_CLIENT_ID>",
+  "apiKey": "<DHAN_API_KEY>",
+  "apiSecret": "<DHAN_API_SECRET>"
+}
+
+STRICT RULES:
+- All three fields are required
+- Must originate from server with whitelisted STATIC IP
+- Do NOT attempt this from browser
+- Do NOT send as headers
+- Do NOT mix with access-token mode
+
+====================================================
+GENERAL ENFORCEMENT RULES
+====================================================
+
+- Exactly ONE auth mode active at a time
+- On auth mode switch:
+  - Destroy existing WebSocket
+  - Clear auth state
+  - Reconnect and re-authenticate
+- First message after open MUST be auth payload
+- If required key is missing, Dhan returns RS-9005
+
+====================================================
+INVALID PATTERNS (NEVER USE)
+====================================================
+
+Authorization: Bearer <token>
+access_token
+Headers for WebSocket auth
+Token in URL query params
+Mixing token + apiKey/secret
+Browser usage of apiSecret
+
+====================================================
+FAILURE HANDLING
+====================================================
+
+If auth response is not success:
+- Treat as unauthenticated
+- Do not subscribe to market data
+- Surface error to UI
+
+Implement EXACTLY as specified.
+Do NOT deviate.

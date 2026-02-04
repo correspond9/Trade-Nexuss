@@ -1,0 +1,67 @@
+DhanHQ WebSocket (v2)
+
+This is the only channel where Dhan streams:
+LTP updates
+Bid / ask
+Depth (limited, but real)
+Continuous ticks
+REST is reference
+WebSocket is truth
+(This is intentional.)
+___________________________________________
+
+Correct architecture
+
+
+            DHAN
+        ┌──────────┐
+        │ WebSocket│  ← REAL-TIME
+        │   Feed   │
+        └──────────┘
+               │
+                v
+        Data_server.<our-domain>.com
+        ├─ WebSocket Listener  ✅
+        ├─ Orderbook Cache     ✅
+        ├─ Best Bid/Ask Engine ✅
+        ├─ Option Chain Engine ✅
+        └─ Price Broadcast API
+               │
+               v
+    ┌──────────┴───────────┐
+    │                     					   │
+Frontend           ---->			 Mock_exchange
+(UI)        		<-----		  	(fills & PnL)
+
+  ^    │
+ │    v
+User
+
+
+REST stays — but only for:
+
+instrument master
+contracts
+margins
+fallbacks
+_________________________________________________________
+
+
+For achieving our goals of setting up a full fledge paper trading webapp with multi user login capability we need:
+
+
+Component	Must-have
+REST		✅ Yes (reference)
+WebSocket	✅ Mandatory
+Best bid/ask	✅ From WS
+
+WebSocket market data is already included in my current subscription plan.,
+so via Dhan WebSocket v2, we get:
+
+
+Via Dhan WebSocket v2 you get:
+✅ Live LTP (tick updates)
+✅ Best Bid & Best Ask
+✅ Limited market depth (top levels, not full book)
+✅ Continuous streaming (push-based, not polling)
+✅ Same latency profile as retail live trading

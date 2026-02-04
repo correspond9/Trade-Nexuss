@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+logs/
+backend.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Test coverage
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Documentation build
+docs/_build/
+
+# Playwright
+.playwright-mcp/
+
+# Restore points and backups
+restore_points/
+backups/
+
+# Vendor dependencies
+vendor/

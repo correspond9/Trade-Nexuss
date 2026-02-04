@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Credentials Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        pre { background: #f8f9fa; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Credentials API Test</h1>
+    <div id="results"></div>
+    
+    <script>
+        const results = document.getElementById('results');
+        
+        function addResult(title, success, data) {
+            const section = document.createElement('div');
+            section.className = `test-section ${success ? 'success' : 'error'}`;
+            section.innerHTML = `
+                <h3>${title}: ${success ? '✅ Success' : '❌ Failed'}</h3>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+            results.appendChild(section);
+        }
+        
+        async function testAPI() {
+            const baseURL = 'http://127.0.0.1:5000/api/v1';
+            
+            // Test 1: Get active mode
+            try {
+                const response = await fetch(`${baseURL}/credentials/active`);
+                const data = await response.json();
+                addResult('GET /credentials/active', response.ok, data);
+            } catch (error) {
+                addResult('GET /credentials/active', false, { error: error.message });
+            }
+            
+            // Test 2: Save credentials
+            try {
+                const payload = {
+                    auth_mode: 'DAILY_TOKEN',
+                    client_id: '1100353799',
+                    access_token: 'test_token_123',
+                    is_default: true
+                };
+                const response = await fetch(`${baseURL}/credentials`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                addResult('POST /credentials', response.ok, data);
+            } catch (error) {
+                addResult('POST /credentials', false, { error: error.message });
+            }
+            
+            // Test 3: Get credentials
+            try {
+                const response = await fetch(`${baseURL}/credentials?auth_mode=DAILY_TOKEN`);
+                const data = await response.json();
+                addResult('GET /credentials?auth_mode=DAILY_TOKEN', response.ok, data);
+            } catch (error) {
+                addResult('GET /credentials?auth_mode=DAILY_TOKEN', false, { error: error.message });
+            }
+        }
+        
+        // Run tests
+        testAPI();
+    </script>
+</body>
+</html>

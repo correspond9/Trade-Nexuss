@@ -1,0 +1,53 @@
+hy<!DOCTYPE html>
+<html>
+<head>
+    <title>CORS Test</title>
+</head>
+<body>
+    <h1>CORS Test</h1>
+    <button onclick="testLogin()">Test Login</button>
+    <div id="result"></div>
+
+    <script>
+        async function testLogin() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Testing...';
+            
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'admin123'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                resultDiv.innerHTML = `
+                    <h3>Response:</h3>
+                    <p><strong>Status:</strong> ${response.status}</p>
+                    <p><strong>Success:</strong> ${response.ok}</p>
+                    <p><strong>CORS Headers:</strong></p>
+                    <pre>${JSON.stringify(Object.fromEntries(
+                        Object.entries(response.headers).filter(([k]) => k.startsWith('access-control'))
+                    ), null, 2)}</pre>
+                    <p><strong>Data:</strong></p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <h3>Error:</h3>
+                    <p><strong>Message:</strong> ${error.message}</p>
+                    <p><strong>Stack:</strong></p>
+                    <pre>${error.stack}</pre>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

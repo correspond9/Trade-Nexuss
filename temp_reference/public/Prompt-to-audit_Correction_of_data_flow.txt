@@ -1,0 +1,114 @@
+You are auditing and correcting the Dhan Data API V2 integration.
+
+The current implementation incorrectly uses WebSocket subscriptions and
+synthetic generators for instrument discovery and search.
+This MUST be corrected immediately.
+
+WebSocket is for LIVE MARKET DATA ONLY.
+Instrument discovery/search MUST come from an Instrument Master.
+
+====================================================
+NON-NEGOTIABLE DATA SOURCE RULES
+====================================================
+
+1) Dhan WebSocket
+   - Purpose: live ticks only (LTP, OI, volume, bid/ask, change)
+   - MUST NOT be used for:
+     - instrument search
+     - instrument discovery
+     - symbol generation
+     - expiry/strike construction
+   - WebSocket data can ONLY enrich known instruments
+
+2) Instrument Master
+   - SINGLE SOURCE OF TRUTH for:
+     - symbol
+     - exchange
+     - instrument type
+     - expiry
+     - strike
+     - lot size
+     - trading symbol
+     - instrument/security ID
+   - MUST be loaded from:
+     - Dhan instrument master (CSV / API / daily dump)
+     - OR a persisted database derived from it
+   - MUST NOT be algorithmically generated
+
+====================================================
+CORRECT INSTRUMENT MASTER SCHEMA (MANDATORY)
+====================================================
+
+Every instrument MUST conform to the following schema:
+
+{
+  "instrumentId": "string",        // Dhan securityId or unique key
+  "tradingSymbol": "string",       // Exact Dhan trading symbol
+  "symbol": "string",              // Underlying (NIFTY, RELIANCE, etc.)
+  "exchange": "NSE" | "BSE" | "MCX",
+  "segment": "IDX" | "EQ" | "FNO" | "COMM",
+  "instrumentType": "INDEX" | "STOCK" | "FUT" | "CE" | "PE",
+  "expiry": "YYYY-MM-DD | null",
+  "strike": number | null,
+  "lotSize": number,
+  "tickSize": number,
+  "currency": "INR",
+  "isActive": boolean
+}
+
+NO field may be inferred from WebSocket data.
+
+====================================================
+SEARCH & WATCHLIST RULES
+====================================================
+
+- Instrument search API MUST:
+  - Query ONLY the instrument master
+  - Support text search on:
+    - tradingSymbol
+    - symbol
+    - exchange
+    - expiry
+    - strike
+  - NEVER depend on WebSocket state
+
+- Watchlist entries MUST:
+  - Store instrumentId as primary key
+  - Join live tick data using instrumentId
+  - Remain functional even if WebSocket is disconnected
+
+====================================================
+CORRECT DATA FLOW (ENFORCE)
+====================================================
+
+1) Load Instrument Master (startup / daily refresh)
+2) Persist to DB or in-memory cache
+3) Expose REST API:
+   GET /instruments/search
+4) User selects instrument → instrumentId
+5) Generate WebSocket subscription USING instrumentId
+6) WebSocket ticks update LTP/market fields ONLY
+
+====================================================
+INVALID PATTERNS (STRICTLY FORBIDDEN)
+====================================================
+
+- Generating instruments via strike/expiry loops
+- Parsing symbol strings to infer metadata
+- Using WebSocket data for search
+- Mixing subscription universe with discovery
+- Guessing trading symbols
+- Using index-based identifiers
+
+====================================================
+EXPECTED OUTCOME
+====================================================
+
+After correction:
+- Watchlist search must work without WebSocket
+- Instrument identity must be stable
+- Live ticks must map deterministically
+- Subscriptions must be minimal and precise
+
+Refactor all affected components to comply with this audit.
+Do NOT preserve legacy patterns.

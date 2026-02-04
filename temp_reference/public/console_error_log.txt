@@ -1,0 +1,741 @@
+theme-components.js:254 Trade Nexxus Theme System initialized
+installHook.js:1 ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition. Error Component Stack
+    at BrowserRouter (react-router-dom.js?v=013b2701:5290:5)
+    at AppProvider (AppContext.jsx:15:31)
+    at AuthProvider (AuthContext.jsx:14:32)
+    at ErrorBoundary (ErrorBoundary.jsx:5:5)
+    at App (<anonymous>)
+overrideMethod @ installHook.js:1
+installHook.js:1 ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath. Error Component Stack
+    at BrowserRouter (react-router-dom.js?v=013b2701:5290:5)
+    at AppProvider (AppContext.jsx:15:31)
+    at AuthProvider (AuthContext.jsx:14:32)
+    at ErrorBoundary (ErrorBoundary.jsx:5:5)
+    at App (<anonymous>)
+overrideMethod @ installHook.js:1
+AppContext.jsx:39  User not authenticated, skipping data load
+AuthContext.jsx:25 🔐 AuthContext initialization started
+AuthContext.jsx:30 🔐 Found in localStorage: Object
+AuthContext.jsx:43 🔐 AuthContext initialized with stored data
+AuthContext.jsx:57 🔐 AuthContext initialization completed
+AppContext.jsx:39  User not authenticated, skipping data load
+AuthContext.jsx:25 🔐 AuthContext initialization started
+AuthContext.jsx:30 🔐 Found in localStorage: Object
+AuthContext.jsx:43 🔐 AuthContext initialized with stored data
+AuthContext.jsx:57 🔐 AuthContext initialization completed
+AppContext.jsx:45  Production mode: Using real API data
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/system/status' from origin 'http://localhost:5174' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+127.0.0.1:5000/api/v1/system/status:1  Failed to load resource: net::ERR_FAILED
+installHook.js:1 Error fetching system status: TypeError: Failed to fetch
+    at fetchSystemStatus (SystemMonitoring.jsx:12:32)
+    at SystemMonitoring.jsx:24:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at commitPassiveMountOnFiber (chunk-E22KYI7D.js?v=013b2701:18206:19)
+    at commitPassiveMountEffects_complete (chunk-E22KYI7D.js?v=013b2701:18179:17)
+    at commitPassiveMountEffects_begin (chunk-E22KYI7D.js?v=013b2701:18169:15)
+    at commitPassiveMountEffects (chunk-E22KYI7D.js?v=013b2701:18159:11)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19543:11)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+    at chunk-E22KYI7D.js?v=013b2701:19381:17
+overrideMethod @ installHook.js:1
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/credentials/active' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+127.0.0.1:5000/api/v1/credentials/active:1  Failed to load resource: net::ERR_FAILED
+installHook.js:1 Error loading settings: TypeError: Failed to fetch
+    at loadSavedSettings (useAuthSettings.js:25:34)
+    at initializeSettings (useAuthSettings.js:214:32)
+    at useAuthSettings.js:225:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at invokePassiveEffectMountInDEV (chunk-E22KYI7D.js?v=013b2701:18374:19)
+    at invokeEffectsInDev (chunk-E22KYI7D.js?v=013b2701:19754:19)
+    at commitDoubleInvokeEffectsInDEV (chunk-E22KYI7D.js?v=013b2701:19739:15)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19556:13)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+    at chunk-E22KYI7D.js?v=013b2701:19381:17
+overrideMethod @ installHook.js:1
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/credentials/active' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+127.0.0.1:5000/api/v1/credentials/active:1  Failed to load resource: net::ERR_FAILED
+installHook.js:1 Error loading settings: TypeError: Failed to fetch
+    at loadSavedSettings (useAuthSettings.js:25:34)
+    at initializeSettings (useAuthSettings.js:214:32)
+    at useAuthSettings.js:225:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at commitPassiveMountOnFiber (chunk-E22KYI7D.js?v=013b2701:18206:19)
+    at commitPassiveMountEffects_complete (chunk-E22KYI7D.js?v=013b2701:18179:17)
+    at commitPassiveMountEffects_begin (chunk-E22KYI7D.js?v=013b2701:18169:15)
+    at commitPassiveMountEffects (chunk-E22KYI7D.js?v=013b2701:18159:11)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19543:11)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+overrideMethod @ installHook.js:1
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/system/status' from origin 'http://localhost:5174' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+127.0.0.1:5000/api/v1/system/status:1  Failed to load resource: net::ERR_FAILED
+installHook.js:1 Error fetching system status: TypeError: Failed to fetch
+    at fetchSystemStatus (SystemMonitoring.jsx:12:32)
+    at SystemMonitoring.jsx:24:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at invokePassiveEffectMountInDEV (chunk-E22KYI7D.js?v=013b2701:18374:19)
+    at invokeEffectsInDev (chunk-E22KYI7D.js?v=013b2701:19754:19)
+    at commitDoubleInvokeEffectsInDEV (chunk-E22KYI7D.js?v=013b2701:19739:15)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19556:13)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+    at chunk-E22KYI7D.js?v=013b2701:19381:17
+    at workLoop (chunk-E22KYI7D.js?v=013b2701:197:42)
+overrideMethod @ installHook.js:1
+dashboard:1 Access to fetch at 'http://localhost:5000/api/v1/admin/users' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+:5000/api/v1/admin/users:1  Failed to load resource: net::ERR_FAILED
+installHook.js:1 API Error [GET] /admin/users: TypeError: Failed to fetch
+    at ApiService.request (apiService.jsx:639:30)
+    at ApiService.get (apiService.jsx:690:31)
+    at loadInitialData (AppContext.jsx:48:43)
+    at AppContext.jsx:60:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at commitPassiveMountOnFiber (chunk-E22KYI7D.js?v=013b2701:18206:19)
+    at commitPassiveMountEffects_complete (chunk-E22KYI7D.js?v=013b2701:18179:17)
+    at commitPassiveMountEffects_begin (chunk-E22KYI7D.js?v=013b2701:18169:15)
+    at commitPassiveMountEffects (chunk-E22KYI7D.js?v=013b2701:18159:11)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19543:11)
+overrideMethod @ installHook.js:1
+Navigated to http://localhost:5174/dashboard
+theme-components.js:254 Trade Nexxus Theme System initialized
+installHook.js:1 ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition. Error Component Stack
+    at BrowserRouter (react-router-dom.js?v=013b2701:5290:5)
+    at AppProvider (AppContext.jsx:15:31)
+    at AuthProvider (AuthContext.jsx:14:32)
+    at ErrorBoundary (ErrorBoundary.jsx:5:5)
+    at App (<anonymous>)
+overrideMethod @ installHook.js:1
+warnOnce @ react-router-dom.js?v=013b2701:4436
+logDeprecation @ react-router-dom.js?v=013b2701:4439
+logV6DeprecationWarnings @ react-router-dom.js?v=013b2701:4442
+(anonymous) @ react-router-dom.js?v=013b2701:5314
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath. Error Component Stack
+    at BrowserRouter (react-router-dom.js?v=013b2701:5290:5)
+    at AppProvider (AppContext.jsx:15:31)
+    at AuthProvider (AuthContext.jsx:14:32)
+    at ErrorBoundary (ErrorBoundary.jsx:5:5)
+    at App (<anonymous>)
+overrideMethod @ installHook.js:1
+warnOnce @ react-router-dom.js?v=013b2701:4436
+logDeprecation @ react-router-dom.js?v=013b2701:4439
+logV6DeprecationWarnings @ react-router-dom.js?v=013b2701:4445
+(anonymous) @ react-router-dom.js?v=013b2701:5314
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+AppContext.jsx:39  User not authenticated, skipping data load
+AuthContext.jsx:25 🔐 AuthContext initialization started
+AuthContext.jsx:30 🔐 Found in localStorage: {token: 'eyJhbGciOiJIUzI1NiIs...', user: '{"id":1,"username":"admin","email":"correspond9@gm…"Super Admin","role":"SUPER_ADMIN","is_active":1}'}
+AuthContext.jsx:43 🔐 AuthContext initialized with stored data
+AuthContext.jsx:57 🔐 AuthContext initialization completed
+AppContext.jsx:39  User not authenticated, skipping data load
+AuthContext.jsx:25 🔐 AuthContext initialization started
+AuthContext.jsx:30 🔐 Found in localStorage: {token: 'eyJhbGciOiJIUzI1NiIs...', user: '{"id":1,"username":"admin","email":"correspond9@gm…"Super Admin","role":"SUPER_ADMIN","is_active":1}'}
+AuthContext.jsx:43 🔐 AuthContext initialized with stored data
+AuthContext.jsx:57 🔐 AuthContext initialization completed
+AppContext.jsx:45  Production mode: Using real API data
+dashboard:1 Access to fetch at 'http://localhost:5000/api/v1/admin/users' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+apiService.jsx:639  GET http://localhost:5000/api/v1/admin/users net::ERR_FAILED
+request @ apiService.jsx:639
+get @ apiService.jsx:690
+loadInitialData @ AppContext.jsx:48
+(anonymous) @ AppContext.jsx:60
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 API Error [GET] /admin/users: TypeError: Failed to fetch
+    at ApiService.request (apiService.jsx:639:30)
+    at ApiService.get (apiService.jsx:690:31)
+    at loadInitialData (AppContext.jsx:48:43)
+    at AppContext.jsx:60:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at commitPassiveMountOnFiber (chunk-E22KYI7D.js?v=013b2701:18206:19)
+    at commitPassiveMountEffects_complete (chunk-E22KYI7D.js?v=013b2701:18179:17)
+    at commitPassiveMountEffects_begin (chunk-E22KYI7D.js?v=013b2701:18169:15)
+    at commitPassiveMountEffects (chunk-E22KYI7D.js?v=013b2701:18159:11)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19543:11)
+overrideMethod @ installHook.js:1
+request @ apiService.jsx:665
+await in request
+get @ apiService.jsx:690
+loadInitialData @ AppContext.jsx:48
+(anonymous) @ AppContext.jsx:60
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+Fetch failed loading: GET "<URL>".
+Fetch failed loading: GET "<URL>".
+Fetch failed loading: GET "<URL>".
+Fetch failed loading: GET "<URL>".
+Fetch failed loading: GET "<URL>".
+Fetch failed loading: GET "<URL>".
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/system/status' from origin 'http://localhost:5174' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+SystemMonitoring.jsx:12  GET http://127.0.0.1:5000/api/v1/system/status net::ERR_FAILED 404 (Not Found)
+fetchSystemStatus @ SystemMonitoring.jsx:12
+(anonymous) @ SystemMonitoring.jsx:24
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 Error fetching system status: TypeError: Failed to fetch
+    at fetchSystemStatus (SystemMonitoring.jsx:12:32)
+    at SystemMonitoring.jsx:24:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at commitPassiveMountOnFiber (chunk-E22KYI7D.js?v=013b2701:18206:19)
+    at commitPassiveMountEffects_complete (chunk-E22KYI7D.js?v=013b2701:18179:17)
+    at commitPassiveMountEffects_begin (chunk-E22KYI7D.js?v=013b2701:18169:15)
+    at commitPassiveMountEffects (chunk-E22KYI7D.js?v=013b2701:18159:11)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19543:11)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+    at chunk-E22KYI7D.js?v=013b2701:19381:17
+overrideMethod @ installHook.js:1
+fetchSystemStatus @ SystemMonitoring.jsx:20
+await in fetchSystemStatus
+(anonymous) @ SystemMonitoring.jsx:24
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/credentials/active' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+useAuthSettings.js:25  GET http://127.0.0.1:5000/api/v1/credentials/active net::ERR_FAILED
+loadSavedSettings @ useAuthSettings.js:25
+initializeSettings @ useAuthSettings.js:214
+(anonymous) @ useAuthSettings.js:225
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 Error loading settings: TypeError: Failed to fetch
+    at loadSavedSettings (useAuthSettings.js:25:34)
+    at initializeSettings (useAuthSettings.js:214:32)
+    at useAuthSettings.js:225:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at commitPassiveMountOnFiber (chunk-E22KYI7D.js?v=013b2701:18206:19)
+    at commitPassiveMountEffects_complete (chunk-E22KYI7D.js?v=013b2701:18179:17)
+    at commitPassiveMountEffects_begin (chunk-E22KYI7D.js?v=013b2701:18169:15)
+    at commitPassiveMountEffects (chunk-E22KYI7D.js?v=013b2701:18159:11)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19543:11)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+overrideMethod @ installHook.js:1
+loadSavedSettings @ useAuthSettings.js:58
+await in loadSavedSettings
+initializeSettings @ useAuthSettings.js:214
+(anonymous) @ useAuthSettings.js:225
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/credentials/active' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+useAuthSettings.js:25  GET http://127.0.0.1:5000/api/v1/credentials/active net::ERR_FAILED
+loadSavedSettings @ useAuthSettings.js:25
+initializeSettings @ useAuthSettings.js:214
+(anonymous) @ useAuthSettings.js:225
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 Error loading settings: TypeError: Failed to fetch
+    at loadSavedSettings (useAuthSettings.js:25:34)
+    at initializeSettings (useAuthSettings.js:214:32)
+    at useAuthSettings.js:225:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at invokePassiveEffectMountInDEV (chunk-E22KYI7D.js?v=013b2701:18374:19)
+    at invokeEffectsInDev (chunk-E22KYI7D.js?v=013b2701:19754:19)
+    at commitDoubleInvokeEffectsInDEV (chunk-E22KYI7D.js?v=013b2701:19739:15)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19556:13)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+    at chunk-E22KYI7D.js?v=013b2701:19381:17
+overrideMethod @ installHook.js:1
+loadSavedSettings @ useAuthSettings.js:58
+await in loadSavedSettings
+initializeSettings @ useAuthSettings.js:214
+(anonymous) @ useAuthSettings.js:225
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/system/status' from origin 'http://localhost:5174' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+SystemMonitoring.jsx:12  GET http://127.0.0.1:5000/api/v1/system/status net::ERR_FAILED 404 (Not Found)
+fetchSystemStatus @ SystemMonitoring.jsx:12
+(anonymous) @ SystemMonitoring.jsx:24
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 Error fetching system status: TypeError: Failed to fetch
+    at fetchSystemStatus (SystemMonitoring.jsx:12:32)
+    at SystemMonitoring.jsx:24:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at invokePassiveEffectMountInDEV (chunk-E22KYI7D.js?v=013b2701:18374:19)
+    at invokeEffectsInDev (chunk-E22KYI7D.js?v=013b2701:19754:19)
+    at commitDoubleInvokeEffectsInDEV (chunk-E22KYI7D.js?v=013b2701:19739:15)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19556:13)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+    at chunk-E22KYI7D.js?v=013b2701:19381:17
+    at workLoop (chunk-E22KYI7D.js?v=013b2701:197:42)
+overrideMethod @ installHook.js:1
+fetchSystemStatus @ SystemMonitoring.jsx:20
+await in fetchSystemStatus
+(anonymous) @ SystemMonitoring.jsx:24
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+useAuthSettings.js:78 🔐 Starting saveSettings...
+useAuthSettings.js:79 🔐 Current settings: {authMode: 'DAILY_TOKEN', clientId: '1100353799', accessToken: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJka…qMcKkk5T___OJxXSIHfPTEKwz-7hkduQGCMebVDyjWPAuopLg', apiKey: '', clientSecret: '', …}
+useAuthSettings.js:88 🔐 Saving DAILY_TOKEN credentials...
+useAuthSettings.js:102 🔐 Payload: {auth_mode: 'DAILY_TOKEN', client_id: '1100353799', access_token: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJka…qMcKkk5T___OJxXSIHfPTEKwz-7hkduQGCMebVDyjWPAuopLg', is_default: true}
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/credentials' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+useAuthSettings.js:104  POST http://127.0.0.1:5000/api/v1/credentials net::ERR_FAILED
+saveSettings @ useAuthSettings.js:104
+handleSave @ SuperAdmin.jsx:30
+callCallback2 @ chunk-E22KYI7D.js?v=013b2701:3680
+invokeGuardedCallbackDev @ chunk-E22KYI7D.js?v=013b2701:3705
+invokeGuardedCallback @ chunk-E22KYI7D.js?v=013b2701:3739
+invokeGuardedCallbackAndCatchFirstError @ chunk-E22KYI7D.js?v=013b2701:3742
+executeDispatch @ chunk-E22KYI7D.js?v=013b2701:7046
+processDispatchQueueItemsInOrder @ chunk-E22KYI7D.js?v=013b2701:7066
+processDispatchQueue @ chunk-E22KYI7D.js?v=013b2701:7075
+dispatchEventsForPlugins @ chunk-E22KYI7D.js?v=013b2701:7083
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:7206
+batchedUpdates$1 @ chunk-E22KYI7D.js?v=013b2701:18966
+batchedUpdates @ chunk-E22KYI7D.js?v=013b2701:3585
+dispatchEventForPluginEventSystem @ chunk-E22KYI7D.js?v=013b2701:7205
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-E22KYI7D.js?v=013b2701:5484
+dispatchEvent @ chunk-E22KYI7D.js?v=013b2701:5478
+dispatchDiscreteEvent @ chunk-E22KYI7D.js?v=013b2701:5455
+installHook.js:1 🔐 SaveSettings error: TypeError: Failed to fetch
+    at saveSettings (useAuthSettings.js:104:26)
+    at handleSave (SuperAdmin.jsx:30:13)
+    at HTMLUnknownElement.callCallback2 (chunk-E22KYI7D.js?v=013b2701:3680:22)
+    at Object.invokeGuardedCallbackDev (chunk-E22KYI7D.js?v=013b2701:3705:24)
+    at invokeGuardedCallback (chunk-E22KYI7D.js?v=013b2701:3739:39)
+    at invokeGuardedCallbackAndCatchFirstError (chunk-E22KYI7D.js?v=013b2701:3742:33)
+    at executeDispatch (chunk-E22KYI7D.js?v=013b2701:7046:11)
+    at processDispatchQueueItemsInOrder (chunk-E22KYI7D.js?v=013b2701:7066:15)
+    at processDispatchQueue (chunk-E22KYI7D.js?v=013b2701:7075:13)
+    at dispatchEventsForPlugins (chunk-E22KYI7D.js?v=013b2701:7083:11)
+overrideMethod @ installHook.js:1
+saveSettings @ useAuthSettings.js:181
+await in saveSettings
+handleSave @ SuperAdmin.jsx:30
+callCallback2 @ chunk-E22KYI7D.js?v=013b2701:3680
+invokeGuardedCallbackDev @ chunk-E22KYI7D.js?v=013b2701:3705
+invokeGuardedCallback @ chunk-E22KYI7D.js?v=013b2701:3739
+invokeGuardedCallbackAndCatchFirstError @ chunk-E22KYI7D.js?v=013b2701:3742
+executeDispatch @ chunk-E22KYI7D.js?v=013b2701:7046
+processDispatchQueueItemsInOrder @ chunk-E22KYI7D.js?v=013b2701:7066
+processDispatchQueue @ chunk-E22KYI7D.js?v=013b2701:7075
+dispatchEventsForPlugins @ chunk-E22KYI7D.js?v=013b2701:7083
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:7206
+batchedUpdates$1 @ chunk-E22KYI7D.js?v=013b2701:18966
+batchedUpdates @ chunk-E22KYI7D.js?v=013b2701:3585
+dispatchEventForPluginEventSystem @ chunk-E22KYI7D.js?v=013b2701:7205
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-E22KYI7D.js?v=013b2701:5484
+dispatchEvent @ chunk-E22KYI7D.js?v=013b2701:5478
+dispatchDiscreteEvent @ chunk-E22KYI7D.js?v=013b2701:5455
+useAuthSettings.js:104 Fetch failed loading: POST "http://127.0.0.1:5000/api/v1/credentials".
+saveSettings @ useAuthSettings.js:104
+handleSave @ SuperAdmin.jsx:30
+callCallback2 @ chunk-E22KYI7D.js?v=013b2701:3680
+invokeGuardedCallbackDev @ chunk-E22KYI7D.js?v=013b2701:3705
+invokeGuardedCallback @ chunk-E22KYI7D.js?v=013b2701:3739
+invokeGuardedCallbackAndCatchFirstError @ chunk-E22KYI7D.js?v=013b2701:3742
+executeDispatch @ chunk-E22KYI7D.js?v=013b2701:7046
+processDispatchQueueItemsInOrder @ chunk-E22KYI7D.js?v=013b2701:7066
+processDispatchQueue @ chunk-E22KYI7D.js?v=013b2701:7075
+dispatchEventsForPlugins @ chunk-E22KYI7D.js?v=013b2701:7083
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:7206
+batchedUpdates$1 @ chunk-E22KYI7D.js?v=013b2701:18966
+batchedUpdates @ chunk-E22KYI7D.js?v=013b2701:3585
+dispatchEventForPluginEventSystem @ chunk-E22KYI7D.js?v=013b2701:7205
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ chunk-E22KYI7D.js?v=013b2701:5484
+dispatchEvent @ chunk-E22KYI7D.js?v=013b2701:5478
+dispatchDiscreteEvent @ chunk-E22KYI7D.js?v=013b2701:5455
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/system/status' from origin 'http://localhost:5174' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+SystemMonitoring.jsx:12  GET http://127.0.0.1:5000/api/v1/system/status net::ERR_FAILED 404 (Not Found)
+fetchSystemStatus @ SystemMonitoring.jsx:12
+setInterval
+(anonymous) @ SystemMonitoring.jsx:25
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 Error fetching system status: TypeError: Failed to fetch
+    at fetchSystemStatus (SystemMonitoring.jsx:12:32)
+overrideMethod @ installHook.js:1
+fetchSystemStatus @ SystemMonitoring.jsx:20
+setInterval
+(anonymous) @ SystemMonitoring.jsx:25
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+Navigated to http://localhost:5174/dashboard
+theme-components.js:254 Trade Nexxus Theme System initialized
+installHook.js:1 ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition. Error Component Stack
+    at BrowserRouter (react-router-dom.js?v=013b2701:5290:5)
+    at AppProvider (AppContext.jsx:15:31)
+    at AuthProvider (AuthContext.jsx:14:32)
+    at ErrorBoundary (ErrorBoundary.jsx:5:5)
+    at App (<anonymous>)
+overrideMethod @ installHook.js:1
+warnOnce @ react-router-dom.js?v=013b2701:4436
+logDeprecation @ react-router-dom.js?v=013b2701:4439
+logV6DeprecationWarnings @ react-router-dom.js?v=013b2701:4442
+(anonymous) @ react-router-dom.js?v=013b2701:5314
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath. Error Component Stack
+    at BrowserRouter (react-router-dom.js?v=013b2701:5290:5)
+    at AppProvider (AppContext.jsx:15:31)
+    at AuthProvider (AuthContext.jsx:14:32)
+    at ErrorBoundary (ErrorBoundary.jsx:5:5)
+    at App (<anonymous>)
+overrideMethod @ installHook.js:1
+warnOnce @ react-router-dom.js?v=013b2701:4436
+logDeprecation @ react-router-dom.js?v=013b2701:4439
+logV6DeprecationWarnings @ react-router-dom.js?v=013b2701:4445
+(anonymous) @ react-router-dom.js?v=013b2701:5314
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+AppContext.jsx:39  User not authenticated, skipping data load
+AuthContext.jsx:25 🔐 AuthContext initialization started
+AuthContext.jsx:30 🔐 Found in localStorage: {token: 'eyJhbGciOiJIUzI1NiIs...', user: '{"id":1,"username":"admin","email":"correspond9@gm…"Super Admin","role":"SUPER_ADMIN","is_active":1}'}
+AuthContext.jsx:43 🔐 AuthContext initialized with stored data
+AuthContext.jsx:57 🔐 AuthContext initialization completed
+AppContext.jsx:39  User not authenticated, skipping data load
+AuthContext.jsx:25 🔐 AuthContext initialization started
+AuthContext.jsx:30 🔐 Found in localStorage: {token: 'eyJhbGciOiJIUzI1NiIs...', user: '{"id":1,"username":"admin","email":"correspond9@gm…"Super Admin","role":"SUPER_ADMIN","is_active":1}'}
+AuthContext.jsx:43 🔐 AuthContext initialized with stored data
+AuthContext.jsx:57 🔐 AuthContext initialization completed
+AppContext.jsx:45  Production mode: Using real API data
+dashboard:1 Access to fetch at 'http://localhost:5000/api/v1/admin/users' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+apiService.jsx:639  GET http://localhost:5000/api/v1/admin/users net::ERR_FAILED
+request @ apiService.jsx:639
+get @ apiService.jsx:690
+loadInitialData @ AppContext.jsx:48
+(anonymous) @ AppContext.jsx:60
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 API Error [GET] /admin/users: TypeError: Failed to fetch
+    at ApiService.request (apiService.jsx:639:30)
+    at ApiService.get (apiService.jsx:690:31)
+    at loadInitialData (AppContext.jsx:48:43)
+    at AppContext.jsx:60:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at commitPassiveMountOnFiber (chunk-E22KYI7D.js?v=013b2701:18206:19)
+    at commitPassiveMountEffects_complete (chunk-E22KYI7D.js?v=013b2701:18179:17)
+    at commitPassiveMountEffects_begin (chunk-E22KYI7D.js?v=013b2701:18169:15)
+    at commitPassiveMountEffects (chunk-E22KYI7D.js?v=013b2701:18159:11)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19543:11)
+overrideMethod @ installHook.js:1
+request @ apiService.jsx:665
+await in request
+get @ apiService.jsx:690
+loadInitialData @ AppContext.jsx:48
+(anonymous) @ AppContext.jsx:60
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+Fetch failed loading: GET "<URL>".
+Fetch failed loading: GET "<URL>".
+Fetch failed loading: GET "<URL>".
+Fetch failed loading: GET "<URL>".
+Fetch failed loading: GET "<URL>".
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/system/status' from origin 'http://localhost:5174' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+SystemMonitoring.jsx:12  GET http://127.0.0.1:5000/api/v1/system/status net::ERR_FAILED 404 (Not Found)
+fetchSystemStatus @ SystemMonitoring.jsx:12
+(anonymous) @ SystemMonitoring.jsx:24
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 Error fetching system status: TypeError: Failed to fetch
+    at fetchSystemStatus (SystemMonitoring.jsx:12:32)
+    at SystemMonitoring.jsx:24:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at commitPassiveMountOnFiber (chunk-E22KYI7D.js?v=013b2701:18206:19)
+    at commitPassiveMountEffects_complete (chunk-E22KYI7D.js?v=013b2701:18179:17)
+    at commitPassiveMountEffects_begin (chunk-E22KYI7D.js?v=013b2701:18169:15)
+    at commitPassiveMountEffects (chunk-E22KYI7D.js?v=013b2701:18159:11)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19543:11)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+    at chunk-E22KYI7D.js?v=013b2701:19381:17
+overrideMethod @ installHook.js:1
+fetchSystemStatus @ SystemMonitoring.jsx:20
+await in fetchSystemStatus
+(anonymous) @ SystemMonitoring.jsx:24
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/credentials/active' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+useAuthSettings.js:25  GET http://127.0.0.1:5000/api/v1/credentials/active net::ERR_FAILED
+loadSavedSettings @ useAuthSettings.js:25
+initializeSettings @ useAuthSettings.js:214
+(anonymous) @ useAuthSettings.js:225
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 Error loading settings: TypeError: Failed to fetch
+    at loadSavedSettings (useAuthSettings.js:25:34)
+    at initializeSettings (useAuthSettings.js:214:32)
+    at useAuthSettings.js:225:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at commitPassiveMountOnFiber (chunk-E22KYI7D.js?v=013b2701:18206:19)
+    at commitPassiveMountEffects_complete (chunk-E22KYI7D.js?v=013b2701:18179:17)
+    at commitPassiveMountEffects_begin (chunk-E22KYI7D.js?v=013b2701:18169:15)
+    at commitPassiveMountEffects (chunk-E22KYI7D.js?v=013b2701:18159:11)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19543:11)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+overrideMethod @ installHook.js:1
+loadSavedSettings @ useAuthSettings.js:58
+await in loadSavedSettings
+initializeSettings @ useAuthSettings.js:214
+(anonymous) @ useAuthSettings.js:225
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+commitPassiveMountOnFiber @ chunk-E22KYI7D.js?v=013b2701:18206
+commitPassiveMountEffects_complete @ chunk-E22KYI7D.js?v=013b2701:18179
+commitPassiveMountEffects_begin @ chunk-E22KYI7D.js?v=013b2701:18169
+commitPassiveMountEffects @ chunk-E22KYI7D.js?v=013b2701:18159
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19543
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/credentials/active' from origin 'http://localhost:5174' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+useAuthSettings.js:25  GET http://127.0.0.1:5000/api/v1/credentials/active net::ERR_FAILED
+loadSavedSettings @ useAuthSettings.js:25
+initializeSettings @ useAuthSettings.js:214
+(anonymous) @ useAuthSettings.js:225
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 Error loading settings: TypeError: Failed to fetch
+    at loadSavedSettings (useAuthSettings.js:25:34)
+    at initializeSettings (useAuthSettings.js:214:32)
+    at useAuthSettings.js:225:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at invokePassiveEffectMountInDEV (chunk-E22KYI7D.js?v=013b2701:18374:19)
+    at invokeEffectsInDev (chunk-E22KYI7D.js?v=013b2701:19754:19)
+    at commitDoubleInvokeEffectsInDEV (chunk-E22KYI7D.js?v=013b2701:19739:15)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19556:13)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+    at chunk-E22KYI7D.js?v=013b2701:19381:17
+overrideMethod @ installHook.js:1
+loadSavedSettings @ useAuthSettings.js:58
+await in loadSavedSettings
+initializeSettings @ useAuthSettings.js:214
+(anonymous) @ useAuthSettings.js:225
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+dashboard:1 Access to fetch at 'http://127.0.0.1:5000/api/v1/system/status' from origin 'http://localhost:5174' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+SystemMonitoring.jsx:12  GET http://127.0.0.1:5000/api/v1/system/status net::ERR_FAILED 404 (Not Found)
+fetchSystemStatus @ SystemMonitoring.jsx:12
+(anonymous) @ SystemMonitoring.jsx:24
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384
+installHook.js:1 Error fetching system status: TypeError: Failed to fetch
+    at fetchSystemStatus (SystemMonitoring.jsx:12:32)
+    at SystemMonitoring.jsx:24:5
+    at commitHookEffectListMount (chunk-E22KYI7D.js?v=013b2701:16963:34)
+    at invokePassiveEffectMountInDEV (chunk-E22KYI7D.js?v=013b2701:18374:19)
+    at invokeEffectsInDev (chunk-E22KYI7D.js?v=013b2701:19754:19)
+    at commitDoubleInvokeEffectsInDEV (chunk-E22KYI7D.js?v=013b2701:19739:15)
+    at flushPassiveEffectsImpl (chunk-E22KYI7D.js?v=013b2701:19556:13)
+    at flushPassiveEffects (chunk-E22KYI7D.js?v=013b2701:19500:22)
+    at chunk-E22KYI7D.js?v=013b2701:19381:17
+    at workLoop (chunk-E22KYI7D.js?v=013b2701:197:42)
+overrideMethod @ installHook.js:1
+fetchSystemStatus @ SystemMonitoring.jsx:20
+await in fetchSystemStatus
+(anonymous) @ SystemMonitoring.jsx:24
+commitHookEffectListMount @ chunk-E22KYI7D.js?v=013b2701:16963
+invokePassiveEffectMountInDEV @ chunk-E22KYI7D.js?v=013b2701:18374
+invokeEffectsInDev @ chunk-E22KYI7D.js?v=013b2701:19754
+commitDoubleInvokeEffectsInDEV @ chunk-E22KYI7D.js?v=013b2701:19739
+flushPassiveEffectsImpl @ chunk-E22KYI7D.js?v=013b2701:19556
+flushPassiveEffects @ chunk-E22KYI7D.js?v=013b2701:19500
+(anonymous) @ chunk-E22KYI7D.js?v=013b2701:19381
+workLoop @ chunk-E22KYI7D.js?v=013b2701:197
+flushWork @ chunk-E22KYI7D.js?v=013b2701:176
+performWorkUntilDeadline @ chunk-E22KYI7D.js?v=013b2701:384

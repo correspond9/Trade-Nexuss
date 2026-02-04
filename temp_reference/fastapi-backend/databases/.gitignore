@@ -1,0 +1,23 @@
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Database directory
+databases/
+!databases/.gitkeep
+
+# Database journal files
+*.db-journal
+*.sqlite-journal
+*.sqlite3-journal
+
+# Database WAL files
+*.db-wal
+*.sqlite-wal
+*.sqlite3-wal
+
+# Database SHM files
+*.db-shm
+*.sqlite-shm
+*.sqlite3-shm

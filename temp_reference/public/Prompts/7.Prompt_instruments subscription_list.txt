@@ -1,0 +1,56 @@
+IMPORTANT – DHANHQ API COMPLIANCE
+
+DhanHQ API v2 enforces strict limits. Violating these can result in throttling or temporary IP blocking.
+
+Observed & documented limits:
+• Max WebSocket connections per user: 5
+• Max instrument subscriptions per WebSocket: 5,000
+• REST Quote API: 1 request per second
+• REST Data APIs (option chain, Greeks, margins): 5 requests per second
+• Excessive retries or reconnect storms may trigger server-side blocking
+
+Implementation MUST:
+• Never exceed these limits
+• Use backoff on reconnects
+• Avoid repeated rapid subscription attempts
+• Centralize REST calls with caching
+• Never call REST per tick or per user action
+
+
+List of Instruments to be subscribed:
+
+Subscribe ONLY to the following instruments via Dhan WebSocket.
+
+NSE – INDEX OPTIONS (CE & PE):
+• NIFTY 50: 8 weekly + 4 quarterly expiries, 100 strikes per expiry
+• BANKNIFTY: current monthly + next 4 quarterly, 100 strikes per expiry
+• SENSEX: current 4 weekly + next 1 monthly, 100 strikes per expiry
+• FINNIFTY: current monthly + next 3 quarterly, 50 strikes per expiry
+• MIDCPNIFTY: current monthly + next 3 quarterly, 50 strikes per expiry
+• BANKEX: current monthly + next 3 quarterly, 50 strikes per expiry
+
+NSE – STOCK OPTIONS:
+• Top 100 NSE F&O stocks
+• Current + next monthly expiry
+• 25 rounded strikes per expiry
+• CE & PE
+
+NSE – STOCK FUTURES:
+• Same 100 NSE F&O stocks
+• Current + next monthly expiry
+
+MCX – FUTURES:
+• GOLD, GOLDM, GOLDMINI
+• SILVER, SILVERM, SILVERMINI
+• CRUDEOIL, NATURALGAS, COPPER
+• Current + next monthly expiry
+
+MCX – OPTIONS:
+• CRUDEOIL, NATURALGAS only
+• Current + next monthly expiry
+• 10 strikes per expiry
+• CE & PE
+
+NO OTHER INSTRUMENTS ARE PERMITTED.
+DO NOT AUTO-EXPAND STRIKES OR EXPIRIES.
+

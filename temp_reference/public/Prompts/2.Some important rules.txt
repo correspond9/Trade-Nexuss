@@ -1,0 +1,33 @@
+Very important rule (dont miss this)
+
+Never mix WebSocket prices directly into margin formulas
+Margin logic must treat Dhan’s REST output as authoritative, not recomputed.
+Use WebSocket only to decide:
+whether to try an order
+when to trigger limit orders
+
+
+Putting it all together (flow)
+WebSocket tick arrives
+   ↓
+Update OptionPriceStore
+   ↓
+Frontend / sees new prices
+   ↓
+User decides to trade
+   ↓
+Mock_exchange checks:
+   - bid/ask feasibility (WS)
+   - cached margin (REST)
+   ↓
+If needed → refresh margin (REST)
+   ↓
+Order executed in mock engine
+   ↓
+Display MTM from Executed prices as entry and exit prices
+
+So what we have:
+FastAPI as Backend server
+Dhan WebSocket for prices
+REST for structure & margins
+Mock exchange for order execution

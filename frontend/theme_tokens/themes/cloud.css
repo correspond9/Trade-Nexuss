@@ -1,0 +1,9 @@
+/* Cloud Theme - Trade Nexxus Neumorphic System */
+
+.theme-cloud {
+    --nui-bg-color: #e9edf5 !important;
+    --nui-text-color: #6b7486 !important;
+    --nui-lights: #fff !important;
+    --nui-shadows: #c8d1e3 !important;
+    --nui-border-color: #6366f1 !important;
+}

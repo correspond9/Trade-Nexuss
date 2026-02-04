@@ -1,0 +1,225 @@
+import React, { useState } from 'react';
+
+// Import all theme components
+import { useThemeLogic } from './ThemeLogic';
+import ButtonSettings from './ButtonSettings';
+import InputSettings from './InputSettings';
+import GlassCardSettings from './GlassCardSettings';
+import SidebarSettings from './SidebarSettings';
+import BackgroundOptions from './BackgroundOptions';
+import { ThemeActions, Notification } from './ThemeActions';
+import { GlobalControls } from './GlobalControls';
+import { GlobalColorControls } from './GlobalColorControls';
+
+export default function ThemeCustomizer() {
+  const [notification, setNotification] = useState(null);
+  const [activeTab, setActiveTab] = useState('buttons');
+  const [selectedTheme, setSelectedTheme] = useState('Custom Theme');
+
+  const {
+    themeConfig,
+    setThemeConfig,
+    componentSettings,
+    setComponentSettings,
+    themes
+  } = useThemeLogic();
+
+  const fontOptions = [
+    'Inter', 'Arial', 'Helvetica', 'Times New Roman', 'Georgia',
+    'Courier New', 'Verdana', 'Trebuchet MS', 'Palatino', 'Garamond',
+    'Bookman', 'Comic Sans MS', 'Impact', 'Lucide Console', 'Tahoma',
+    'Bebas Neue', 'Montserrat', 'Poppins', 'Roboto', 'Oswald',
+    'Raleway', 'Playfair Display', 'Merriweather', 'Lato', 'Open Sans',
+    'Nunito', 'Rubik', 'Ubuntu', 'Dancing Script', 'Pacifico',
+    'Bangers', 'Press Start 2P', 'Fira Code', 'JetBrains Mono', 'Space Mono'
+  ];
+
+  const fontWeightOptions = ['regular', 'bold', 'semibold', 'italic'];
+
+  const showNotification = (message, type = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  const applyTheme = (themeName) => {
+    const theme = themes[themeName];
+    if (theme) {
+      setThemeConfig(theme);
+      setSelectedTheme(themeName);
+      showNotification(`${themeName} theme applied successfully!`);
+    }
+  };
+
+  const renderComponentSettings = () => {
+    switch(activeTab) {
+      case 'buttons':
+        return (
+          <ButtonSettings
+            settings={componentSettings.buttons}
+            onChange={(newSettings) => setComponentSettings({...componentSettings, buttons: newSettings})}
+            fontOptions={fontOptions}
+            fontWeightOptions={fontWeightOptions}
+          />
+        );
+      case 'inputs':
+        return (
+          <InputSettings
+            settings={componentSettings.inputs}
+            onChange={(newSettings) => setComponentSettings({...componentSettings, inputs: newSettings})}
+            fontOptions={fontOptions}
+            fontWeightOptions={fontWeightOptions}
+          />
+        );
+      case 'glassCards':
+        return (
+          <GlassCardSettings
+            settings={componentSettings.glassCards}
+            onChange={(newSettings) => setComponentSettings({...componentSettings, glassCards: newSettings})}
+            fontOptions={fontOptions}
+            fontWeightOptions={fontWeightOptions}
+          />
+        );
+      case 'sidebar':
+        return (
+          <SidebarSettings
+            settings={componentSettings.sidebar}
+            onChange={(newSettings) => setComponentSettings({...componentSettings, sidebar: newSettings})}
+            fontOptions={fontOptions}
+            fontWeightOptions={fontWeightOptions}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderPreview = () => {
+    switch(activeTab) {
+      case 'buttons':
+        return (
+          <>
+            <button className="w-full px-3 py-2 rounded-lg text-sm font-medium">
+              Sample Button
+            </button>
+            <button className="w-full px-3 py-2 rounded-lg text-sm font-medium">
+              Another Button
+            </button>
+          </>
+        );
+      case 'inputs':
+        return (
+          <>
+            <input 
+              type="text" 
+              placeholder="Text input..." 
+              className="w-full px-3 py-2 rounded-lg text-sm"
+            />
+            <select className="w-full px-3 py-2 rounded-lg text-sm">
+              <option>Select option</option>
+              <option>Option 1</option>
+              <option>Option 2</option>
+            </select>
+          </>
+        );
+      case 'glassCards':
+        return (
+          <>
+            <div className="p-3 rounded-lg text-center text-sm glass-card">
+              <div className="font-medium">Glass Card 1</div>
+              <div className="text-xs opacity-75">Sample content</div>
+            </div>
+            <div className="p-3 rounded-lg text-center text-sm glass-card">
+              <div className="font-medium">Glass Card 2</div>
+              <div className="text-xs opacity-75">Another sample</div>
+            </div>
+          </>
+        );
+      case 'sidebar':
+        return (
+          <div className="p-3 rounded-lg text-sm">
+            <div className="font-medium mb-2">Sidebar Menu</div>
+            <div className="space-y-1 text-xs">
+              <div className="p-1 rounded hover:bg-white/10 cursor-pointer">Menu Item 1</div>
+              <div className="p-1 rounded hover:bg-white/10 cursor-pointer">Menu Item 2</div>
+              <div className="p-1 rounded hover:bg-white/10 cursor-pointer">Menu Item 3</div>
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-3xl font-bold text-gray-900 mb-6">Theme Customization</h1>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left Column */}
+          <div className="space-y-6">
+            <div className="bg-white/10 backdrop-blur-xl border border-white/10 rounded-2xl p-4 glass-card">
+              <h2 className="text-lg font-semibold mb-3">Theme Selection</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {Object.keys(themes).map(theme => (
+                  <button
+                    key={theme}
+                    onClick={() => applyTheme(theme)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      selectedTheme === theme 
+                        ? 'bg-blue-500 text-white' 
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {theme}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-xl border border-white/10 rounded-2xl p-4 glass-card">
+              <h2 className="text-lg font-semibold mb-3">Component Settings</h2>
+              <div className="flex gap-2 mb-4">
+                {['buttons', 'inputs', 'glassCards', 'sidebar'].map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      activeTab === tab 
+                        ? 'bg-blue-500 text-white' 
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div>{renderComponentSettings()}</div>
+                <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                  <h4 className="text-sm font-medium mb-2 text-gray-600">Live Preview</h4>
+                  <div className="space-y-2">{renderPreview()}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column */}
+          <div className="space-y-6">
+            <BackgroundOptions themeConfig={themeConfig} setThemeConfig={setThemeConfig} />
+            <GlobalControls themeConfig={themeConfig} onThemeConfigChange={setThemeConfig} />
+            <GlobalColorControls themeConfig={themeConfig} onThemeConfigChange={setThemeConfig} />
+            <ThemeActions 
+              themeConfig={themeConfig} 
+              componentSettings={componentSettings} 
+              onNotification={showNotification} 
+            />
+          </div>
+        </div>
+      </div>
+
+      <Notification notification={notification} />
+    </div>
+  );
+}

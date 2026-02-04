@@ -1,0 +1,18 @@
+{
+  "timestamp": "2026-01-27T10:19:55.248744",
+  "operation": "database_rename",
+  "old_name": "openalgo.db",
+  "new_name": "trading_terminal.db",
+  "backup_suffix": "20260127_101955",
+  "files_processed": 18,
+  "updates": [
+    {
+      "file": ".env",
+      "line": null,
+      "timestamp": "2026-01-27T10:19:55.247115",
+      "old": "# DHAN API Credentials for Comprehensive Integration\nDHAN_CLIENT_ID=2511215707\nDHAN_ACCESS_TOKEN=eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbkNvbnN1bWVyVHlwZSI6IlNFTEYiLCJwYXJ0bmVySWQiOiIiLCJkaGFuQ2xpZW50SWQiOiIyNTExMjE1NzA3Iiwid2ViaG9va1VybCI6IiIsImlzcyI6ImRoYW4iLCJleHAiOjE3NzE3MTI5MDF9.WrYToNSN1sEejjJLeDlSw1C_RRvN-AQPLq8a8enq_wNv1sxzcTHd5DRQT5Be2BBWrZJPCYEthPIqpOymBhJCQQ\n\n# Dhan Broker API Credentials (Static IP Authentication)\nBROKER_API_KEY=your_dhan_api_key_here\nBROKER_API_SECRET=your_dhan_api_secret_here\n\n# Static IP Configuration (for cloud deployment)\nDHAN_STATIC_IP=your_static_ip_address_here\n\n# Sandbox Configuration (for development/testing)\nDHAN_SANDBOX_MODE=true\nDHAN_SANDBOX_TOKEN=your_sandbox_token_here\n\n# API Key Pepper for secure hashing (required)\nAPI_KEY_PEPPER=3988d7a56ff85183cfcaf2c9e4bdbb744f140b9aaf79e37d4495765b155fcb51\n\n# Database URL (absolute path)\nDATABASE_URL=sqlite:///D:/4.PROJECTS/Broking Terminal/backend/db/openalgo.db\n",
+      "new": "# DHAN API Credentials for Comprehensive Integration\nDHAN_CLIENT_ID=2511215707\nDHAN_ACCESS_TOKEN=eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbkNvbnN1bWVyVHlwZSI6IlNFTEYiLCJwYXJ0bmVySWQiOiIiLCJkaGFuQ2xpZW50SWQiOiIyNTExMjE1NzA3Iiwid2ViaG9va1VybCI6IiIsImlzcyI6ImRoYW4iLCJleHAiOjE3NzE3MTI5MDF9.WrYToNSN1sEejjJLeDlSw1C_RRvN-AQPLq8a8enq_wNv1sxzcTHd5DRQT5Be2BBWrZJPCYEthPIqpOymBhJCQQ\n\n# Dhan Broker API Credentials (Static IP Authentication)\nBROKER_API_KEY=your_dhan_api_key_here\nBROKER_API_SECRET=your_dhan_api_secret_here\n\n# Static IP Configuration (for cloud deployment)\nDHAN_STATIC_IP=your_static_ip_address_here\n\n# Sandbox Configuration (for development/testing)\nDHAN_SANDBOX_MODE=true\nDHAN_SANDBOX_TOKEN=your_sandbox_token_here\n\n# API Key Pepper for secure hashing (required)\nAPI_KEY_PEPPER=3988d7a56ff85183cfcaf2c9e4bdbb744f140b9aaf79e37d4495765b155fcb51\n\n# Database URL (absolute path)\nDATABASE_URL=sqlite:///D:/4.PROJECTS/Broking Terminal/backend/db/trading_terminal.db\n"
+    }
+  ],
+  "verification": true
+}

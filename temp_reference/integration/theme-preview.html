@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trade Nexxus - Neumorphic Theme Designer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Base Neumo UI Styles -->
+    <style>
+        /* Simplified Theme System - No Light/Dark Mode */
+        :root {
+            /* Base Variables */
+            --nui-border-radius: 1rem;
+            --nui-font-size-xs: 0.75rem;
+            --nui-font-size-sm: 0.875rem;
+            --nui-font-size-md: 1rem;
+            --nui-font-size-lg: 1.125rem;
+            --nui-spacing-xs: 0.25rem;
+            --nui-spacing-sm: 0.5rem;
+            --nui-spacing-md: 1rem;
+            --nui-spacing-lg: 1.5rem;
+            
+            /* Default Theme Colors */
+            --nui-bg-color: #dedad3;
+            --nui-text-color: #1d2532;
+            --nui-lights: #ffffff;
+            --nui-shadows: #000000;
+            
+            /* Trade Nexxus Custom Colors */
+            --tn-profit: #10b981;
+            --tn-loss: #ef4444;
+            --tn-buy: #3b82f6;
+            --tn-sell: #f55c0a;
+            
+            /* Computed Colors - Reference Implementation */
+            --nui-dark-outer-shadow: -0.35rem -0.35rem 0.9rem 0.2rem rgba(255, 255, 255, 0.96);
+            --nui-dark-outer-dark: 0.5rem 0.5rem 1rem 0.2rem rgba(0, 0, 0, 0.6);
+            --nui-dark-inset-shadow: inset 0.25rem 0.25rem 0.5rem rgba(255, 255, 255, 0.96);
+            --nui-dark-inset-dark: inset -0.25rem -0.25rem 0.5rem rgba(0, 0, 0, 0.6);
+        }
+
+        body {
+            background-color: var(--nui-bg-color);
+            color: var(--nui-text-color);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            transition: all 0.3s ease;
+        }
+
+        /* Theme Classes Only - Moved after base styles for specificity */
+
+        /* Ocean Theme */
+        .theme-ocean {
+            --nui-bg-color: #e8f3ff !important;
+            --nui-text-color: #2b3645 !important;
+            --nui-lights: #fff !important;
+            --nui-shadows: #b3c7e6 !important;
+            --nui-border-color: #2563eb !important;
+        }
+
+        /* Cloud Theme */
+        .theme-cloud {
+            --nui-bg-color: #e9edf5 !important;
+            --nui-text-color: #6b7486 !important;
+            --nui-lights: #fff !important;
+            --nui-shadows: #c8d1e3 !important;
+            --nui-border-color: #6366f1 !important;
+        }
+
+        /* Trade Nexxus Theme */
+        .theme-tradenexxus {
+            --nui-bg-color: #0a0e27 !important;
+            --nui-text-color: #e4e4e7 !important;
+            --nui-lights: #1e293b !important;
+            --nui-shadows: #0f172a !important;
+            --nui-border-color: #3b82f6 !important;
+        }
+
+        /* Neumorphic Components - Reference Implementation (All Inset) */
+        .nui-neuromorphic, .nui-neuromorphic-inset-active {
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+        }
+
+        .nui-neuromorphic, .nui-neuromorphic-active, .nui-neuromorphic-inset, .nui-neuromorphic-inset-active {
+            background: var(--nui-bg-color);
+            border: none;
+            border-radius: var(--nui-border-radius);
+            transition: all 0.1s ease;
+        }
+
+        .nui-neuromorphic-active, .nui-neuromorphic-inset {
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+        }
+
+        .nui-clickable {
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            user-select: none;
+        }
+
+        .nui-clickable.nui-neuromorphic:active {
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+        }
+
+        .nui-clickable.nui-neuromorphic-inset:active, .nui-clickable.nui-neuromorphic:active {
+            background: var(--nui-bg-color);
+            border: none;
+            border-radius: var(--nui-border-radius);
+            transition: all 0.1s ease;
+        }
+
+        .nui-clickable.nui-neuromorphic-inset:active {
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+        }
+
+        /* Custom Components */
+        .nui-profit {
+            background: var(--tn-profit);
+            color: white;
+        }
+
+        .nui-loss {
+            background: var(--tn-loss);
+            color: white;
+        }
+
+        .nui-buy {
+            background: var(--tn-buy);
+            color: white;
+        }
+
+        .nui-sell {
+            background: var(--tn-sell);
+            color: white;
+        }
+
+        /* Z-index and Layering */
+        .nui-neuromorphic {
+            position: relative;
+            z-index: 1;
+        }
+
+        .nui-neuromorphic-inset-active {
+            position: relative;
+            z-index: 1;
+        }
+
+        .nui-neuromorphic-active {
+            position: relative;
+            z-index: 2;
+        }
+
+        .nui-neuromorphic-inset {
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Prevent shadow overlap */
+        .nui-neuromorphic:hover {
+            position: relative;
+            z-index: 3;
+        }
+
+        /* Concave Button Styles */
+        .nui-neuromorphic-concave {
+            position: relative;
+            z-index: 1;
+            box-shadow: inset 2px 2px 5px var(--nui-shadows), inset -2px -2px 5px var(--nui-lights);
+            background: var(--nui-bg-color);
+            color: var(--nui-text-color);
+            border: none;
+        }
+
+        .nui-neuromorphic-concave-active {
+            position: relative;
+            z-index: 2;
+            box-shadow: inset 2px 2px 5px var(--nui-shadows), inset -2px -2px 5px var(--nui-lights);
+            background: var(--nui-bg-color);
+            color: var(--nui-text-color);
+            border: none;
+        }
+
+        .nui-neuromorphic-concave:hover {
+            position: relative;
+            z-index: 3;
+            box-shadow: inset 2px 2px 5px var(--nui-shadows), inset -2px -2px 5px var(--nui-lights);
+            background: var(--nui-bg-color);
+            color: var(--nui-text-color);
+            border: none;
+        }
+
+        /* Select Styles with Dropdown Icon */
+        .nui-select {
+            background: #ffffff;
+            color: #000000;
+            border: none;
+            border-radius: 43px;
+            padding: var(--nui-spacing-md);
+            padding-right: 40px;
+            box-shadow: inset -7px 7px 9px #ffffff, inset 7px -7px 9px #ffffff;
+            transition: all 0.2s ease;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            cursor: pointer;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23000000' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            background-size: 12px 12px;
+        }
+
+        .nui-select:focus {
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark), 0 0 0 2px var(--tn-buy);
+        }
+        .nui-input {
+            background: #ffffff;
+            color: #000000;
+            border: none;
+            border-radius: 43px;
+            padding: var(--nui-spacing-md);
+            box-shadow: inset -7px 7px 9px #ffffff, inset 7px -7px 9px #ffffff;
+            transition: all 0.2s ease;
+            outline: none;
+            appearance: none;
+        }
+
+        .nui-input:focus {
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark), 0 0 0 2px var(--tn-buy);
+        }
+
+        /* Textarea Styles - Pure black text with white background and 3D dug appearance */
+        .nui-textarea {
+            background: #ffffff;
+            color: #000000;
+            border: none;
+            border-radius: var(--nui-border-radius);
+            padding: var(--nui-spacing-md);
+            box-shadow: inset -7px 7px 9px #ffffff, inset 7px -7px 9px #ffffff;
+            transition: all 0.2s ease;
+            outline: none;
+            appearance: none;
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .nui-textarea:focus {
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark), 0 0 0 2px var(--tn-buy);
+        }
+
+        /* Custom Controls - Reference Implementation */
+        .control-panel {
+            background: var(--nui-bg-color);
+            border-radius: var(--nui-border-radius);
+            padding: var(--nui-spacing-lg);
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+            position: sticky;
+            top: 1rem;
+            max-height: calc(100vh - 2rem);
+            overflow-y: auto;
+            z-index: 10;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: var(--nui-spacing-sm);
+            position: relative;
+            z-index: 20;
+        }
+
+        .slider {
+            flex: 1;
+            height: 6px;
+            background: var(--nui-bg-color);
+            border-radius: 3px;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+            position: relative;
+            z-index: 25;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: var(--nui-bg-color);
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+            position: relative;
+            z-index: 30;
+        }
+
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: var(--nui-bg-color);
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+            border: none;
+            position: relative;
+            z-index: 30;
+        }
+
+        .slider-value {
+            min-width: 50px;
+            text-align: center;
+            font-weight: 600;
+            color: var(--nui-text-color);
+            background: var(--nui-bg-color);
+            padding: 0.25rem 0.5rem;
+            border-radius: var(--nui-border-radius);
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+            position: relative;
+            z-index: 20;
+        }
+
+        .control-group {
+            margin-bottom: var(--nui-spacing-lg);
+        }
+
+        /* Theme Selector Buttons - Fixed Visibility */
+        .theme-selector {
+            display: flex;
+            gap: var(--nui-spacing-sm);
+            flex-wrap: wrap;
+        }
+
+        .theme-btn {
+            padding: var(--nui-spacing-sm) var(--nui-spacing-md);
+            border-radius: var(--nui-border-radius);
+            background: var(--nui-bg-color);
+            color: var(--nui-text-color);
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+            position: relative;
+            z-index: 5;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 80px;
+        }
+
+        .theme-btn:hover {
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+            transform: translateY(1px);
+        }
+
+        .theme-btn.active {
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+            background: var(--nui-bg-color);
+            color: var(--nui-text-color);
+            transform: translateY(1px);
+        }
+
+        
+        
+        .color-input-wrapper {
+            display: flex;
+            gap: var(--nui-spacing-md);
+            align-items: center;
+        }
+
+        .color-input {
+            width: 50px;
+            height: 40px;
+            border: none;
+            border-radius: calc(var(--nui-border-radius) * 0.5);
+            cursor: pointer;
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-light);
+        }
+
+        .color-text {
+            flex: 1;
+        }
+
+        .theme-selector {
+            display: flex;
+            gap: var(--nui-spacing-sm);
+            margin-bottom: var(--nui-spacing-lg);
+        }
+
+        .theme-btn {
+            flex: 1;
+            padding: var(--nui-spacing-sm);
+            border: none;
+            border-radius: calc(var(--nui-border-radius) * 0.5);
+            background: var(--nui-bg-color);
+            color: var(--nui-text-color);
+            cursor: pointer;
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-light);
+            transition: all 0.2s ease;
+        }
+
+        .theme-btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .theme-btn.active {
+            background: var(--tn-buy);
+            color: white;
+        }
+
+        /* Dropdown Styles - Enhanced Visibility */
+        #theme-dropdown-btn {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 48px;
+            padding: 12px 16px !important;
+            background: var(--nui-bg-color) !important;
+            border: none !important;
+            border-radius: var(--nui-border-radius) !important;
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark) !important;
+            cursor: pointer !important;
+            transition: all 0.2s ease !important;
+            width: 100% !important;
+        }
+
+        #theme-dropdown-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark) !important;
+        }
+
+        #theme-dropdown-btn i {
+            flex-shrink: 0;
+            width: 16px !important;
+            height: 16px !important;
+            color: var(--nui-text-color) !important;
+        }
+
+        #theme-dropdown-btn .dropdown-arrow {
+            transition: transform 0.2s ease;
+        }
+
+        #theme-dropdown-btn .dropdown-arrow.rotate {
+            transform: rotate(180deg);
+        }
+
+        #theme-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            min-width: 200px;
+            transform-origin: top right;
+            transition: all 0.2s ease;
+            opacity: 0;
+            visibility: hidden;
+            transform: scaleY(0.8) translateY(-10px);
+            z-index: 20;
+            background: var(--nui-bg-color);
+            border: none;
+            border-radius: var(--nui-border-radius);
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+            margin-top: 8px;
+        }
+
+        #theme-dropdown.show {
+            opacity: 1;
+            visibility: visible;
+            transform: scaleY(1) translateY(0);
+        }
+
+        #theme-dropdown button {
+            width: 100%;
+            text-align: left;
+            border: none;
+            background: transparent;
+            padding: var(--nui-spacing-sm) var(--nui-spacing-md);
+            color: #000000 !important;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: var(--nui-spacing-sm);
+            transition: all 0.2s ease;
+            border-radius: calc(var(--nui-border-radius) * 0.5);
+        }
+
+        #theme-dropdown button:hover {
+            background: rgba(59, 130, 246, 0.1);
+            transform: translateX(2px);
+        }
+
+        .transition-transform {
+            transition: transform 0.2s ease;
+        }
+
+        /* Dropdown Arrow Animation */
+        .dropdown-arrow {
+            transition: transform 0.2s ease;
+        }
+
+        .dropdown-arrow.rotate {
+            transform: rotate(180deg);
+        }
+
+        /* Select Options Fix */
+        select option {
+            color: #000000 !important;
+            background: #ffffff !important;
+        }
+
+        /* Animations and Responsive Design */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        @keyframes glow {
+            0%, 100% { box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark); }
+            50% { box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark), 0 0 20px rgba(59, 130, 246, 0.5); }
+        }
+
+        /* Animated Elements */
+        .fade-in {
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        .slide-in {
+            animation: slideIn 0.8s ease-out;
+        }
+
+        /* Button Animations - Reduced Intensity */
+        .nui-neuromorphic {
+            transition: all 0.2s ease;
+        }
+
+        .nui-neuromorphic:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+        }
+
+        .nui-neuromorphic:active {
+            transform: translateY(0);
+            transition: all 0.1s ease;
+        }
+
+        /* Interactive Demo Button Animations - Subtle */
+        #demo-btn1:hover {
+            transform: scale(1.02);
+        }
+
+        #demo-btn2:hover {
+            box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark), 0 0 10px rgba(59, 130, 246, 0.3);
+        }
+
+        #demo-btn3:hover {
+            transform: scale(1.02);
+        }
+
+        /* Card Animations - Very Subtle */
+        .nui-neuromorphic:not(.nui-clickable):hover {
+            transform: translateY(-1px);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .control-panel {
+                position: static;
+                max-height: none;
+                margin-bottom: 2rem;
+            }
+
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+
+            .demo-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .theme-selector {
+                flex-direction: column;
+            }
+
+            .theme-btn {
+                width: 100%;
+            }
+
+            .slider-container {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .slider-value {
+                text-align: center;
+                margin-top: 0.5rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .control-panel {
+                padding: 1rem;
+            }
+
+            .nui-neuromorphic {
+                padding: 0.75rem;
+            }
+
+            .slider {
+                height: 8px;
+            }
+
+            .slider::-webkit-slider-thumb {
+                width: 24px;
+                height: 24px;
+            }
+
+            .slider::-moz-range-thumb {
+                width: 24px;
+                height: 24px;
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .control-panel {
+                position: static;
+                max-height: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header with Theme Controls -->
+        <header class="mb-12 fade-in">
+            <div class="nui-neuromorphic p-6">
+                <h1 class="text-3xl font-bold mb-4">Trade Nexxus - Neumorphic Theme Designer</h1>
+                <p class="text-lg mb-6">Advanced neumorphic design system with theme switching</p>
+                
+                <!-- Theme Selector - Simple Buttons -->
+                    <div class="theme-selector">
+                        <button onclick="setTheme('default', this)" class="theme-btn active" data-theme="default">🎨 Default</button>
+                        <button onclick="setTheme('ocean', this)" class="theme-btn" data-theme="ocean">🌊 Ocean</button>
+                        <button onclick="setTheme('cloud', this)" class="theme-btn" data-theme="cloud">☁️ Cloud</button>
+                        <button onclick="setTheme('tradenexxus', this)" class="theme-btn" data-theme="tradenexxus">🚀 Trade Nexxus</button>
+                    </div>
+
+                <!-- Theme Only - Mode Removed -->
+            </div>
+        </header>
+
+        <!-- Main Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 main-content">
+            <!-- Control Panel -->
+            <div class="lg:col-span-1 slide-in">
+                <div class="control-panel">
+                    <h2 class="text-2xl font-bold mb-6">Design Controls</h2>
+                    
+                    <!-- Shape Controls Only -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-semibold mb-4">🔷 Shape Properties</h3>
+                        
+                        <div class="control-group">
+                            <label class="control-label">Border Radius</label>
+                            <div class="slider-container">
+                                <input type="range" id="border-radius" class="slider" min="0" max="50" value="16">
+                                <span class="slider-value">16px</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Shadow Properties -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-semibold mb-4">🌑 Shadow Properties</h3>
+                        
+                        <div class="control-group">
+                            <label class="control-label">Shadow Size</label>
+                            <div class="slider-container">
+                                <input type="range" id="shadow-size" class="slider" min="0" max="20" value="7">
+                                <span class="slider-value">7px</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Shadow Distance</label>
+                            <div class="slider-container">
+                                <input type="range" id="shadow-distance" class="slider" min="1" max="20" value="7">
+                                <span class="slider-value">7px</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Shadow Blur</label>
+                            <div class="slider-container">
+                                <input type="range" id="shadow-blur" class="slider" min="1" max="30" value="9">
+                                <span class="slider-value">9px</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Shadow Intensity</label>
+                            <div class="slider-container">
+                                <input type="range" id="shadow-intensity" class="slider" min="0" max="100" value="100">
+                                <span class="slider-value">100%</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Shadow Color</label>
+                            <div class="color-input-wrapper">
+                                <input type="color" id="shadow-color" class="color-input" value="#5e5e5">
+                                <input type="text" id="shadow-color-text" class="nui-input color-text" value="#5e5e5">
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Light Angles</label>
+                            <div class="flex gap-2">
+                                <button class="nui-neuromorphic nui-clickable p-2" onclick="setLightAngle('top-left')">↖️ Top-Left</button>
+                                <button class="nui-neuromorphic nui-clickable p-2" onclick="setLightAngle('top-right')">↗️ Top-Right</button>
+                                <button class="nui-neuromorphic nui-clickable p-2" onclick="setLightAngle('bottom-left')">↙️ Bottom-Left</button>
+                                <button class="nui-neuromorphic nui-clickable p-2" onclick="setLightAngle('bottom-right')">↘️ Bottom-Right</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom Colors -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-semibold mb-4">🎨 Custom Colors</h3>
+                        
+                        <div class="control-group">
+                            <label class="control-label">Background Color</label>
+                            <div class="color-input-wrapper">
+                                <input type="color" id="bg-color" class="color-input" value="#dedad3">
+                                <input type="text" id="bg-color-text" class="nui-input color-text" value="#dedad3">
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Border Color</label>
+                            <div class="color-input-wrapper">
+                                <input type="color" id="border-color" class="color-input" value="#3b82f6">
+                                <input type="text" id="border-color-text" class="nui-input color-text" value="#3b82f6">
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Buy Color</label>
+                            <div class="color-input-wrapper">
+                                <input type="color" id="buy-color" class="color-input" value="#3b82f6">
+                                <input type="text" id="buy-color-text" class="nui-input color-text" value="#3b82f6">
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Sell Color</label>
+                            <div class="color-input-wrapper">
+                                <input type="color" id="sell-color" class="color-input" value="#f59e0b">
+                                <input type="text" id="sell-color-text" class="nui-input color-text" value="#f59e0b">
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Profit Color</label>
+                            <div class="color-input-wrapper">
+                                <input type="color" id="profit-color" class="color-input" value="#10b981">
+                                <input type="text" id="profit-color-text" class="nui-input color-text" value="#10b981">
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Loss Color</label>
+                            <div class="color-input-wrapper">
+                                <input type="color" id="loss-color" class="color-input" value="#ef4444">
+                                <input type="text" id="loss-color-text" class="nui-input color-text" value="#ef4444">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex gap-4">
+                        <button onclick="resetToDefaults()" class="nui-neuromorphic nui-clickable flex-1 p-3">Reset</button>
+                        <button onclick="exportTheme()" class="nui-neuromorphic nui-primary nui-clickable flex-1 p-3">Export Theme</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Preview Area -->
+            <div class="lg:col-span-2">
+                <div class="space-y-8">
+                    <!-- Buttons Preview -->
+                    <section>
+                        <h2 class="text-2xl font-bold mb-6">Buttons</h2>
+                        <div class="nui-neuromorphic p-6">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div class="text-center">
+                                    <h3 class="font-semibold mb-3">Standard</h3>
+                                    <button class="nui-neuromorphic nui-clickable w-full p-3 mb-2">Click Me</button>
+                                    <button class="nui-neuromorphic-inset nui-clickable w-full p-3">Pressed</button>
+                                </div>
+                                <div class="text-center">
+                                    <h3 class="font-semibold mb-3">Trading</h3>
+                                    <button class="nui-neuromorphic nui-buy nui-clickable w-full p-3 mb-2">BUY</button>
+                                    <button class="nui-neuromorphic nui-sell nui-clickable w-full p-3">SELL</button>
+                                </div>
+                                <div class="text-center">
+                                    <h3 class="font-semibold mb-3">P&L</h3>
+                                    <button class="nui-neuromorphic nui-profit nui-clickable w-full p-3 mb-2">PROFIT</button>
+                                    <button class="nui-neuromorphic nui-loss nui-clickable w-full p-3">LOSS</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Forms Preview -->
+                    <section>
+                        <h2 class="text-2xl font-bold mb-6">Form Elements</h2>
+                        <div class="nui-neuromorphic p-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <h3 class="font-semibold mb-3">Input Fields</h3>
+                                    <div class="space-y-4">
+                                        <input type="text" class="nui-input w-full" placeholder="Enter text...">
+                                        <input type="email" class="nui-input w-full" placeholder="Email address...">
+                                        <input type="password" class="nui-input w-full" placeholder="Password...">
+                                    </div>
+                                </div>
+                                <div>
+                                    <h3 class="font-semibold mb-3">Other Elements</h3>
+                                    <div class="space-y-4">
+                                        <select class="nui-select w-full">
+                                            <option>Select option...</option>
+                                            <option>Option 1</option>
+                                            <option>Option 2</option>
+                                        </select>
+                                        <textarea class="nui-textarea w-full" rows="3" placeholder="Textarea..."></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Cards Preview -->
+                    <section>
+                        <h2 class="text-2xl font-bold mb-6">Cards</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="nui-neuromorphic p-6">
+                                <h3 class="text-xl font-bold mb-3">Trading Card</h3>
+                                <div class="space-y-2">
+                                    <div class="flex justify-between">
+                                        <span>NIFTY 50</span>
+                                        <span class="font-bold">23,456.80</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span>Change</span>
+                                        <span class="nui-profit font-bold">+156.40</span>
+                                    </div>
+                                    <div class="flex gap-2 mt-4">
+                                        <button class="nui-neuromorphic nui-buy nui-clickable flex-1 p-2">BUY</button>
+                                        <button class="nui-neuromorphic nui-sell nui-clickable flex-1 p-2">SELL</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="nui-neuromorphic p-6">
+                                <h3 class="text-xl font-bold mb-3">Profile Card</h3>
+                                <div class="text-center">
+                                    <div class="w-20 h-20 mx-auto mb-4 rounded-full nui-neuromorphic"></div>
+                                    <h4 class="font-semibold mb-2">John Trader</h4>
+                                    <p class="text-sm mb-4">Professional Trader</p>
+                                    <button class="nui-neuromorphic nui-clickable p-2">View Profile</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Interactive Demo -->
+                    <section>
+                        <h2 class="text-2xl font-bold mb-6">Interactive Demo</h2>
+                        <div class="nui-neuromorphic p-6">
+                            <div class="text-center">
+                                <p class="mb-4">Click the buttons below to see press states and hover effects!</p>
+                                <div class="flex gap-4 justify-center">
+                                    <button class="nui-neuromorphic nui-neuromorphic-concave" id="demo-btn1">Hover Me</button>
+                                    <button class="nui-neuromorphic nui-buy nui-neuromorphic-concave" id="demo-btn2">Click Me</button>
+                                    <button class="nui-neuromorphic nui-sell nui-neuromorphic-concave" id="demo-btn3">Press Me</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize everything when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize Lucide icons first
+            lucide.createIcons();
+            
+            // Initialize shadow styles
+            updateShadowStyles();
+            
+            // Initialize all control event listeners
+            initializeControls();
+        });
+
+        // Initialize all controls
+        function initializeControls() {
+            // Add event listeners for all sliders and inputs
+            Object.keys(controls).forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('input', updateCSS);
+                    element.addEventListener('change', updateCSS);
+                }
+            });
+        }
+
+        // Theme Management - Enhanced with Dropdown
+        let currentTheme = 'default';
+
+        function setTheme(themeName, buttonElement) {
+            // Remove all theme classes
+            document.body.classList.remove('theme-default', 'theme-ocean', 'theme-cloud', 'theme-tradenexxus');
+            
+            // Add new theme class
+            document.body.classList.add('theme-' + themeName);
+            
+            // Update active button state
+            document.querySelectorAll('.theme-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            buttonElement.classList.add('active');
+            
+            // Update current theme display
+            const themeNames = {
+                'default': 'Default',
+                'ocean': 'Ocean',
+                'cloud': 'Cloud',
+                'tradenexxus': 'Trade Nexxus'
+            };
+            
+            // Update theme name display if element exists
+            const themeNameElement = document.getElementById('current-theme-name');
+            if (themeNameElement) {
+                themeNameElement.textContent = themeNames[themeName];
+            }
+            // Update current theme variable
+            currentTheme = theme;
+        }
+
+        // Control Management - Simplified
+        const controls = {
+            'border-radius': 'nui-border-radius',
+            'bg-color': 'nui-bg-color',
+            'border-color': 'nui-border-color',
+            'buy-color': 'tn-buy',
+            'sell-color': 'tn-sell',
+            'profit-color': 'tn-profit',
+            'loss-color': 'tn-loss',
+            'shadow-size': 'shadow-size',
+            'shadow-distance': 'shadow-distance',
+            'shadow-blur': 'shadow-blur',
+            'shadow-intensity': 'shadow-intensity',
+            'shadow-color': 'shadow-color'
+        };
+
+        // Initialize light angle
+        window.currentLightAngle = 'top-left';
+
+        function updateCSS() {
+            Object.keys(controls).forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    const value = element.value;
+                    const cssVar = controls[id];
+                    
+                    if (id.includes('color')) {
+                        document.documentElement.style.setProperty(`--${cssVar}`, value);
+                        
+                        // Update text input
+                        const textInput = document.getElementById(`${id}-text`);
+                        if (textInput) textInput.value = value;
+                    } else if (id.startsWith('shadow-')) {
+                        // Handle shadow controls
+                        updateShadowStyles();
+                    } else {
+                        document.documentElement.style.setProperty(`--${cssVar}`, `${value}px`);
+                    }
+                    
+                    // Update slider value displays
+                    if (id.includes('shadow-') || id === 'border-radius') {
+                        const sliderValue = element.nextElementSibling;
+                        if (sliderValue && sliderValue.classList.contains('slider-value')) {
+                            const suffix = id === 'shadow-intensity' ? '%' : 'px';
+                            sliderValue.textContent = value + suffix;
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateShadowStyles() {
+            const size = document.getElementById('shadow-size').value;
+            const distance = document.getElementById('shadow-distance').value;
+            const blur = document.getElementById('shadow-blur').value;
+            const intensity = document.getElementById('shadow-intensity').value / 100;
+            const shadowColor = document.getElementById('shadow-color').value;
+            
+            // Calculate shadow opacity based on intensity
+            const whiteOpacity = intensity;
+            const darkOpacity = intensity * 0.8;
+            
+            // Get current light angle
+            const currentAngle = window.currentLightAngle || 'top-left';
+            
+            // Calculate shadow positions based on light angle
+            let whiteShadowX, whiteShadowY, darkShadowX, darkShadowY;
+            
+            switch(currentAngle) {
+                case 'top-left':
+                    whiteShadowX = size + distance;
+                    whiteShadowY = size + distance;
+                    darkShadowX = -(size + distance);
+                    darkShadowY = -(size + distance);
+                    break;
+                case 'top-right':
+                    whiteShadowX = -(size + distance);
+                    whiteShadowY = size + distance;
+                    darkShadowX = size + distance;
+                    darkShadowY = -(size + distance);
+                    break;
+                case 'bottom-left':
+                    whiteShadowX = size + distance;
+                    whiteShadowY = -(size + distance);
+                    darkShadowX = -(size + distance);
+                    darkShadowY = size + distance;
+                    break;
+                case 'bottom-right':
+                    whiteShadowX = -(size + distance);
+                    whiteShadowY = -(size + distance);
+                    darkShadowX = size + distance;
+                    darkShadowY = size + distance;
+                    break;
+                default:
+                    whiteShadowX = size;
+                    whiteShadowY = size;
+                    darkShadowX = -size;
+                    darkShadowY = -size;
+            }
+            
+            // Create shadow values
+            const whiteShadow = `rgba(255, 255, 255, ${whiteOpacity}) ${whiteShadowX}px ${whiteShadowY}px ${blur}px`;
+            const darkShadow = `rgba(${hexToRgb(shadowColor).join(', ')}, ${darkOpacity}) ${darkShadowX}px ${darkShadowY}px ${blur}px`;
+            
+            // Update input field shadows
+            const style = document.createElement('style');
+            style.textContent = `
+                .nui-input {
+                    box-shadow: inset ${whiteShadow}, inset ${darkShadow} !important;
+                }
+            `;
+            
+            // Remove old shadow style if exists
+            const oldStyle = document.getElementById('dynamic-shadow-style');
+            if (oldStyle) oldStyle.remove();
+            
+            // Add new shadow style
+            style.id = 'dynamic-shadow-style';
+            document.head.appendChild(style);
+        }
+
+        function setLightAngle(angle) {
+            window.currentLightAngle = angle;
+            updateShadowStyles();
+            
+            // Update button states
+            document.querySelectorAll('[onclick^="setLightAngle"]').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? [
+                parseInt(result[1], 16),
+                parseInt(result[2], 16),
+                parseInt(result[3], 16)
+            ] : [0, 0, 0];
+        }
+
+        // Add event listeners
+        Object.keys(controls).forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.addEventListener('input', updateCSS);
+                
+                // Handle color text inputs
+                if (id.includes('color')) {
+                    const textInput = document.getElementById(`${id}-text`);
+                    if (textInput) {
+                        textInput.addEventListener('input', () => {
+                            element.value = textInput.value;
+                            updateCSS();
+                        });
+                    }
+                }
+            }
+        });
+
+        // Interactive demo buttons
+        ['demo-btn1', 'demo-btn2', 'demo-btn3'].forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.addEventListener('click', function() {
+                    this.classList.add('nui-neuromorphic-active');
+                    setTimeout(() => this.classList.remove('nui-neuromorphic-active'), 150);
+                });
+            }
+        });
+
+        // Reset to defaults - Reference Implementation
+        function resetToDefaults() {
+            document.getElementById('border-radius').value = 16;
+            document.getElementById('bg-color').value = '#dedad3';
+            document.getElementById('border-color').value = '#3b82f6';
+            document.getElementById('buy-color').value = '#3b82f6';
+            document.getElementById('sell-color').value = '#f55c0a';
+            document.getElementById('profit-color').value = '#10b981';
+            document.getElementById('loss-color').value = '#ef4444';
+            
+            // Reset shadow controls
+            document.getElementById('shadow-size').value = 7;
+            document.getElementById('shadow-distance').value = 7;
+            document.getElementById('shadow-blur').value = 9;
+            document.getElementById('shadow-intensity').value = 100;
+            document.getElementById('shadow-color').value = '#5e5e5';
+            
+            // Update text inputs
+            document.getElementById('bg-color-text').value = '#dedad3';
+            document.getElementById('border-color-text').value = '#3b82f6';
+            document.getElementById('buy-color-text').value = '#3b82f6';
+            document.getElementById('sell-color-text').value = '#f55c0a';
+            document.getElementById('profit-color-text').value = '#10b981';
+            document.getElementById('loss-color-text').value = '#ef4444';
+            document.getElementById('shadow-color-text').value = '#5e5e5';
+            
+            updateCSS();
+        }
+
+        // Export Theme
+        function exportTheme() {
+            const css = `
+/* Trade Nexxus Custom Neumorphic Theme */
+:root {
+    /* Base Variables */
+    --nui-border-radius: ${getComputedStyle(document.documentElement).getPropertyValue('--nui-border-radius')};
+    
+    /* Universal Colors */
+    --nui-bg-color: ${getComputedStyle(document.documentElement).getPropertyValue('--nui-bg-color')};
+    --nui-border-color: ${getComputedStyle(document.documentElement).getPropertyValue('--nui-border-color')};
+    
+    /* Trading Colors */
+    --tn-buy: ${getComputedStyle(document.documentElement).getPropertyValue('--tn-buy')};
+    --tn-sell: ${getComputedStyle(document.documentElement).getPropertyValue('--tn-sell')};
+    --tn-profit: ${getComputedStyle(document.documentElement).getPropertyValue('--tn-profit')};
+    --tn-loss: ${getComputedStyle(document.documentElement).getPropertyValue('--tn-loss')};
+    
+    ${currentTheme !== 'default' ? `
+    /* ${currentTheme.charAt(0).toUpperCase() + currentTheme.slice(1)} Theme */
+    --nui-bg-color: ${getComputedStyle(document.documentElement).getPropertyValue('--nui-light-bg-color')};
+    --nui-text-color: ${getComputedStyle(document.documentElement).getPropertyValue('--nui-light-text-color')};
+    --nui-lights: ${getComputedStyle(document.documentElement).getPropertyValue('--nui-light-lights')};
+    --nui-shadows: ${getComputedStyle(document.documentElement).getPropertyValue('--nui-light-shadows')};
+    ` : ''}
+}
+
+/* Include the full Neumo UI styles from styles.css */
+/* Add your custom components and overrides below */
+
+/* Universal Theme Application */
+body {
+    background-color: var(--nui-bg-color);
+}
+
+.nui-neuromorphic, .nui-neuromorphic-inset {
+    border: 2px solid var(--nui-border-color);
+}
+            `.trim();
+
+            // Method 1: Copy to clipboard
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(css).then(() => {
+                    alert(`Theme CSS copied to clipboard!\n\nFile name: trade-nexxus-${currentTheme}-theme.css\n\nPaste this into a new .css file and save it.`);
+                    console.log(`Theme copied to clipboard: trade-nexxus-${currentTheme}-theme.css`);
+                }).catch(err => {
+                    console.error('Failed to copy to clipboard:', err);
+                    fallbackExport(css);
+                });
+            } else {
+                fallbackExport(css);
+            }
+        }
+
+        function fallbackExport(css) {
+            // Method 2: Display in textarea for manual copy
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: var(--nui-bg-color);
+                border: 2px solid var(--nui-border-color);
+                border-radius: var(--nui-border-radius);
+                padding: 20px;
+                box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-light);
+                z-index: 1000;
+                max-width: 80%;
+                max-height: 80%;
+                overflow: auto;
+            `;
+            
+            modal.innerHTML = `
+                <h3 style="margin: 0 0 10px 0; color: var(--nui-text-color);">Export Theme CSS</h3>
+                <p style="margin: 0 0 10px 0; color: var(--nui-text-color); font-size: 14px;">
+                    File name: <strong>trade-nexxus-${currentTheme}-theme.css</strong>
+                </p>
+                <textarea style="width: 100%; height: 300px; background: var(--nui-bg-color); 
+                           color: var(--nui-text-color); border: 1px solid var(--nui-border-color); 
+                           border-radius: var(--nui-border-radius); padding: 10px; 
+                           font-family: monospace; font-size: 12px;">${css}</textarea>
+                <div style="margin-top: 10px; text-align: right;">
+                    <button onclick="this.parentElement.parentElement.remove()" 
+                            style="padding: 8px 16px; background: var(--tn-buy); color: white; 
+                                   border: none; border-radius: var(--nui-border-radius); 
+                                   cursor: pointer;">Close</button>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Auto-select the text
+            const textarea = modal.querySelector('textarea');
+            textarea.select();
+            textarea.setSelectionRange(0, 99999);
+            
+            console.log(`Theme displayed for manual copy: trade-nexxus-${currentTheme}-theme.css`);
+        }
+
+        // Initialize
+        updateCSS();
+    </script>
+</body>
+</html>

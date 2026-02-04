@@ -1,0 +1,212 @@
+/* Trade Nexxus - Neumorphic Theme System */
+/* Extracted from theme-preview.html for production use */
+
+/* Simplified Theme System - No Light/Dark Mode */
+:root {
+    /* Base Variables */
+    --nui-border-radius: 1rem;
+    --nui-font-size-xs: 0.75rem;
+    --nui-font-size-sm: 0.875rem;
+    --nui-font-size-md: 1rem;
+    --nui-font-size-lg: 1.125rem;
+    --nui-spacing-xs: 0.25rem;
+    --nui-spacing-sm: 0.5rem;
+    --nui-spacing-md: 1rem;
+    --nui-spacing-lg: 1.5rem;
+    
+    /* Default Theme Colors */
+    --nui-bg-color: #dedad3;
+    --nui-text-color: #1d2532;
+    --nui-lights: #ffffff;
+    --nui-shadows: #000000;
+    
+    /* Trade Nexxus Custom Colors */
+    --tn-profit: #10b981;
+    --tn-loss: #ef4444;
+    --tn-buy: #3b82f6;
+    --tn-sell: #f59e0b;
+    
+    /* Computed Colors - Reference Implementation */
+    --nui-dark-outer-shadow: -0.35rem -0.35rem 0.9rem 0.2rem rgba(255, 255, 255, 0.96);
+    --nui-dark-outer-dark: 0.5rem 0.5rem 1rem 0.2rem rgba(0, 0, 0, 0.6);
+    --nui-dark-inset-shadow: inset 0.25rem 0.25rem 0.5rem rgba(255, 255, 255, 0.96);
+    --nui-dark-inset-dark: inset -0.25rem -0.25rem 0.5rem rgba(0, 0, 0, 0.6);
+}
+
+/* Theme Classes Only */
+
+/* Default Theme - Trade Nexxus Neumorphic System */
+.theme-default {
+    --nui-bg-color: #dedad3 !important;
+    --nui-text-color: #1d2532 !important;
+    --nui-lights: #ffffff !important;
+    --nui-shadows: #000000 !important;
+    --nui-border-color: #3b82f6 !important;
+}
+
+/* Ocean Theme */
+.theme-ocean {
+    --nui-bg-color: #e8f3ff !important;
+    --nui-text-color: #2b3645 !important;
+    --nui-lights: #fff !important;
+    --nui-shadows: #b3c7e6 !important;
+    --nui-border-color: #2563eb !important;
+}
+
+/* Cloud Theme */
+.theme-cloud {
+    --nui-bg-color: #e9edf5 !important;
+    --nui-text-color: #6b7486 !important;
+    --nui-lights: #fff !important;
+    --nui-shadows: #c8d1e3 !important;
+    --nui-border-color: #6366f1 !important;
+}
+
+/* Trade Nexxus Theme */
+.theme-tradenexxus {
+    --nui-bg-color: #0a0e27 !important;
+    --nui-text-color: #e4e4e7 !important;
+    --nui-lights: #1e293b !important;
+    --nui-shadows: #0f172a !important;
+    --nui-border-color: #1e40af !important;
+}
+
+/* Base Styles */
+body {
+    background-color: var(--nui-bg-color);
+    color: var(--nui-text-color);
+    font-family: system-ui, -apple-system, sans-serif;
+    transition: all 0.3s ease;
+}
+
+/* Neumorphic Components - Reference Implementation */
+.nui-neuromorphic {
+    background: var(--nui-bg-color);
+    border-radius: var(--nui-border-radius);
+    box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+    border: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.nui-neuromorphic-inset {
+    background: var(--nui-bg-color);
+    border-radius: var(--nui-border-radius);
+    box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+    border: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.nui-neuromorphic-convex {
+    background: var(--nui-bg-color);
+    border-radius: var(--nui-border-radius);
+    box-shadow: var(--nui-dark-outer-shadow), var(--nui-dark-outer-dark);
+    border: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.nui-neuromorphic-concave {
+    background: var(--nui-bg-color);
+    border-radius: var(--nui-border-radius);
+    box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+    border: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.nui-clickable {
+    cursor: pointer;
+}
+
+.nui-clickable:hover {
+    transform: translateY(-2px);
+}
+
+.nui-clickable:active {
+    transform: translateY(0);
+    box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+}
+
+.nui-neuromorphic-active {
+    transform: translateY(0);
+    box-shadow: var(--nui-dark-inset-shadow), var(--nui-dark-inset-dark);
+}
+
+/* Trading Specific Buttons */
+.nui-buy {
+    background: var(--tn-buy);
+    color: white;
+}
+
+.nui-sell {
+    background: var(--tn-sell);
+    color: white;
+}
+
+.nui-profit {
+    background: var(--tn-profit);
+    color: white;
+}
+
+.nui-loss {
+    background: var(--tn-loss);
+    color: white;
+}
+
+.nui-primary {
+    background: var(--nui-border-color);
+    color: white;
+}
+
+/* Form Elements */
+.nui-input {
+    background: var(--nui-bg-color);
+    border: 2px solid var(--nui-border-color);
+    border-radius: var(--nui-border-radius);
+    color: var(--nui-text-color);
+    padding: var(--nui-spacing-sm) var(--nui-spacing-md);
+    font-size: var(--nui-font-size-md);
+    transition: all 0.3s ease;
+    outline: none;
+}
+
+.nui-input:focus {
+    border-color: var(--nui-border-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Theme selector styles */
+.theme-selector .theme-btn {
+    background: var(--nui-bg-color);
+    border: 2px solid var(--nui-border-color);
+    border-radius: var(--nui-border-radius);
+    color: var(--nui-text-color);
+    padding: var(--nui-spacing-sm) var(--nui-spacing-md);
+    margin: var(--nui-spacing-xs);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.theme-selector .theme-btn:hover {
+    transform: translateY(-2px);
+}
+
+.theme-selector .theme-btn.active {
+    background: var(--nui-border-color);
+    color: white;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    :root {
+        --nui-border-radius: 0.75rem;
+        --nui-spacing-md: 0.75rem;
+        --nui-spacing-lg: 1rem;
+    }
+}

@@ -1,0 +1,42 @@
+/* Trade Nexxus Custom Neumorphic Theme */
+:root {
+    /* Base Variables */
+    --nui-border-radius: 31px;
+    --nui-shadow-offset: 10px;
+    --nui-shadow-blur: 20px;
+    --nui-shadow-intensity: 0.5;
+    
+    /* Universal Colors */
+    --nui-bg-color: #dedad3;
+    --nui-border-color: #3b82f6;
+    
+    /* Trading Colors */
+    --tn-buy: #3b82f6;
+    --tn-sell: #f55c0a;
+    --tn-profit: #10b981;
+    --tn-loss: #ef4444;
+    
+    
+    /* Ocean Theme */
+    --nui-light-bg-color: #dedad3;
+    --nui-dark-bg-color: #1d2532;
+    --nui-light-text-color: #1d2532;
+    --nui-dark-text-color: #dedad3;
+    --nui-light-lights: #ffffff;
+    --nui-dark-lights: #000000;
+    --nui-light-shadows: #ffffff;
+    --nui-dark-shadows: #000000;
+    
+}
+
+/* Include the full Neumo UI styles from styles.css */
+/* Add your custom components and overrides below */
+
+/* Universal Theme Application */
+body {
+    background-color: var(--nui-bg-color);
+}
+
+.nui-neuromorphic, .nui-neuromorphic-inset {
+    border: 2px solid var(--nui-border-color);
+}

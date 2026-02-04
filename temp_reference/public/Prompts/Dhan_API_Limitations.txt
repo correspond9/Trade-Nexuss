@@ -1,0 +1,18 @@
+Before proceeding, note the official DhanHQ v2 connection and rate limits that must be respected to avoid service throttling, errors, or potential temporary blocking of our connections:
+1. **WebSocket Connections & Subscriptions**
+   - A single user can establish up to **5 WebSocket connections**.  
+   - On each connection, you may subscribe to up to **5,000 instruments per connection**.  
+   - Subscriptions must use multiple JSON messages if needed, but total per connection must not exceed 5,000. :contentReference[oaicite:0]{index=0}
+2. **REST API Rate Limits**
+   - **Quote/market snapshot (REST)** APIs are limited to **1 request per second** per user. :contentReference[oaicite:1]{index=1}
+   - **Data APIs (like option chains, Greeks, margin)** are limited to **5 requests per second** (aggregate across endpoints). :contentReference[oaicite:2]{index=2}
+   - **Day / query caps** may also apply (e.g., daily request totals), so upfront caching and request consolidation is required. :contentReference[oaicite:3]{index=3}
+3. **Error Codes Related to Limits**
+   - Code `804`: “Requested number of instruments exceeds limit.”  
+   - Code `805`: “Too many requests or connections. Further requests may result in the user being blocked.”  
+   - These errors indicate hitting subscription or rate limits and must be handled with throttling or backoff. :contentReference[oaicite:4]{index=4}
+Make sure the implementation:
+- centralizes and throttles all REST calls,
+- avoids calling REST on a per-order or per-tick basis,
+- batches instrument subscriptions carefully per connection,
+- and monitors WebSocket reconnections to re-establish subscriptions safely without overloading the Dhan servers.

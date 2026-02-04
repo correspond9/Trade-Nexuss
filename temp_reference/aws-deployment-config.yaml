@@ -1,0 +1,145 @@
+# AWS Deployment Configuration with WebSocket Support
+# Production-ready setup for Dhan WebSocket integration
+
+# EC2 Instance Configuration
+instance_type: "t3.medium"  # 4GB RAM for WebSocket + processing
+security_group_rules:
+  - port: 80
+    protocol: tcp
+    source: 0.0.0.0/0
+  - port: 443
+    protocol: tcp
+    source: 0.0.0.0/0
+  - port: 22
+    protocol: tcp
+    source: "YOUR_IP_HERE"
+  - port: 5002
+    protocol: tcp
+    source: 0.0.0.0/0  # API server
+  - port: 8765
+    protocol: tcp
+    source: 0.0.0.0/0  # WebSocket server
+
+# Elastic IP Configuration
+elastic_ip:
+  allocate: true
+  associate: true
+  note: "Required for Dhan WebSocket connection"
+
+# Environment Variables for Production
+environment:
+  NODE_ENV: "production"
+  DHAN_API_BASE_URL: "https://api.dhan.co/v2"
+  DHAN_WS_URL: "wss://websocket.dhan.co"
+  STATIC_IP: "YOUR_ELASTIC_IP_HERE"
+  PORT: "5002"
+  WS_PORT: "8765"
+
+# Nginx Configuration for WebSocket Support
+nginx_config: |
+  server {
+      listen 80;
+      server_name your-domain.com;
+      
+      # Frontend
+      location / {
+          root /var/www/trading-terminal/frontend/dist;
+          try_files $uri $uri/ /index.html;
+      }
+      
+      # Backend API
+      location /api/ {
+          proxy_pass http://localhost:5002;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection 'upgrade';
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_cache_bypass $http_upgrade;
+      }
+      
+      # WebSocket support
+      location /ws {
+          proxy_pass http://localhost:8765;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection "upgrade";
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_read_timeout 86400;
+      }
+  }
+
+# PM2 Configuration for Production
+pm2_config: |
+  module.exports = {
+    apps: [
+      {
+        name: 'trading-backend',
+        script: 'comprehensive-api-integration.js',
+        instances: 1,
+        autorestart: true,
+        watch: false,
+        max_memory_restart: '3G',
+        env: {
+          NODE_ENV: 'production',
+          PORT: 5002
+        },
+        error_file: '/var/log/trading-terminal/error.log',
+        out_file: '/var/log/trading-terminal/out.log',
+        log_file: '/var/log/trading-terminal/combined.log',
+        time: true
+      }
+    ]
+  };
+
+# SSL Configuration (Let's Encrypt)
+ssl_config: |
+  server {
+      listen 443 ssl http2;
+      server_name your-domain.com;
+      
+      ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+      ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+      
+      # WebSocket over SSL
+      location /ws {
+          proxy_pass http://localhost:8765;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection "upgrade";
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_read_timeout 86400;
+      }
+      
+      # Other locations...
+  }
+
+# Deployment Commands
+deployment_commands:
+  - "sudo apt update && sudo apt upgrade -y"
+  - "sudo apt install nodejs npm nginx git -y"
+  - "sudo npm install pm2 -g"
+  - "sudo npm install ws -g"
+  - "git clone YOUR_REPO_URL /var/www/trading-terminal"
+  - "cd /var/www/trading-terminal && npm install"
+  - "cd frontend && npm install && npm run build"
+  - "sudo cp nginx-config /etc/nginx/sites-available/trading-terminal"
+  - "sudo ln -s /etc/nginx/sites-available/trading-terminal /etc/nginx/sites-enabled/"
+  - "sudo nginx -t && sudo systemctl restart nginx"
+  - "pm2 start ecosystem.config.js"
+  - "pm2 save && pm2 startup"
+
+# Monitoring Setup
+monitoring:
+  - "pm2 monit"
+  - "sudo tail -f /var/log/trading-terminal/combined.log"
+  - "sudo systemctl status nginx"
+  - "netstat -tulpn | grep :8765"  # WebSocket port check

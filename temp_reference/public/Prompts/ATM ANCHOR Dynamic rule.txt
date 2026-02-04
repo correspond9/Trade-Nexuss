@@ -1,0 +1,33 @@
+CRITICAL: ATM MUST NOT BE MANUALLY PROVIDED.
+
+ATM must be computed automatically by the system using live prices.
+
+ATM COMPUTATION RULE:
+• Fetch underlying LTP (index, stock, commodity)
+• Read strike interval from instrument master
+• Compute:
+  ATM = round(LTP / strike_interval) * strike_interval
+
+ATM sources:
+• At system startup: use Market Quote REST (batched) OR first WebSocket tick
+• During live market: update ATM logically from WebSocket ticks
+
+STRIKE GENERATION RULE:
+• Strikes must be generated ONLY AFTER ATM is computed
+• Do NOT sort strikes lexicographically
+• Do NOT pick lowest or first strike
+• All strike selection must be relative to ATM
+
+DYNAMIC ATM BEHAVIOR:
+• ATM may update in real time for display & logic
+• Strike subscriptions MUST remain FIXED intraday
+• Re-subscription allowed ONLY on:
+  - Market open
+  - Expiry rollover
+  - Explicit ADMIN refresh
+• Never resubscribe strikes on every price move
+
+If ATM cannot be computed (no price available):
+• Abort strike generation
+• Log error
+• Do NOT guess ATM

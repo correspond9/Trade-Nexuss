@@ -1,0 +1,424 @@
+"""
+REST API endpoints for two-tier subscription system.
+Watchlist, option chains, and subscription status.
+"""
+
+from fastapi import APIRouter, Query, HTTPException, Depends
+from typing import Optional, Dict, List
+from pydantic import BaseModel
+from app.market.watchlist_manager import get_watchlist_manager
+from app.market.atm_engine import get_atm_engine
+from app.market.subscription_manager import get_subscription_manager
+from app.market.ws_manager import get_ws_manager
+from app.market.instrument_master.registry import REGISTRY
+from app.schedulers.expiry_refresh_scheduler import get_expiry_scheduler
+from app.routers.authoritative_option_chain import router as option_chain_router
+
+router = APIRouter(prefix="/api/v2", tags=["market"])
+
+# Request/Response models
+class AddWatchlistRequest(BaseModel):
+    user_id: int
+    symbol: str
+    expiry: str
+    instrument_type: str = "STOCK_OPTION"
+    underlying_ltp: Optional[float] = None
+
+class RemoveWatchlistRequest(BaseModel):
+    user_id: int
+    symbol: str
+    expiry: str
+
+class OptionChainRequest(BaseModel):
+    symbol: str
+    expiry: str
+    underlying_ltp: float
+
+class AdminSubscribeIndicesRequest(BaseModel):
+    symbols: Optional[List[str]] = None
+    tier: str = "TIER_B"
+
+# ============================================================================
+# WATCHLIST ENDPOINTS
+# ============================================================================
+
+@router.post("/watchlist/add")
+async def add_to_watchlist(req: AddWatchlistRequest):
+    """Add instrument to user watchlist and subscribe to option chain"""
+    watchlist_mgr = get_watchlist_manager()
+    result = watchlist_mgr.add_to_watchlist(
+        user_id=req.user_id,
+        symbol=req.symbol,
+        expiry=req.expiry,
+        instrument_type=req.instrument_type,
+        underlying_ltp=req.underlying_ltp
+    )
+    
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed"))
+    
+    return result
+
+@router.post("/watchlist/remove")
+async def remove_from_watchlist(req: RemoveWatchlistRequest):
+    """Remove from watchlist and unsubscribe option chain"""
+    watchlist_mgr = get_watchlist_manager()
+    result = watchlist_mgr.remove_from_watchlist(
+        user_id=req.user_id,
+        symbol=req.symbol,
+        expiry=req.expiry
+    )
+    
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    
+    return result
+
+@router.get("/watchlist/{user_id}")
+async def get_user_watchlist(user_id: int):
+    """Get user's watchlist"""
+    watchlist_mgr = get_watchlist_manager()
+    watchlist = watchlist_mgr.get_user_watchlist(user_id)
+    return {
+        "user_id": user_id,
+        "count": len(watchlist),
+        "watchlist": watchlist
+    }
+
+# ============================================================================
+# OPTION CHAIN ENDPOINTS
+# ============================================================================
+
+@router.get("/option-chain/{symbol}")
+async def get_option_chain(
+    symbol: str,
+    expiry: str = Query(...),
+    underlying_ltp: float = Query(...)
+):
+    """
+    Get option chain for a symbol+expiry.
+    Generates strikes based on ATM calculation.
+    Does NOT subscribe - that happens via watchlist.
+    """
+    atm_engine = get_atm_engine()
+    
+    try:
+        chain = atm_engine.generate_chain(
+            symbol=symbol,
+            expiry=expiry,
+            underlying_ltp=underlying_ltp
+        )
+        return chain
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/option-chain/subscribe")
+async def subscribe_option_chain(req: OptionChainRequest):
+    """
+    Explicitly subscribe to option chain strikes.
+    Used for programmatic subscriptions or admin overrides.
+    """
+    atm_engine = get_atm_engine()
+    sub_mgr = get_subscription_manager()
+    
+    try:
+        # Generate chain
+        chain = atm_engine.generate_chain(
+            symbol=req.symbol,
+            expiry=req.expiry,
+            underlying_ltp=req.underlying_ltp,
+            force_recalc=True
+        )
+        
+        strikes = chain["strikes"]
+        subscribed = []
+        failed = []
+        
+        # Subscribe all strikes
+        for strike in strikes:
+            # CE
+            token_ce = f"{req.symbol}_{req.expiry}_{strike:.0f}CE"
+            success, msg, ws_id = sub_mgr.subscribe(
+                token=token_ce,
+                symbol=req.symbol,
+                expiry=req.expiry,
+                strike=strike,
+                option_type="CE",
+                tier="TIER_A"
+            )
+            if success:
+                subscribed.append(token_ce)
+            else:
+                failed.append(token_ce)
+            
+            # PE
+            token_pe = f"{req.symbol}_{req.expiry}_{strike:.0f}PE"
+            success, msg, ws_id = sub_mgr.subscribe(
+                token=token_pe,
+                symbol=req.symbol,
+                expiry=req.expiry,
+                strike=strike,
+                option_type="PE",
+                tier="TIER_A"
+            )
+            if success:
+                subscribed.append(token_pe)
+            else:
+                failed.append(token_pe)
+        
+        return {
+            "symbol": req.symbol,
+            "expiry": req.expiry,
+            "option_chain": chain,
+            "subscribed": subscribed,
+            "failed": failed,
+            "total_subscribed": len(subscribed)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ============================================================================
+# SUBSCRIPTION STATUS ENDPOINTS
+# ============================================================================
+
+@router.get("/subscriptions/status")
+async def get_subscription_status():
+    """Get overall subscription status"""
+    sub_mgr = get_subscription_manager()
+    ws_mgr = get_ws_manager()
+    
+    return {
+        "subscriptions": sub_mgr.get_ws_stats(),
+        "websocket": ws_mgr.get_status()
+    }
+
+@router.get("/subscriptions/active")
+async def list_active_subscriptions(tier: Optional[str] = None):
+    """List active subscriptions, optionally filtered by tier"""
+    sub_mgr = get_subscription_manager()
+    subs = sub_mgr.list_active_subscriptions(tier=tier)
+    
+    return {
+        "tier": tier,
+        "count": len(subs),
+        "subscriptions": subs
+    }
+
+@router.get("/subscriptions/search")
+async def search_active_subscriptions(
+    q: str = Query(..., min_length=1),
+    tier: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100)
+):
+    """Search active subscriptions by token/symbol for autocomplete"""
+    sub_mgr = get_subscription_manager()
+    query = q.upper().strip()
+    subs = sub_mgr.list_active_subscriptions(tier=tier)
+    results = []
+
+    for sub in subs:
+        haystack = " ".join(
+            str(part) for part in [
+                sub.get("token"),
+                sub.get("symbol"),
+                sub.get("expiry"),
+                sub.get("strike"),
+                sub.get("option_type"),
+                sub.get("symbol_canonical")
+            ] if part
+        ).upper()
+
+        if query in haystack:
+            results.append(sub)
+            if len(results) >= limit:
+                break
+
+    return {
+        "query": q,
+        "tier": tier,
+        "count": len(results),
+        "results": results
+    }
+
+@router.get("/subscriptions/{token}")
+async def get_subscription_details(token: str):
+    """Get details for a specific subscription"""
+    sub_mgr = get_subscription_manager()
+    sub = sub_mgr.get_subscription(token)
+    
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    
+    return {
+        "token": token,
+        "details": sub
+    }
+
+@router.get("/market/underlying-ltp/{symbol}")
+async def get_underlying_ltp(symbol: str):
+    """Return latest underlying LTP from live price cache"""
+    from app.market.live_prices import get_price
+    symbol_upper = symbol.upper()
+    ltp = get_price(symbol_upper)
+    if ltp is None:
+        raise HTTPException(status_code=404, detail=f"No LTP available for {symbol_upper}")
+    return {
+        "status": "success",
+        "symbol": symbol_upper,
+        "ltp": ltp
+    }
+
+# ============================================================================
+# INSTRUMENT SEARCH ENDPOINTS
+# ============================================================================
+
+@router.get("/instruments/search")
+async def search_instruments(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100)
+):
+    """Search for instruments by symbol (for watchlist UI)"""
+    if len(q) < 1:
+        return {"results": []}
+    
+    q_upper = q.upper()
+    results = []
+    
+    # Search in registry
+    for symbol, records in REGISTRY.by_symbol.items():
+        if q_upper in symbol:
+            results.append({
+                "symbol": symbol,
+                "count": len(records),
+                "f_o_eligible": REGISTRY.is_f_o_eligible(symbol)
+            })
+        
+        if len(results) >= limit:
+            break
+    
+    return {
+        "query": q,
+        "count": len(results),
+        "results": results
+    }
+
+@router.get("/instruments/{symbol}/expiries")
+async def get_expiries(symbol: str):
+    """Get available expiries for a symbol"""
+    expiries = REGISTRY.get_expiries_for_symbol(symbol)
+    
+    return {
+        "symbol": symbol,
+        "expiries": expiries,
+        "count": len(expiries)
+    }
+
+# ============================================================================
+# ADMIN ENDPOINTS
+# ============================================================================
+
+@router.post("/admin/unsubscribe-all-tier-a")
+async def admin_unsubscribe_all_tier_a():
+    """Admin: Unsubscribe all Tier A subscriptions (simulates EOD)"""
+    sub_mgr = get_subscription_manager()
+    count = sub_mgr.unsubscribe_all_tier_a()
+    
+    return {
+        "action": "UNSUBSCRIBE_ALL_TIER_A",
+        "count": count,
+        "message": f"Unsubscribed {count} Tier A instruments"
+    }
+
+@router.post("/admin/clear-watchlists")
+async def admin_clear_watchlists(user_id: Optional[int] = None):
+    """Admin: Clear watchlists (all users or specific user)"""
+    watchlist_mgr = get_watchlist_manager()
+    
+    if user_id:
+        result = watchlist_mgr.clear_all_user_watchlist(user_id)
+        return {
+            "action": "CLEAR_WATCHLIST",
+            "user_id": user_id,
+            **result
+        }
+    else:
+        return {
+            "action": "CLEAR_ALL_WATCHLISTS",
+            "message": "Not implemented - specify user_id"
+        }
+
+@router.get("/admin/ws-status")
+async def admin_ws_status():
+    """Admin: Get detailed WebSocket status"""
+    ws_mgr = get_ws_manager()
+    return ws_mgr.get_status()
+
+@router.post("/admin/rebalance-ws")
+async def admin_rebalance_ws():
+    """Admin: Rebalance subscriptions across WS connections"""
+    ws_mgr = get_ws_manager()
+    result = ws_mgr.rebalance()
+    
+    return {
+        "action": "REBALANCE_WS",
+        **result
+    }
+
+@router.post("/admin/subscribe-indices")
+async def admin_subscribe_indices(req: AdminSubscribeIndicesRequest):
+    """Admin: Subscribe a minimal set of index symbols for dashboard live prices"""
+    sub_mgr = get_subscription_manager()
+
+    allowed = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
+    symbols = [s.upper() for s in (req.symbols or ["NIFTY", "BANKNIFTY", "SENSEX"])]
+    symbols = [s for s in symbols if s in allowed]
+
+    results = []
+    for symbol in symbols:
+        token = f"INDEX_{symbol}"
+        success, msg, ws_id = sub_mgr.subscribe(
+            token=token,
+            symbol=symbol,
+            expiry=None,
+            strike=None,
+            option_type=None,
+            tier=req.tier
+        )
+        results.append({
+            "symbol": symbol,
+            "token": token,
+            "success": success,
+            "message": msg,
+            "ws_id": ws_id
+        })
+
+    return {
+        "action": "SUBSCRIBE_INDICES",
+        "count": len(results),
+        "results": results
+    }
+
+@router.get("/options/expiry-cache")
+async def get_expiry_cache():
+    """Inspect cached expiries fetched by the daily scheduler"""
+    scheduler = get_expiry_scheduler()
+    last_refresh = {
+        symbol: ts.isoformat() if ts else None
+        for symbol, ts in scheduler.last_refresh.items()
+    }
+    return {
+        "status": "ok",
+        "expiries": scheduler.cached_expiries,
+        "last_refresh": last_refresh
+    }
+
+# ============================================================================
+# INCLUDE AUTHORITATIVE OPTION CHAIN ROUTES
+# ============================================================================
+# Register nested router with dedicated prefix to avoid conflicts
+# Routes will be at /api/v2/options/live, /api/v2/options/available/*, etc.
+router.include_router(option_chain_router, prefix="/options", tags=["option-chain"])
+
+print("[OK] Market API v2 endpoints loaded")
+print("[OK] Authoritative option chain routes registered at /api/v2/options/*")

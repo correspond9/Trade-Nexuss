@@ -1,0 +1,289 @@
+STEP 1: AUTHORITATIVE EXPIRY SOURCE (MANDATORY)
+• Instrument master MUST NOT be used to determine expiries.
+• Instrument master is metadata-only.
+• Expiry dates, lot sizes, strike intervals MUST be fetched dynamically from Dhan Option Chain APIs.
+
+EXPLICITLY FORBIDDEN
+• Do NOT read expiry dates from instrument master
+• Do NOT hardcode expiry calendars
+• Do NOT assume monthly/weekly patterns
+• Do NOT infer expiry from symbol names
+
+OPTION CHAIN CONSTRUCTION (UPDATED FLOW)
+Expiry List API (authoritative)
+   ↓
+Select required expiries
+   ↓
+Option Chain REST (per expiry)
+   ↓
+Extract strikes, tokens, Greeks, OI
+   ↓
+Subscribe to WebSocket for live prices
+
+
+Why is this required?
+• Exchange expiries change
+• Weekly schedules shift
+• Holidays alter expiries
+• Static masters become stale
+
+
+SUCCESS CONDITION
+The fix is COMPLETE only if:
+
+No expiry comes from instrument master
+All expiries match live exchange contracts
+Option chain requests succeed for every expiry
+No “instrument not found” or empty chain errors occur
+
+
+STEP 2 — DETERMINE EXPIRY DATES (SMARTLY)
+
+For each underlying:
+
+• Read all expiries from instrument master
+• Select expiries based on rules:
+
+Examples:
+
+Weekly indices → next N weeklies
+
+Monthly instruments → current + next monthly
+
+Quarterly → next N quarterlies
+
+MCX → current + next monthly
+
+Store selected expiries in:
+
+expiry_registry
+
+
+STEP 3 — COMPUTE ATM (AUTOMATICALLY)
+
+ATM MUST NEVER BE MANUAL.
+
+For every underlying (index / stock / commodity):
+
+Fetch LTP
+
+• Prefer WebSocket first tick
+• Fallback: Market Quote REST (batched)
+
+Read strike interval
+
+• From instrument_master_cache
+
+Compute ATM
+ATM = round(LTP / strike_interval) * strike_interval
+
+
+Examples:
+• NIFTY LTP 25175 → interval 50 → ATM 25200
+• BANKNIFTY LTP 48610 → interval 100 → ATM 48600
+
+If LTP is unavailable:
+• STOP
+• Do NOT guess ATM
+• Log error
+
+Store ATM in:
+
+atm_registry
+
+
+STEP 4 — GENERATE STRIKES (RULE-BASED)
+
+Strikes must be generated ONLY relative to ATM.
+
+Strike rules:
+
+• NIFTY / BANKNIFTY / SENSEX
+→ 50 below + ATM + 49 above = 100
+
+• FINNIFTY / MIDCPNIFTY / BANKEX
+→ 25 below + ATM + 24 above = 50
+
+• NSE Stock Options
+→ 12 below + ATM + 12 above = 25
+
+• MCX Options
+→ 5 below + 5 above = 10
+
+Strike spacing MUST come from instrument master.
+
+DO NOT:
+• sort lexicographically
+• pick first/lowest strike
+• expand ranges intraday
+
+
+STEP 5 — BUILD OPTION CHAIN SKELETON (REST)
+
+For each:
+• underlying
+• expiry
+
+Call DhanHQ REST Option Chain API:
+
+POST /api/v2/optionchain
+{
+  "UnderlyingScrip": "<name>",
+  "UnderlyingSeg": "<segment>",
+  "Expiry": "<YYYY-MM-DD>"
+}
+
+
+From REST response, build Option Chain Skeleton:
+
+option_chain_cache[underlying][expiry] = {
+  underlying,
+  expiry,
+  lot_size,
+  strike_interval,
+  atm_strike,
+  strikes: {
+    strike_price: {
+      CE: {
+        token,
+        ltp,
+        bid,
+        ask,
+        oi,
+        volume,
+        iv,
+        greeks
+      },
+      PE: {
+        token,
+        ltp,
+        bid,
+        ask,
+        oi,
+        volume,
+        iv,
+        greeks
+      }
+    }
+  },
+  last_updated
+}
+
+
+REST provides:
+• OI
+• Greeks
+• IV
+• initial LTP
+• metadata
+
+
+
+STEP 6 — WEBSOCKET SUBSCRIPTIONS
+
+From option_chain_cache:
+• Extract ALL option tokens
+• Group tokens deterministically
+• Max 5,000 per WebSocket
+• Max 5 connections
+
+Connect to:
+
+wss://ws.dhan.co/v2/market
+
+
+Subscribe format:
+
+{
+  "action": "subscribe",
+  "symbols": [
+    "segment|security_id|instrument_token"
+  ]
+}
+
+
+Maintain:
+
+token → websocket_id mapping
+
+
+
+STEP 7 — MERGE LIVE DATA (WEBSOCKET)
+
+On each tick:
+• Identify instrument token
+• Locate strike in option_chain_cache
+• Update ONLY:
+
+LTP
+
+Bid
+
+Ask
+
+Volume (if present)
+
+DO NOT:
+• regenerate strikes
+• rebuild chain
+• resubscribe
+
+Greeks remain from REST until refreshed periodically.
+
+STEP 8 — CENTRAL CACHE (CRITICAL)
+
+ALL option chain data MUST live in:
+
+option_chain_cache (in-memory + Redis fallback)
+
+
+Frontend pages MUST:
+• Read ONLY from this cache
+• NEVER call Dhan APIs
+
+This ensures:
+• Single data source
+• Consistent prices
+• No rate-limit issues
+
+🔁 STEP 9 — PERIODIC REFRESH RULES
+
+• Greeks / OI refresh → REST every 30–60 seconds
+• ATM recalculation → logical, continuous
+• Strike regeneration → ONLY on:
+
+Market open
+
+Expiry rollover
+
+Admin manual refresh
+
+🌐 STEP 10 — SERVE FRONTEND FROM CACHE
+
+Expose FastAPI endpoints like:
+
+GET /optionchain/live?underlying=NIFTY&expiry=2026-04-30
+
+
+Response must come ONLY from:
+
+option_chain_cache
+
+🚫 STRICT NON-NEGOTIABLE RULES
+• No manual ATM input
+• No per-user REST calls
+• No per-tick REST calls
+• No UI-driven subscriptions
+• No strike guessing
+• No silent pruning
+
+✅ SUCCESS CRITERIA
+
+System is COMPLETE only if:
+
+✔ Option chains are built once
+✔ Updated in real time
+✔ Stored centrally
+✔ Served to all UI pages
+✔ ATM is automatic
+✔ Dhan limits are never breached

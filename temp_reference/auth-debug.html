@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Auth Debug</title>
+</head>
+<body>
+    <h1>Authentication Debug</h1>
+    <div id="auth-status"></div>
+    
+    <script>
+        // Check localStorage
+        const authToken = localStorage.getItem('authToken');
+        const authUser = localStorage.getItem('authUser');
+        const user = localStorage.getItem('user');
+        
+        console.log('localStorage contents:', {
+            authToken: authToken ? authToken.substring(0, 50) + '...' : null,
+            authUser: authUser,
+            user: user
+        });
+        
+        // Try to make an authenticated request
+        fetch('http://127.0.0.1:5000/api/v1/credentials/active', {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': authToken ? `Bearer ${authToken}` : undefined
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('auth-status').innerHTML = `
+                <h2>Auth Test Result:</h2>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+                <h3>Token found: ${authToken ? 'Yes' : 'No'}</h3>
+                <h3>User found: ${authUser || user ? 'Yes' : 'No'}</h3>
+            `;
+        })
+        .catch(error => {
+            document.getElementById('auth-status').innerHTML = `
+                <h2>Error:</h2>
+                <pre>${error.message}</pre>
+            `;
+        });
+    </script>
+</body>
+</html>

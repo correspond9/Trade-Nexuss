@@ -1,0 +1,19 @@
+graph TB
+    A[Trading Terminal App] --> B[PostgreSQL - Core Data]
+    A --> C[Redis - Cache/Sessions]
+    A --> D[MongoDB - Logs/Analytics]
+    A --> E[PostgreSQL - Credentials]
+    
+    B --> F[Users, Orders, Positions]
+    B --> G[Portfolio, Holdings]
+    B --> H[Market Data Cache]
+    
+    C --> I[User Sessions]
+    C --> J[Real-time Cache]
+    
+    D --> K[Audit Logs]
+    D --> L[Market Data History]
+    D --> M[Performance Metrics]
+    
+    E --> N[API Credentials]
+    E --> O[Encryption Keys]

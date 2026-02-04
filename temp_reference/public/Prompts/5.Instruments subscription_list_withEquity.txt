@@ -1,0 +1,189 @@
+DHANHQ WEBSOCKET SUBSCRIPTION LIST AND RULES
+READ CAREFULLY. THIS PROMPT REPLACES ALL PREVIOUS INSTRUCTIONS.
+NO OPTIMIZATION, PRUNING, OR REINTERPRETATION IS ALLOWED.
+
+OBJECTIVE:
+Subscribe to the approved instrument universe using DhanHQ API v2 WebSocket,
+strictly within Dhan limits, with deterministic rule-based generation.
+
+Any deviation from these rules is a BUG.
+
+🔒 DHANHQ API v2 COMPLIANCE (MANDATORY)
+DhanHQ API v2 hard limits:
+
+• Max WebSocket connections per user: 5
+• Max instrument subscriptions per WebSocket: 5,000
+• REST Quote APIs: 1 request per second
+• REST Data APIs (option chain, Greeks, margins): 5 requests per second
+
+Violations may result in throttling or temporary IP blocking.
+
+Implementation MUST:
+• Never exceed these limits
+• Use exponential backoff on reconnects
+• Avoid rapid subscribe/unsubscribe cycles
+• Centralize REST calls with caching
+• Never call REST per tick or per user action
+
+APPROVED INSTRUMENT UNIVERSE (LOCKED & FINAL)
+A) NSE – INDEX OPTIONS (CE & PE mandatory)
+
+NIFTY 50
+Expiries: 8 weekly + 4 quarterly
+Strikes per expiry: 101
+
+BANKNIFTY
+Expiries: current monthly + next 4 quarterly
+Strikes per expiry: 101
+
+SENSEX
+Expiries: current 4 weekly + next 1 monthly
+Strikes per expiry: 101
+
+FINNIFTY
+Expiries: current monthly + next 3 quarterly
+Strikes per expiry: 50
+
+MIDCPNIFTY
+Expiries: current monthly + next 3 quarterly
+Strikes per expiry: 50
+
+BANKEX
+Expiries: current monthly + next 3 quarterly
+Strikes per expiry: 50
+
+
+B) NSE – STOCK OPTIONS
+
+All the stocks which falls in the official list of  NSE F&O (this list is dynamic and updated by NSE time to time)
+Expiries: current monthly + next monthly
+Strikes per expiry: 25 (ATM + 12 each side)
+CE & PE mandatory
+
+
+C) NSE – STOCK FUTURES
+
+Same NSE F&O stocks which are defined in STOCK OPTIONS
+Expiries: current monthly + next monthly
+
+
+D) NSE – EQUITY (CASH MARKET)
+
+Top 1500 NSE equity stocks
+One instrument per stock
+No expiries, no strikes
+
+
+
+E) MCX – FUTURES
+
+Include ONLY:
+GOLD, GOLDM, GOLDMINI
+SILVER, SILVERM, SILVERMINI
+CRUDEOIL, CRUDEOILM
+NATURALGAS, NATURALGASM,
+COPPER
+[Note the names of the instruments are defined in plan language, these could or could not be exact instrument names as per the official MCX list]
+
+Expiries:
+Current monthly + next monthly
+
+
+F) MCX – OPTIONS
+
+Include ONLY:
+CRUDEOIL
+NATURALGAS
+
+Rules:
+Expiries: current monthly + next monthly
+Strikes per expiry: 99 (ATM Strike + 49 each side)
+CE & PE mandatory
+
+
+
+STRIKE GENERATION RULES (MANDATORY)
+All option strikes MUST be generated relative to ATM Strike.
+Strike generation must be deterministic and rule-driven.
+Search filters must NEVER control subscriptions.
+
+
+
+ATM Definition
+
+ATM = nearest strike to current underlying LTP
+Rounded using exchange-defined strike intervals
+
+ATM recalculated ONLY at:
+• system startup
+• expiry rollover
+• explicit admin refresh
+NEVER on every tick
+
+Strike Ranges
+Index Options (NIFTY, BANKNIFTY, SENSEX)
+
+50 strikes below ATM
+ATM
+50 strikes above ATM
+= 101 total
+
+Index Options (FINNIFTY, MIDCPNIFTY, BANKEX)
+
+25 strikes below ATM
+ATM
+24 strikes above ATM
+= 50 total
+
+NSE Stock Options
+
+12 strikes below ATM
+ATM
+12 strikes above ATM
+= 25 total
+
+
+MCX Options
+
+50 strikes below ATM
+ATM
+50 strikes above ATM
+= 101 total
+
+Strike spacing MUST be read from instrument master.
+DO NOT hardcode strike intervals.
+
+
+STABILITY & ANTI-DRIFT RULES (CRITICAL)
+• Do NOT auto-expand strikes
+• Do NOT reduce strike counts
+• Do NOT add extra expiries
+• Do NOT drop weekly options
+• Do NOT regenerate strikes intraday
+• Do NOT infer universe from search UI
+• Do NOT optimize for “performance”
+
+Once generated, strikes for an expiry remain FIXED until expiry rollover.
+
+
+Do NOT auto-correct silently
+
+
+
+WEBSOCKET DISTRIBUTION RULES
+
+Use maximum 5 WebSocket connections
+Maximum 5,000 instruments per connection
+Distribute instruments deterministically
+Maintain mapping: instrument_token → websocket_id
+Subscriptions must be idempotent on reconnect
+
+
+SUCCESS CRITERIA
+Implementation is COMPLETE only if:
+
+All ~16,900 instruments are subscribed
+No WS exceeds 5,000 instruments
+Strike and expiry counts match rules exactly
+No silent pruning or expansion occurs
+System remains within DhanHQ v2 limits

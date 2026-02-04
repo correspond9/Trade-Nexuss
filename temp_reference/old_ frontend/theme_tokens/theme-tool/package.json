@@ -1,0 +1,43 @@
+{
+  "name": "universal-theme-customization-tool",
+  "version": "1.0.0",
+  "description": "A complete, production-ready theme customization system for React applications",
+  "main": "index.js",
+  "type": "module",
+  "keywords": [
+    "react",
+    "theme",
+    "customization",
+    "ui",
+    "design-system",
+    "css-variables",
+    "real-time",
+    "component-styling"
+  ],
+  "author": "Theme Tool Developer",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": "^16.0.0 || ^17.0.0 || ^18.0.0",
+    "react-dom": "^16.0.0 || ^17.0.0 || ^18.0.0"
+  },
+  "dependencies": {
+    "lucide-react": "^0.263.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^4.0.0"
+  },
+  "files": [
+    "*.js",
+    "*.jsx",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-repo/theme-tool.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-repo/theme-tool/issues"
+  },
+  "homepage": "https://github.com/your-repo/theme-tool#readme"
+}

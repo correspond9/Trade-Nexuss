@@ -1,0 +1,213 @@
+DHANHQ WEBSOCKET INSTRUMENT SUBSCRIPTION (ATM-AWARE)
+READ CAREFULLY.
+THIS PROMPT REPLACES ALL PREVIOUS INSTRUCTIONS.
+NO OPTIMIZATION, PRUNING, OR REINTERPRETATION IS ALLOWED.
+
+OBJECTIVE:
+Subscribe to the approved instrument universe using DhanHQ API v2 WebSocket,
+with correct ATM-based strike generation, strict Dhan compliance,
+and zero manual ATM inputs.
+
+🔒 DHANHQ API v2 COMPLIANCE (MANDATORY)
+Hard limits (DhanHQ v2):
+
+• Max WebSocket connections per user: 5
+• Max instrument subscriptions per WebSocket: 5,000
+• REST Quote APIs: 1 request per second
+• REST Data APIs (option chain, Greeks, margins): 5 requests per second
+
+Violations may result in throttling or temporary IP blocking.
+
+Implementation MUST:
+• Never exceed these limits
+• Use exponential backoff on reconnects
+• Avoid rapid subscribe/unsubscribe cycles
+• Centralize REST calls with caching
+• Never call REST per tick or per user action
+
+🎯 APPROVED INSTRUMENT UNIVERSE (LOCKED & FINAL)
+A) NSE – INDEX OPTIONS (CE & PE mandatory)
+
+NIFTY 50
+
+Expiries: 8 weekly + 4 quarterly
+Strikes per expiry: 100
+
+BANKNIFTY
+Expiries: current monthly + next 4 quarterly
+Strikes per expiry: 100
+
+SENSEX
+Expiries: current 4 weekly + next 1 monthly
+Strikes per expiry: 100
+
+FINNIFTY
+Expiries: current monthly + next 3 quarterly
+Strikes per expiry: 50
+
+MIDCPNIFTY
+Expiries: current monthly + next 3 quarterly
+Strikes per expiry: 50
+
+BANKEX
+Expiries: current monthly + next 3 quarterly
+Strikes per expiry: 50
+
+B) NSE – STOCK OPTIONS
+ALL NSE F&O stocks
+Expiries: current monthly + next monthly
+Strikes per expiry: 25 ( ATM + 12 up and 12 downside)
+CE & PE mandatory
+
+
+C) NSE – STOCK FUTURES
+Same NSE F&O stocks
+Expiries: current monthly + next monthly
+
+D) NSE – EQUITY (CASH MARKET)
+Top 1500 NSE equity stocks
+One instrument per stock
+No expiries, no strikes
+
+E) MCX – FUTURES
+Include ONLY:
+GOLD, GOLDM, GOLDMINI
+SILVER, SILVERM, SILVERMINI
+CRUDEOIL, NATURALGAS, COPPER
+
+Expiries:
+Current monthly + next monthly
+
+F) MCX – OPTIONS
+Include ONLY:
+CRUDEOIL
+NATURALGAS
+Rules:
+Expiries: current monthly + next monthly
+Strikes per expiry: 10
+CE & PE mandatory
+
+🔑 ATM COMPUTATION & STRIKE GENERATION (CRITICAL)
+ATM MUST NOT BE MANUALLY PROVIDED.
+
+ATM is a computed value derived from live prices.
+If ATM cannot be computed, STOP and DO NOT generate strikes.
+
+ATM COMPUTATION RULE
+
+For every underlying (index, stock, commodity):
+
+1. Fetch underlying LTP
+   • Prefer first WebSocket tick
+   • Fallback: Market Quote REST (batched)
+
+2. Read strike interval from instrument master
+
+3. Compute:
+   ATM = round(LTP / strike_interval) * strike_interval
+
+
+Examples:
+
+NIFTY LTP 25175 → interval 50 → ATM = 25200
+
+BANKNIFTY LTP 48610 → interval 100 → ATM = 48600
+
+❌ Do NOT sort strikes lexicographically
+❌ Do NOT guess ATM
+❌ Do NOT use first/lowest strike
+
+🎯 STRIKE RANGE RULES (RELATIVE TO ATM)
+Index Options (NIFTY, BANKNIFTY, SENSEX)
+
+50 strikes below ATM
+
+ATM
+
+49 strikes above ATM
+= 100 strikes
+
+Index Options (FINNIFTY, MIDCPNIFTY, BANKEX)
+
+25 strikes below ATM
+
+ATM
+
+24 strikes above ATM
+= 50 strikes
+
+NSE Stock Options
+
+12 strikes below ATM
+
+ATM
+
+12 strikes above ATM
+= 25 strikes
+
+MCX Options
+
+5 strikes below ATM
+
+5 strikes above ATM
+= 10 strikes
+
+Strike spacing MUST be read from instrument master.
+DO NOT hardcode intervals.
+
+🔄 DYNAMIC ATM BEHAVIOR (LIVE MARKET)
+ATM may update dynamically using WebSocket ticks for logic & display.
+
+BUT:
+
+• Strike subscriptions MUST remain FIXED intraday
+• Do NOT resubscribe strikes on every price move
+• Re-subscription allowed ONLY on:
+  - Market open
+  - Expiry rollover
+  - Explicit ADMIN refresh
+
+🚫 STABILITY & ANTI-DRIFT RULES
+• Do NOT auto-expand strike ranges
+• Do NOT reduce strike counts
+• Do NOT add extra expiries
+• Do NOT drop weekly options
+• Do NOT infer universe from search UI
+• Do NOT optimize for performance by pruning
+
+📊 EXPECTED COUNTS (MANDATORY ASSERTION)
+Index Options        ≈ 5,600
+Stock Options        ≈ 10,000
+Stock Futures        ≈   200
+NSE Equities         ≈ 1,000
+MCX Futures          ≈    18
+MCX Options          ≈    80
+--------------------------------
+TOTAL                ≈ 16,900 instruments
+
+
+After generation:
+
+Assert count ≈ expected
+
+If mismatch → STOP and report error
+
+Do NOT auto-correct silently
+
+🔌 WEBSOCKET DISTRIBUTION
+
+Max 5 WebSocket connections
+Max 5,000 instruments per connection
+Deterministic allocation
+Maintain mapping: instrument_token → websocket_id
+Subscriptions must be idempotent on reconnect
+
+✅ SUCCESS CRITERIA
+
+Implementation is COMPLETE only if:
+ATM is computed automatically for every underlying
+No manual ATM input exists anywhere
+Strikes are correctly centered around ATM
+~16,900 instruments are subscribed
+No WebSocket exceeds limits
+No subscription churn occurs intraday

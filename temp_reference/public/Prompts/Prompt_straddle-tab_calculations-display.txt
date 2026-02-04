@@ -1,0 +1,178 @@
+You are implementing a FRONTEND-ONLY feature named “Straddly” (Straddle Matrix Tab).
+
+Assume:
+- Backend already exists and is correct.
+- Option chain structure is prebuilt and cached on backend using REST.
+- Live prices (LTP, bid/ask) are fed via Dhan WebSocket and stored in OptionPriceStore.
+- Frontend fetches option chain snapshots ONLY from backend cache APIs.
+- Frontend NEVER talks directly to Dhan APIs.
+
+====================================================
+FEATURE OBJECTIVE
+====================================================
+
+Display a real-time list of STRADDLE PRICES
+(CE + PE of the same strike)
+for a selected INDEX and selected EXPIRY.
+
+This feature is UI-derivation only.
+It must NOT modify backend data, ATM logic, strikes, or subscriptions.
+
+====================================================
+SUPPORTED UNDERLYINGS
+====================================================
+
+Indexes:
+- NIFTY
+- BANKNIFTY
+- SENSEX
+
+====================================================
+EXPIRY SELECTION LOGIC (MANDATORY)
+====================================================
+
+Frontend expiry selector must expose ONLY:
+- “CURRENT”
+- “NEXT”
+
+Mapping rules:
+- CURRENT = nearest non-expired expiry available in option chain cache
+- NEXT = immediate expiry after CURRENT
+
+Rules:
+- Do NOT calculate expiry dates manually
+- Do NOT assume weekly/monthly
+- Read expiries strictly from cached option chain
+- If NEXT expiry does not exist → disable NEXT option
+
+====================================================
+LOT SIZE LOGIC (MANDATORY)
+====================================================
+
+Lot size must be read from cached instrument metadata.
+
+Per index:
+- NIFTY → use NIFTY option lot size from cache
+- BANKNIFTY → use BANKNIFTY option lot size from cache
+- SENSEX → use SENSEX option lot size from cache
+
+Display Rules:
+- Straddle Premium = (CE_LTP + PE_LTP)
+- Display value = Straddle Premium × Lot Size
+- If lot size missing → show “Lot size unavailable” and disable row
+
+====================================================
+STRIKE SET RULES (STRICT)
+====================================================
+
+Total strikes to display: EXACTLY 25
+
+Composition:
+- 12 strikes below center
+- 1 center strike
+- 12 strikes above center
+
+Strike source:
+- Use ONLY strikes present in cached option chain
+- NEVER generate strikes
+- NEVER expand or shrink strike list
+
+If fewer than 25 strikes exist:
+- Display available strikes
+- Show warning: “Partial strike data”
+
+====================================================
+STRADDLE PRICE COMPUTATION
+====================================================
+
+For each strike:
+- Fetch CE_LTP and PE_LTP from OptionPriceStore
+- If either CE or PE is missing OR stale:
+  → Mark straddle as INVALID
+  → Do NOT substitute zero or last-known values
+
+Valid Straddle Premium:
+- straddle = CE_LTP + PE_LTP
+
+====================================================
+CENTER (ATM) STRIKE SELECTION — THIS FEATURE ONLY
+====================================================
+
+Center strike logic:
+- Center strike = strike with LOWEST VALID straddle premium
+- Computed ONLY from currently displayed strikes
+- Ignore invalid straddles during comparison
+
+Dynamic behavior:
+- Recalculate center strike whenever:
+  - CE or PE price updates arrive
+- Center strike may change frequently in live market
+
+Critical Isolation Rule:
+- This ATM logic is:
+  - ONLY for Straddly UI
+  - MUST NOT affect backend ATM
+  - MUST NOT affect subscriptions or option chain
+
+====================================================
+UI DISPLAY RULES
+====================================================
+
+- Strikes must be displayed in ASCENDING strike order
+- DO NOT reorder strikes when center changes
+- Highlight the dynamically selected center strike
+- Highlight must update in real-time without refresh
+- Non-center strikes must visually remain stable
+
+====================================================
+REAL-TIME UPDATE & PERFORMANCE RULES
+====================================================
+
+- Recompute straddles ONLY when:
+  - CE or PE price for visible strikes changes
+- Use memoization / derived state
+- DO NOT debounce, throttle, or delay updates
+- UI must tolerate frequent center switching
+
+====================================================
+MARKET CLOSED BEHAVIOR
+====================================================
+
+If market is closed:
+- Freeze last computed center strike
+- Continue displaying last known straddle values
+- Do NOT attempt recomputation from stale prices
+
+====================================================
+ERROR & EDGE CASE HANDLING
+====================================================
+
+- If no valid straddles exist:
+  → Show “Straddle data unavailable”
+- If CE or PE missing:
+  → Disable that row
+- If backend cache temporarily unavailable:
+  → Show loading or degraded state
+
+====================================================
+ABSOLUTE PROHIBITIONS
+====================================================
+
+- DO NOT use underlying LTP for ATM
+- DO NOT call REST APIs for this feature
+- DO NOT mutate backend caches
+- DO NOT persist center strike
+- DO NOT reuse this logic outside Straddly tab
+- DO NOT infer strikes from UI filters
+
+====================================================
+DELIVERABLES
+====================================================
+
+- One complete Straddly frontend component
+- Clear separation of:
+  - Data selection
+  - Straddle computation
+  - Center selection
+  - Rendering
+- Clean, readable code suitable for production UI
