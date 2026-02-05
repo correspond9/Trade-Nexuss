@@ -17,7 +17,9 @@ const SystemMonitoring = () => {
         const data = await response.json();
 
         const wsStatus = data?.websocket_status || {};
+        const mcxWsStatus = data?.mcx_websocket_status || {};
         const wsConnected = (wsStatus.connected_connections ?? 0) > 0;
+        const mcxWsConnected = (mcxWsStatus.connected_connections ?? 0) > 0;
 
         const normalized = {
           services: {
@@ -28,7 +30,12 @@ const SystemMonitoring = () => {
               status: wsConnected ? 'healthy' : 'offline',
               message: wsConnected ? 'Connections active' : 'No active connections',
               connections: wsStatus.connected_connections || 0
-            }
+            },
+            mcx_websocket: {
+              status: mcxWsConnected ? 'healthy' : 'offline',
+              message: mcxWsConnected ? 'Connections active' : 'No active connections',
+              connections: mcxWsStatus.connected_connections || 0
+            },
           },
           system_metrics: {}
         };
@@ -156,10 +163,10 @@ const SystemMonitoring = () => {
           </p>
         </div>
 
-        {/* WebSocket Status */}
+        {/* Equity WebSocket Status */}
         <div className="bg-white rounded-lg shadow p-4">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-medium text-gray-900">WebSocket</h3>
+            <h3 className="text-sm font-medium text-gray-900">Equity WebSocket</h3>
             <AlertCircle className="w-4 h-4 text-gray-400" />
           </div>
           <div className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(services.websocket?.status || 'checking')}`}>
@@ -167,6 +174,20 @@ const SystemMonitoring = () => {
           </div>
           <p className="text-xs text-gray-500 mt-2">
             {services.websocket?.message || 'Checking connection...'}
+          </p>
+        </div>
+
+        {/* MCX WebSocket Status */}
+        <div className="bg-white rounded-lg shadow p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-medium text-gray-900">MCX WebSocket</h3>
+            <AlertCircle className="w-4 h-4 text-gray-400" />
+          </div>
+          <div className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(services.mcx_websocket?.status || 'checking')}`}>
+            {getStatusText(services.mcx_websocket?.status || 'checking')}
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            {services.mcx_websocket?.message || 'Checking connection...'}
           </p>
         </div>
       </div>
@@ -212,8 +233,12 @@ const SystemMonitoring = () => {
             <p className="font-medium">{metrics.disk_free_gb ? `${metrics.disk_free_gb.toFixed(2)} GB` : 'N/A'}</p>
           </div>
           <div className="bg-gray-50 p-3 rounded">
-            <p className="text-gray-600">WebSocket Connections</p>
+            <p className="text-gray-600">Equity WS Connections</p>
             <p className="font-medium">{services.websocket?.connections || 0}</p>
+          </div>
+          <div className="bg-gray-50 p-3 rounded">
+            <p className="text-gray-600">MCX WS Connections</p>
+            <p className="font-medium">{services.mcx_websocket?.connections || 0}</p>
           </div>
           <div className="bg-gray-50 p-3 rounded">
             <p className="text-gray-600">Dhan API Status</p>

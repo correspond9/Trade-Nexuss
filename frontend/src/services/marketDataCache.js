@@ -57,7 +57,8 @@ class MarketDataCache {
 
     // Fetch fresh data
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000/api/v1'}/option-chain-v2/expiries/${symbol}`);
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
+      const response = await fetch(`${baseUrl}/options/available/expiries?underlying=${encodeURIComponent(symbol)}`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch expiries: ${response.statusText}`);
@@ -66,9 +67,9 @@ class MarketDataCache {
       const data = await response.json();
       
       // Process the data
-      const weeklyExpiries = data.weekly || [];
-      const monthlyExpiries = data.monthly || [];
-      const allExpiries = [...weeklyExpiries, ...monthlyExpiries].slice(0, 2);
+      const weeklyExpiries = data.data || [];
+      const monthlyExpiries = [];
+      const allExpiries = weeklyExpiries.slice(0, 2);
       
       // Convert to display format
       const formatExpiry = (dateStr) => {
@@ -111,6 +112,11 @@ class MarketDataCache {
 
   async getInstrumentData(symbol) {
     const cacheKey = `instrument_${symbol}`;
+    const fallbackData = {
+      'NIFTY': { lotSize: 50, strikeInterval: 50 },
+      'BANKNIFTY': { lotSize: 25, strikeInterval: 100 },
+      'SENSEX': { lotSize: 10, strikeInterval: 100 }
+    };
     
     // Return cached data if valid
     if (this.isCacheValid(cacheKey)) {
@@ -119,7 +125,8 @@ class MarketDataCache {
 
     // Fetch fresh data
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000/api/v1'}/debug/instrument/${symbol}`);
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
+      const response = await fetch(`${baseUrl}/instruments/${encodeURIComponent(symbol)}/expiries`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch instrument data: ${response.statusText}`);
@@ -127,11 +134,12 @@ class MarketDataCache {
 
       const data = await response.json();
       
+      const defaults = fallbackData[symbol] || fallbackData['NIFTY'];
       const result = {
-        lotSize: data.lotSize || 50,
-        strikeInterval: data.strikeInterval || 50,
-        hasOptions: data.hasOptions || true,
-        totalInstruments: data.totalInstruments || 0,
+        lotSize: defaults.lotSize,
+        strikeInterval: defaults.strikeInterval,
+        hasOptions: (data.expiries || []).length > 0,
+        totalInstruments: (data.expiries || []).length,
         symbol: symbol
       };
 
@@ -148,12 +156,6 @@ class MarketDataCache {
       console.error('Error fetching instrument data:', error);
       
       // Return fallback data based on symbol
-      const fallbackData = {
-        'NIFTY': { lotSize: 50, strikeInterval: 50 },
-        'BANKNIFTY': { lotSize: 25, strikeInterval: 100 },
-        'SENSEX': { lotSize: 10, strikeInterval: 100 }
-      };
-
       return {
         ...fallbackData[symbol] || fallbackData['NIFTY'],
         hasOptions: true,

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { apiService } from '../services/apiService';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
+
 const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
   const [quantity, setQuantity] = useState(1);
   const [orderTypeSelection, setOrderTypeSelection] = useState('Normal');
@@ -114,8 +116,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
 
   const fetchMargin = async () => {
     try {
-      // Mock API call to Dhan server for margin calculation
-      const response = await fetch('/api/calculate-margin', {
+      const response = await fetch(`${API_BASE}/margin/calculate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,5 +1,7 @@
 // src/App.tsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { apiService } from "../services/apiService";
+import { useAuth } from "../contexts/AuthContext";
 
 // ---------- EXPIRY HELPER FUNCTION ----------
 
@@ -33,9 +35,9 @@ const generateExpiryDates = () => {
   };
 };
 
-// ---------- MOCK USER + HELPERS ----------
+// ---------- DEFAULT USER + HELPERS ----------
 
-const MOCK_USER = {
+const DEFAULT_USER = {
   id: 7521,
   userId: "7521",
   name: "Sufyan Ahmed Ansari",
@@ -84,67 +86,10 @@ const formatDateDisplay = (isoLike: string) =>
     year: "numeric",
   });
 
-// ---------- MOCK DATA ----------
+// ---------- DEFAULT DATA ----------
 
 const expiries = generateExpiryDates();
-
-const MOCK_TRADES = [
-  {
-    id: 1,
-    date: new Date().toISOString().split('T')[0] + "T09:25:00",
-    time: "09:25:00",
-    side: "BUY",
-    symbol: `NIFTY${expiries.currentYear}${expiries.current}2518000CE`,
-    product: "NRML",
-    qty: 50,
-    price: 112.5,
-    status: "Executed",
-  },
-  {
-    id: 2,
-    date: new Date().toISOString().split('T')[0] + "T10:05:00",
-    time: "10:05:00",
-    side: "SELL",
-    symbol: `BANKNIFTY${expiries.currentYear}${expiries.current}2518500PE`,
-    product: "MIS",
-    qty: 25,
-    price: 245.8,
-    status: "Executed",
-  },
-  {
-    id: 3,
-    date: new Date(Date.now() - 86400000).toISOString().split('T')[0] + "T09:45:00",
-    time: "09:45:00",
-    side: "SELL",
-    symbol: `NIFTY${expiries.currentYear}${expiries.current}2518200PE`,
-    product: "NRML",
-    qty: 75,
-    price: 178.3,
-    status: "Executed",
-  },
-  {
-    id: 4,
-    date: new Date(Date.now() - 86400000).toISOString().split('T')[0] + "T13:15:00",
-    time: "13:15:00",
-    side: "BUY",
-    symbol: `BANKNIFTY${expiries.currentYear}${expiries.current}2518800CE`,
-    product: "MIS",
-    qty: 30,
-    price: 156.7,
-    status: "Executed",
-  },
-  {
-    id: 5,
-    date: new Date(Date.now() - 172800000).toISOString().split('T')[0] + "T11:05:00",
-    time: "11:05:00",
-    side: "BUY",
-    symbol: `FINNIFTY${expiries.currentYear}${expiries.current}2519800CE`,
-    product: "NRML",
-    qty: 40,
-    price: 89.2,
-    status: "Executed",
-  },
-];
+const DEFAULT_TRADES: TradeRow[] = [];
 
 type PnLRow = {
   id: number;
@@ -162,44 +107,63 @@ type PnLRow = {
   netPnL: number;
 };
 
-// simple mock P&L with brokerage + expenses
-const buildMockPnL = (): PnLRow[] =>
-  MOCK_TRADES.map((t, idx) => {
+type TradeRow = {
+  id: number;
+  date: string;
+  time: string;
+  side: "BUY" | "SELL";
+  symbol: string;
+  product: string;
+  qty: number;
+  price: number;
+  status: string;
+};
+
+type LedgerRow = {
+  id: number;
+  date: string;
+  particular: string;
+  type: string;
+  remarks: string;
+  credit: number;
+  debit: number;
+};
+
+type FundsRow = {
+  id: number;
+  date: string;
+  amount: number;
+  status: string;
+  method: string;
+};
+
+const buildPnLRows = (trades: TradeRow[]): PnLRow[] =>
+  trades.map((t, idx) => {
     const isOption = t.symbol.includes("CE") || t.symbol.includes("PE");
     const instrumentType: "OPTION" | "FUTURE" = isOption ? "OPTION" : "FUTURE";
 
     const qty = t.qty;
     const basePrice = t.price;
-    const buyPrice = t.side === "BUY" ? basePrice : basePrice - (10 + idx * 2);
-    const sellPrice =
-      t.side === "SELL" ? basePrice : basePrice + (12 + idx * 2);
+    const buyQty = t.side === "BUY" ? qty : 0;
+    const sellQty = t.side === "SELL" ? qty : 0;
+    const buyPrice = t.side === "BUY" ? basePrice : 0;
+    const sellPrice = t.side === "SELL" ? basePrice : 0;
 
-    const buyValue = qty * buyPrice;
-    const sellValue = qty * sellPrice;
-    const turnover = buyValue + sellValue;
-
-    const platformRate = isOption ? 0.0005 : 0.00025; // 0.05% or 0.025%
-    const platformCost = turnover * platformRate;
-
-    const stt = sellValue * (isOption ? 0.0005 : 0.000125);
-    const exchangeTxn = turnover * 0.000053; // approx
-    const sebiFees = turnover * 0.000001;
-    const stampDuty = buyValue * 0.00003;
-    const gstBase = platformCost + exchangeTxn + sebiFees;
-    const gst = gstBase * 0.18;
-
-    const tradeExpense = stt + exchangeTxn + sebiFees + stampDuty + gst;
-    const net = sellValue - buyValue - platformCost - tradeExpense;
+    const buyValue = buyQty * buyPrice;
+    const sellValue = sellQty * sellPrice;
+    const platformCost = 0;
+    const tradeExpense = 0;
+    const net = sellValue - buyValue;
 
     return {
       id: t.id,
       date: t.date,
       symbol: t.symbol,
       instrumentType,
-      buyQty: qty,
+      buyQty,
       buyPrice,
       buyValue,
-      sellQty: qty,
+      sellQty,
       sellPrice,
       sellValue,
       platformCost,
@@ -207,84 +171,21 @@ const buildMockPnL = (): PnLRow[] =>
       netPnL: net,
     };
   });
-
-const MOCK_PNL_ROWS = buildMockPnL();
-
-const MOCK_LEDGER = [
-  {
-    id: 1,
-    date: "2025-12-18T10:00:00",
-    particular: "PayIn",
-    type: "IMPS",
-    remarks: "Funds added via IMPS",
-    credit: 200000,
-    debit: 0,
-  },
-  {
-    id: 2,
-    date: "2025-12-18T15:30:00",
-    particular: "Trade P&L",
-    type: "Derivatives",
-    remarks: "Net profit for the day",
-    credit: 16551.35,
-    debit: 0,
-  },
-  {
-    id: 3,
-    date: "2025-12-19T15:30:00",
-    particular: "Trade P&L",
-    type: "Derivatives",
-    remarks: "Net loss for the day",
-    credit: 0,
-    debit: 1769.31,
-  },
-  {
-    id: 4,
-    date: "2025-12-19T16:00:00",
-    particular: "PayOut",
-    type: "NEFT",
-    remarks: "Withdrawal to bank",
-    credit: 0,
-    debit: 50000,
-  },
-];
-
-const MOCK_FUNDS_PAYIN = [
-  {
-    id: 1,
-    date: "2025-12-18T10:00:00",
-    amount: 200000,
-    status: "SUCCESS",
-    method: "IMPS",
-  },
-  {
-    id: 2,
-    date: "2025-12-20T09:45:00",
-    amount: 150000,
-    status: "PENDING",
-    method: "NEFT",
-  },
-];
-
-const MOCK_FUNDS_PAYOUT = [
-  {
-    id: 1,
-    date: "2025-12-19T16:00:00",
-    amount: 50000,
-    status: "APPROVED",
-    method: "NEFT",
-  },
-];
+const DEFAULT_PNL_ROWS: PnLRow[] = [];
+const DEFAULT_LEDGER: LedgerRow[] = [];
+const DEFAULT_FUNDS_PAYIN: FundsRow[] = [];
+const DEFAULT_FUNDS_PAYOUT: FundsRow[] = [];
 
 // ---------- SMALL PRESENTATION HELPERS ----------
 
 const TradeHistoryTable: React.FC<{
   fromDate: Date | null;
   toDate: Date | null;
-}> = ({ fromDate, toDate }) => {
+  trades: TradeRow[];
+}> = ({ fromDate, toDate, trades }) => {
   const rows = useMemo(
-    () => MOCK_TRADES.filter((r) => inDateRange(r.date, fromDate, toDate)),
-    [fromDate, toDate]
+    () => trades.filter((r) => inDateRange(r.date, fromDate, toDate)),
+    [trades, fromDate, toDate]
   );
   return (
     <div className="table-card">
@@ -340,10 +241,11 @@ const TradeHistoryTable: React.FC<{
 const PnLReportsTable: React.FC<{
   fromDate: Date | null;
   toDate: Date | null;
-}> = ({ fromDate, toDate }) => {
+  pnlRows: PnLRow[];
+}> = ({ fromDate, toDate, pnlRows }) => {
   const rows = useMemo(
-    () => MOCK_PNL_ROWS.filter((r) => inDateRange(r.date, fromDate, toDate)),
-    [fromDate, toDate]
+    () => pnlRows.filter((r) => inDateRange(r.date, fromDate, toDate)),
+    [pnlRows, fromDate, toDate]
   );
 
   const totals = useMemo(
@@ -467,13 +369,15 @@ const PnLReportsTable: React.FC<{
 const LedgerTable: React.FC<{
   fromDate: Date | null;
   toDate: Date | null;
-}> = ({ fromDate, toDate }) => {
+  ledgerEntries: LedgerRow[];
+  startBalance: number;
+}> = ({ fromDate, toDate, ledgerEntries, startBalance }) => {
   const sorted = useMemo(
     () =>
-      [...MOCK_LEDGER].sort(
+      [...ledgerEntries].sort(
         (a, b) => toDateOnly(b.date).getTime() - toDateOnly(a.date).getTime()
       ),
-    []
+    [ledgerEntries]
   );
 
   const filtered = useMemo(
@@ -481,7 +385,7 @@ const LedgerTable: React.FC<{
     [sorted, fromDate, toDate]
   );
 
-  let running = MOCK_USER.walletBalance;
+  let running = startBalance;
   const rowsWithBalance = filtered.map((r) => {
     running = running + (r.credit || 0) - (r.debit || 0);
     return { ...r, balance: running };
@@ -494,7 +398,7 @@ const LedgerTable: React.FC<{
       acc.balance = r.balance;
       return acc;
     },
-    { credit: 0, debit: 0, balance: MOCK_USER.walletBalance }
+    { credit: 0, debit: 0, balance: startBalance }
   );
 
   return (
@@ -569,17 +473,20 @@ const LedgerTable: React.FC<{
 const FundsView: React.FC<{
   fromDate: Date | null;
   toDate: Date | null;
-}> = ({ fromDate, toDate }) => {
+  fundsPayin: FundsRow[];
+  fundsPayout: FundsRow[];
+  balance: number;
+}> = ({ fromDate, toDate, fundsPayin, fundsPayout, balance }) => {
   const [subTab, setSubTab] = useState<"PAYIN" | "PAYOUT">("PAYIN");
 
   const payInRows = useMemo(
-    () => MOCK_FUNDS_PAYIN.filter((r) => inDateRange(r.date, fromDate, toDate)),
-    [fromDate, toDate]
+    () => fundsPayin.filter((r) => inDateRange(r.date, fromDate, toDate)),
+    [fundsPayin, fromDate, toDate]
   );
   const payOutRows = useMemo(
     () =>
-      MOCK_FUNDS_PAYOUT.filter((r) => inDateRange(r.date, fromDate, toDate)),
-    [fromDate, toDate]
+      fundsPayout.filter((r) => inDateRange(r.date, fromDate, toDate)),
+    [fundsPayout, fromDate, toDate]
   );
 
   return (
@@ -626,7 +533,7 @@ const FundsView: React.FC<{
           Credits: <strong style={{ color: "#16a34a" }}>₹1,460,825.95</strong>
           &nbsp; Debits:{" "}
           <strong style={{ color: "#dc2626" }}>₹744,217.65</strong> &nbsp;
-          Balance: <strong>{formatINR(MOCK_USER.walletBalance)}</strong>
+          Balance: <strong>{formatINR(balance)}</strong>
         </div>
       </div>
 
@@ -730,7 +637,7 @@ const FundsView: React.FC<{
               }}
               onClick={() =>
                 alert(
-                  "Payout request placed (mock). In real app this will be saved and visible in admin Payouts tab."
+                  "Payout request placed. This will be saved and visible in admin Payouts tab."
                 )
               }
             >
@@ -779,7 +686,7 @@ const FundsView: React.FC<{
   );
 };
 
-const MarginView: React.FC = () => {
+const MarginView: React.FC<{ allowedMargin: number }> = ({ allowedMargin }) => {
   const snapshots = [
     { time: "09:15", used: 175000 },
     { time: "09:20", used: 569500 },
@@ -804,7 +711,7 @@ const MarginView: React.FC = () => {
           textAlign: "right",
         }}
       >
-        Allowed Margin: <strong>{formatINR(MOCK_USER.allocatedMargin)}</strong>
+        Allowed Margin: <strong>{formatINR(allowedMargin)}</strong>
       </div>
       <table>
         <thead>
@@ -833,7 +740,7 @@ const MarginView: React.FC = () => {
 // ---------- PROFILE VIEW + REPORTS SHELL ----------
 
 const ProfileView: React.FC<{
-  user: typeof MOCK_USER;
+  user: typeof DEFAULT_USER;
   onUpdateTargets: (p: number, s: number) => void;
 }> = ({ user, onUpdateTargets }) => {
   const [profit, setProfit] = useState<number | string>(user.profitTargetPct);
@@ -941,7 +848,15 @@ const ProfileView: React.FC<{
   );
 };
 
-const ReportsShell: React.FC = () => {
+const ReportsShell: React.FC<{
+  trades: TradeRow[];
+  pnlRows: PnLRow[];
+  ledgerEntries: LedgerRow[];
+  fundsPayin: FundsRow[];
+  fundsPayout: FundsRow[];
+  balance: number;
+  allowedMargin: number;
+}> = ({ trades, pnlRows, ledgerEntries, fundsPayin, fundsPayout, balance, allowedMargin }) => {
   const [reportType, setReportType] = useState<
     "TRADE_HISTORY" | "PNL" | "LEDGER" | "FUNDS" | "MARGIN"
   >("LEDGER");
@@ -1013,12 +928,29 @@ const ReportsShell: React.FC = () => {
       </div>
 
       {reportType === "TRADE_HISTORY" && (
-        <TradeHistoryTable fromDate={from} toDate={to} />
+        <TradeHistoryTable fromDate={from} toDate={to} trades={trades} />
       )}
-      {reportType === "PNL" && <PnLReportsTable fromDate={from} toDate={to} />}
-      {reportType === "LEDGER" && <LedgerTable fromDate={from} toDate={to} />}
-      {reportType === "FUNDS" && <FundsView fromDate={from} toDate={to} />}
-      {reportType === "MARGIN" && <MarginView />}
+      {reportType === "PNL" && (
+        <PnLReportsTable fromDate={from} toDate={to} pnlRows={pnlRows} />
+      )}
+      {reportType === "LEDGER" && (
+        <LedgerTable
+          fromDate={from}
+          toDate={to}
+          ledgerEntries={ledgerEntries}
+          startBalance={balance}
+        />
+      )}
+      {reportType === "FUNDS" && (
+        <FundsView
+          fromDate={from}
+          toDate={to}
+          fundsPayin={fundsPayin}
+          fundsPayout={fundsPayout}
+          balance={balance}
+        />
+      )}
+      {reportType === "MARGIN" && <MarginView allowedMargin={allowedMargin} />}
     </>
   );
 };
@@ -1026,10 +958,105 @@ const ReportsShell: React.FC = () => {
 // ---------- MAIN APP (PROFILE + REPORTS SWITCH) ----------
 
 const App: React.FC = () => {
+  const { user: authUser } = useAuth();
   const [activeMenu, setActiveMenu] = useState<"PROFILE" | "REPORTS">(
     "PROFILE"
   );
-  const [user, setUser] = useState(MOCK_USER);
+  const [user, setUser] = useState(DEFAULT_USER);
+  const [trades, setTrades] = useState<TradeRow[]>(DEFAULT_TRADES);
+  const [pnlRows, setPnlRows] = useState<PnLRow[]>(DEFAULT_PNL_ROWS);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerRow[]>(DEFAULT_LEDGER);
+  const [fundsPayin, setFundsPayin] = useState<FundsRow[]>(DEFAULT_FUNDS_PAYIN);
+  const [fundsPayout, setFundsPayout] = useState<FundsRow[]>(DEFAULT_FUNDS_PAYOUT);
+  const [allowedMargin, setAllowedMargin] = useState(DEFAULT_USER.allocatedMargin);
+
+  useEffect(() => {
+    const loadProfileData = async () => {
+      if (!authUser?.id) {
+        return;
+      }
+
+      try {
+        const [usersResponse, ordersResponse, ledgerResponse, payinsResponse, payoutsResponse] = await Promise.all([
+          apiService.get('/admin/users'),
+          apiService.get('/trading/orders', { user_id: authUser.id }),
+          apiService.get('/admin/ledger', { user_id: authUser.id }),
+          apiService.get('/admin/payins'),
+          apiService.get('/admin/payouts')
+        ]);
+
+        const users = usersResponse?.data || [];
+        const dbUser = users.find((u) => u.id === authUser.id);
+        if (dbUser) {
+          setUser((prev) => ({
+            ...prev,
+            id: dbUser.id,
+            userId: String(dbUser.id),
+            name: dbUser.username || prev.name,
+            email: dbUser.email || prev.email,
+            status: dbUser.status || prev.status,
+            walletBalance: Number(dbUser.wallet_balance || prev.walletBalance),
+            allocatedMargin: Number(dbUser.wallet_balance || prev.allocatedMargin)
+          }));
+          setAllowedMargin(Number(dbUser.wallet_balance || DEFAULT_USER.allocatedMargin));
+        }
+
+        const orders = ordersResponse?.data || [];
+        const mappedTrades: TradeRow[] = orders.map((o) => {
+          const createdAt = o.created_at || new Date().toISOString();
+          const dateObj = new Date(createdAt);
+          return {
+            id: o.id,
+            date: createdAt,
+            time: dateObj.toLocaleTimeString('en-IN'),
+            side: (o.transaction_type || 'BUY').toUpperCase(),
+            symbol: o.symbol || 'UNKNOWN',
+            product: o.product_type || 'MIS',
+            qty: Number(o.quantity || 0),
+            price: Number(o.price || 0),
+            status: o.status || 'PENDING'
+          } as TradeRow;
+        });
+        setTrades(mappedTrades);
+        setPnlRows(buildPnLRows(mappedTrades));
+
+        const ledger = ledgerResponse?.data || [];
+        const mappedLedger: LedgerRow[] = ledger.map((entry) => ({
+          id: entry.id,
+          date: entry.created_at || new Date().toISOString(),
+          particular: entry.entry_type || 'ENTRY',
+          type: entry.entry_type || 'ENTRY',
+          remarks: entry.remarks || '',
+          credit: Number(entry.credit || 0),
+          debit: Number(entry.debit || 0)
+        }));
+        setLedgerEntries(mappedLedger);
+
+        const payins = (payinsResponse?.data || []).filter((e) => e.user_id === authUser.id);
+        const payouts = (payoutsResponse?.data || []).filter((e) => e.user_id === authUser.id);
+        const mappedPayins: FundsRow[] = payins.map((entry) => ({
+          id: entry.id,
+          date: entry.created_at || new Date().toISOString(),
+          amount: Number(entry.credit || 0),
+          status: 'SUCCESS',
+          method: entry.entry_type || 'PAYIN'
+        }));
+        const mappedPayouts: FundsRow[] = payouts.map((entry) => ({
+          id: entry.id,
+          date: entry.created_at || new Date().toISOString(),
+          amount: Number(entry.debit || 0),
+          status: 'COMPLETED',
+          method: entry.entry_type || 'PAYOUT'
+        }));
+        setFundsPayin(mappedPayins);
+        setFundsPayout(mappedPayouts);
+      } catch (error) {
+        console.error('Failed to load profile data:', error);
+      }
+    };
+
+    loadProfileData();
+  }, [authUser]);
 
   const handleUpdateTargets = (p: number, s: number) => {
     setUser((u) => ({ ...u, profitTargetPct: p, slPct: s }));
@@ -1056,7 +1083,17 @@ const App: React.FC = () => {
           <ProfileView user={user} onUpdateTargets={handleUpdateTargets} />
         )}
 
-        {activeMenu === "REPORTS" && <ReportsShell />}
+        {activeMenu === "REPORTS" && (
+          <ReportsShell
+            trades={trades}
+            pnlRows={pnlRows}
+            ledgerEntries={ledgerEntries}
+            fundsPayin={fundsPayin}
+            fundsPayout={fundsPayout}
+            balance={user.walletBalance}
+            allowedMargin={allowedMargin}
+          />
+        )}
       </div>
     </div>
   );

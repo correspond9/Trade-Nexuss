@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiService } from '../services/apiService';
 import { useAuthoritativeOptionChain } from '../hooks/useAuthoritativeOptionChain';
+import normalizeUnderlying from '../utils/underlying';
 
 const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry = null }) => {
   const [centerStrike, setCenterStrike] = useState(null);
@@ -8,18 +9,8 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
   const [strikeInterval, setStrikeInterval] = useState(null);
 
   // Convert selectedIndex to symbol for API calls
-  const getSymbolFromIndex = (index) => {
-    const indexMap = {
-      'NIFTY 50': 'NIFTY',
-      'NIFTY BANK': 'BANKNIFTY',
-      'BANKNIFTY': 'BANKNIFTY',
-      'SENSEX': 'SENSEX'
-    };
-    return indexMap[index] || 'NIFTY';
-  };
-
   // Get symbol
-  const symbol = getSymbolFromIndex(selectedIndex);
+  const symbol = normalizeUnderlying(selectedIndex);
   
   // ✨ Use the authoritative hook to fetch realtime cached data
   const {
@@ -60,10 +51,12 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
     }
   }, [chainData?.strike_interval]);
 
-  // STRADDLE-ONLY ATM RULE:
-  // Use the strike with the lowest CE+PE premium (min straddle).
-  // This is exclusive to the Straddle tab and not used elsewhere.
+  // STRADDLE ATM RULE:
+  // Prefer authoritative ATM from cache; fallback to min CE+PE when ATM is missing.
   const straddleAtmStrike = useMemo(() => {
+    if (chainData?.atm_strike) {
+      return chainData.atm_strike;
+    }
     if (!chainData?.strikes) {
       return null;
     }
@@ -214,7 +207,7 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
         
         {straddles.map((straddle) => {
           const isValidStraddle = straddle.isValid;
-          const displayValue = isValidStraddle ? parseFloat(straddle.straddle_premium).toFixed(2) : 'N/A';
+          const displayValue = isValidStraddle ? parseFloat(straddle.straddle_premium).toFixed(2) : '0.00';
           
           return (
             <div
@@ -229,8 +222,8 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
                 </div>
                 <div className="text-gray-500 text-[10px]">
                   {isValidStraddle ? '🟢' : '🔴'} 
-                  {' CE: ' + (straddle.ce_ltp > 0 ? straddle.ce_ltp.toFixed(2) : 'N/A') + 
-                   ' | PE: ' + (straddle.pe_ltp > 0 ? straddle.pe_ltp.toFixed(2) : 'N/A')}
+                  {' CE: ' + (straddle.ce_ltp > 0 ? straddle.ce_ltp.toFixed(2) : '0.00') + 
+                   ' | PE: ' + (straddle.pe_ltp > 0 ? straddle.pe_ltp.toFixed(2) : '0.00')}
                 </div>
               </div>
               

@@ -3,7 +3,7 @@ import { apiService } from './apiService';
 // Trading API service for OpenAlgo backend integration
 class TradingApiService {
   constructor() {
-    this.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+    this.baseURL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
   }
 
   // Order Management

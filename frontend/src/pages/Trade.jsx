@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import normalizeUnderlying from '../utils/underlying';
 import OrdersTab from './Orders';
 import BasketsTab from './BASKETS';
 import WatchlistComponent from './WATCHLIST';
@@ -15,15 +16,11 @@ const formatExpiry = (dateStr) => {
   return `${day} ${months[date.getMonth()]}`;
 };
 
-// Fetch expiry dates from authoritative options cache with LTP fallback
+// Fetch expiry dates from authoritative options cache
 const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
   try {
     // Convert display name to symbol
-    const symbol = selectedIndex.includes('NIFTY BANK') || selectedIndex.includes('BANKNIFTY')
-      ? 'BANKNIFTY'
-      : selectedIndex.includes('SENSEX')
-        ? 'SENSEX'
-        : 'NIFTY';
+    const symbol = normalizeUnderlying(selectedIndex);
     
     const apiUrl = `${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2'}/options/available/expiries?underlying=${symbol}`;
     console.log('[TRADE] Fetching expiries from authoritative API:', apiUrl);
@@ -42,8 +39,8 @@ const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
     console.log('[TRADE] Parsed expiries from authoritative cache:', expiries);
     
     if (!expiries.length) {
-      console.warn('[TRADE] No expiries found in authoritative cache, trying LTP fallback');
-      return await fetchExpiryDatesWithLTPFallback(symbol);
+      console.warn('[TRADE] No expiries found in authoritative cache');
+      return { displayExpiries: [], isoExpiries: [] };
     }
 
     const sorted = expiries.slice().sort();
@@ -72,118 +69,7 @@ const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
     
   } catch (error) {
     console.error('[TRADE] Error fetching from authoritative API:', error);
-    console.log('[TRADE] Falling back to LTP-based expiry generation...');
-    
-    // Fallback to LTP-based expiry generation
-    const symbol = selectedIndex.includes('NIFTY BANK') || selectedIndex.includes('BANKNIFTY')
-      ? 'BANKNIFTY'
-      : selectedIndex.includes('SENSEX')
-        ? 'SENSEX'
-        : 'NIFTY';
-    
-    return await fetchExpiryDatesWithLTPFallback(symbol);
-  }
-};
-
-// LTP fallback: Generate expiries using current date and LTP
-const fetchExpiryDatesWithLTPFallback = async (symbol) => {
-  try {
-    console.log('[TRADE] Using LTP fallback for expiry generation');
-    
-    // Get current LTP first
-    const ltpUrl = `${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2'}/market/underlying-ltp/${symbol}`;
-    const ltpResponse = await fetch(ltpUrl);
-    
-    let currentLTP = null;
-    if (ltpResponse.ok) {
-      const ltpData = await ltpResponse.json();
-      currentLTP = ltpData.ltp || ltpData.data?.ltp;
-    }
-    
-    // Generate expiries based on symbol type (no hardcoded dates)
-    const now = new Date();
-    const expiries = [];
-    
-    if (symbol === 'NIFTY' || symbol === 'SENSEX') {
-      // Weekly expiries (Thursdays)
-      for (let i = 0; i < 4; i++) {
-        const expiry = new Date(now);
-        const daysUntilThursday = (4 - expiry.getDay() + 7) % 7 || 7;
-        expiry.setDate(now.getDate() + daysUntilThursday + (i * 7));
-        expiries.push(expiry.toISOString().split('T')[0]);
-      }
-    } else if (symbol === 'BANKNIFTY' || symbol === 'FINNIFTY') {
-      // Weekly expiries (Thursdays for BANKNIFTY, Wednesdays for FINNIFTY)
-      const targetDay = symbol === 'FINNIFTY' ? 3 : 4; // Wednesday or Thursday
-      for (let i = 0; i < 4; i++) {
-        const expiry = new Date(now);
-        const daysUntilTarget = (targetDay - expiry.getDay() + 7) % 7 || 7;
-        expiry.setDate(now.getDate() + daysUntilTarget + (i * 7));
-        expiries.push(expiry.toISOString().split('T')[0]);
-      }
-    } else {
-      // Monthly expiries (last Thursday of month)
-      for (let i = 0; i < 3; i++) {
-        const expiry = new Date(now.getFullYear(), now.getMonth() + i + 1, 0);
-        while (expiry.getDay() !== 4) {
-          expiry.setDate(expiry.getDate() - 1);
-        }
-        expiries.push(expiry.toISOString().split('T')[0]);
-      }
-    }
-    
-    const sorted = expiries.slice().sort();
-    // Select first 2 expiries but ensure they are current and next, not skipping any
-    // If current expiry is in the list, start from it; otherwise start from first
-    const today = new Date().toISOString().split('T')[0];
-    
-    console.log('[TRADE LTP Fallback] All expiries (sorted):', sorted);
-    console.log('[TRADE LTP Fallback] Today:', today);
-    
-    let currentIndex = sorted.findIndex(exp => exp >= today);
-    if (currentIndex === -1) {
-      console.warn('[TRADE LTP Fallback] No future expiries found, using first available');
-      currentIndex = 0;
-    }
-    
-    const selected = sorted.slice(currentIndex, currentIndex + 2);
-    
-    console.log('[TRADE LTP Fallback] Selected expiries (ISO):', selected);
-    
-    const message = currentLTP 
-      ? `Generated expiries using LTP fallback (${currentLTP})`
-      : 'Generated expiries using date fallback (no LTP available)';
-    
-    console.log('[TRADE] LTP fallback result - Current:', today, 'Display:', selected.map(formatExpiry), 'ISO:', selected);
-    console.log('[TRADE]', message);
-    
-    return {
-      displayExpiries: selected.map(formatExpiry),
-      isoExpiries: selected,
-      fallbackMessage: message
-    };
-    
-  } catch (fallbackError) {
-    console.error('[TRADE] LTP fallback also failed:', fallbackError);
-    
-    // Emergency fallback: Generate minimal expiries
-    const now = new Date();
-    const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    
-    const emergencyExpiries = [
-      now.toISOString().split('T')[0],
-      nextWeek.toISOString().split('T')[0],
-      nextMonth.toISOString().split('T')[0]
-    ].slice(0, 2);
-    
-    console.warn('[TRADE] Using emergency fallback expiries:', emergencyExpiries);
-    
-    return {
-      displayExpiries: emergencyExpiries.map(formatExpiry),
-      isoExpiries: emergencyExpiries,
-      fallbackMessage: 'Emergency fallback: Generated dates'
-    };
+    return { displayExpiries: [], isoExpiries: [] };
   }
 };
 

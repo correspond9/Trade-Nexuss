@@ -1,13 +1,12 @@
 // API service with caching and error handling
 class ApiService {
   constructor() {
-    this.baseURL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000/api/v1';
+    this.baseURL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
     this.cache = new Map();
     this.defaultHeaders = {
       'Content-Type': 'application/json',
     };
-    // Use mock data based on environment variable
-    this.useMockData = import.meta.env.VITE_MOCK_DATA === 'true';
+    this.useMockData = false;
     this.authToken = null;
   }
 
@@ -24,7 +23,9 @@ class ApiService {
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
-    const isWeeklySymbol = symbol.includes('NIFTY') || symbol.includes('SENSEX');
+    const weeklySymbols = ['NIFTY', 'SENSEX', 'FINNIFTY', 'MIDCPNIFTY'];
+    const normalizedSymbol = (symbol || '').toUpperCase().trim();
+    const isWeeklySymbol = weeklySymbols.includes(normalizedSymbol);
 
     const formatExpiry = (date) => {
       const day = date.getDate();
@@ -708,38 +709,6 @@ class ApiService {
   }
 
   async post(endpoint, data = {}) {
-    // Handle mock authentication
-    if (this.useMockData && endpoint === '/auth/login') {
-      const mockUsers = [
-        {
-          id: 1,
-          username: 'admin',
-          email: 'admin@example.com',
-          full_name: 'Admin User',
-          role: 'SUPER_ADMIN',
-          is_active: true
-        },
-        {
-          id: 2,
-          username: 'user',
-          email: 'user@example.com',
-          full_name: 'Test User',
-          role: 'USER_EQUITY',
-          is_active: true
-        }
-      ];
-      
-      const user = mockUsers.find(u => u.username === data.username);
-      if (user && (data.password === 'admin123' || data.password === 'password123')) {
-        return {
-          access_token: `mock-token-${user.username}-${Date.now()}`,
-          user: user
-        };
-      } else {
-        throw new Error('Invalid username or password');
-      }
-    }
-    
     return this.request(endpoint, {
       method: 'POST',
       body: JSON.stringify(data),

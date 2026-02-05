@@ -9,6 +9,7 @@ const Header = () => {
 
   const navigationItems = [
     { name: 'Trade', path: '/trade', icon: '💹' },
+    { name: 'Commodities', path: '/commodities', icon: '🛢️' },
     { name: 'P. MIS', path: '/trade/all-positions', icon: '📊', adminOnly: true },
     { name: 'P. Normal', path: '/trade/all-positions-normal', icon: '📈', adminOnly: true },
     { name: 'P.Userwise', path: '/trade/all-positions-userwise', icon: '👥', adminOnly: true },

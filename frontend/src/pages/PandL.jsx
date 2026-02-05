@@ -16,32 +16,39 @@ const PandL = () => {
   const loadPandLData = async () => {
     setLoading(true);
     try {
-      // Mock data for now
-      const mockData = [
-        {
-          id: 1,
-          date: '2026-01-29',
-          userId: '7522',
-          userName: 'C.K. Nanaiah',
-          realizedPnl: 2500.50,
-          unrealizedPnl: -500.25,
-          totalPnl: 2000.25,
-          brokerage: 50.00,
-          netPnl: 1950.25
-        },
-        {
-          id: 2,
-          date: '2026-01-29',
-          userId: '7523',
-          userName: 'Dhruv Kirit Gohil',
-          realizedPnl: 1200.00,
-          unrealizedPnl: 300.75,
-          totalPnl: 1500.75,
-          brokerage: 30.00,
-          netPnl: 1470.75
-        }
-      ];
-      setPandlData(mockData);
+      const [positionsResponse, usersResponse] = await Promise.all([
+        apiService.get('/portfolio/positions'),
+        apiService.get('/admin/users')
+      ]);
+      const users = usersResponse?.data || [];
+      const userMap = new Map(users.map((u) => [u.id, u.username || `User ${u.id}`]));
+      const positions = positionsResponse?.data || [];
+
+      const grouped = new Map();
+      positions.forEach((pos) => {
+        const entry = grouped.get(pos.user_id) || { realized: 0, unrealized: 0 };
+        entry.realized += Number(pos.realizedPnl || 0);
+        entry.unrealized += Number(pos.mtm || 0);
+        grouped.set(pos.user_id, entry);
+      });
+
+      const date = new Date().toISOString().split('T')[0];
+      const rows = Array.from(grouped.entries()).map(([userId, totals], idx) => {
+        const totalPnl = totals.realized + totals.unrealized;
+        return {
+          id: idx + 1,
+          date: date,
+          userId: String(userId),
+          userName: userMap.get(userId) || `User ${userId}`,
+          realizedPnl: totals.realized,
+          unrealizedPnl: totals.unrealized,
+          totalPnl: totalPnl,
+          brokerage: 0,
+          netPnl: totalPnl
+        };
+      });
+
+      setPandlData(rows);
     } catch (error) {
       console.error('Error loading P&L data:', error);
     } finally {

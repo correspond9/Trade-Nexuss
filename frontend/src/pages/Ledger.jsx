@@ -15,176 +15,80 @@ const Ledger = () => {
   const [showDetails, setShowDetails] = useState(false);
   const [summary, setSummary] = useState(null);
 
-  // Mock transaction data
-  const mockTransactions = [
-    {
-      id: 1,
-      date: '2024-01-28',
-      time: '09:15:23',
-      type: 'CREDIT',
-      category: 'FUND_ADD',
-      description: 'Funds added via UPI',
-      amount: 50000.00,
-      balance: 150000.00,
-      reference: 'UPI123456789',
-      status: 'COMPLETED',
-      userId: 1,
-      userName: 'admin'
-    },
-    {
-      id: 2,
-      date: '2024-01-28',
-      time: '09:30:45',
-      type: 'DEBIT',
-      category: 'TRADE',
-      description: 'BUY RELIANCE EQ 100 @ 2456.75',
-      amount: -245675.00,
-      balance: 1450325.00,
-      reference: 'ORD001',
-      status: 'COMPLETED',
-      userId: 1,
-      userName: 'admin'
-    },
-    {
-      id: 3,
-      date: '2024-01-28',
-      time: '10:15:12',
-      type: 'CREDIT',
-      category: 'TRADE',
-      description: 'SELL RELIANCE EQ 100 @ 2489.50',
-      amount: 248950.00,
-      balance: 1699275.00,
-      reference: 'ORD002',
-      status: 'COMPLETED',
-      userId: 1,
-      userName: 'admin'
-    },
-    {
-      id: 4,
-      date: '2024-01-28',
-      time: '11:45:30',
-      type: 'DEBIT',
-      category: 'CHARGES',
-      description: 'Brokerage charges',
-      amount: -125.50,
-      balance: 1699150.00,
-      reference: 'BRK001',
-      status: 'COMPLETED',
-      userId: 1,
-      userName: 'admin'
-    },
-    {
-      id: 5,
-      date: '2024-01-27',
-      time: '14:20:15',
-      type: 'DEBIT',
-      category: 'WITHDRAWAL',
-      description: 'Bank withdrawal request',
-      amount: -25000.00,
-      balance: 145000.00,
-      reference: 'WD001',
-      status: 'PROCESSING',
-      userId: 1,
-      userName: 'admin'
-    },
-    {
-      id: 6,
-      date: '2024-01-27',
-      time: '15:30:45',
-      type: 'CREDIT',
-      category: 'PAYOUT',
-      description: 'Profit sharing payout',
-      amount: 12500.00,
-      balance: 170000.00,
-      reference: 'PAY001',
-      status: 'COMPLETED',
-      userId: 1,
-      userName: 'admin'
-    },
-    {
-      id: 7,
-      date: '2024-01-26',
-      time: '09:45:22',
-      type: 'DEBIT',
-      category: 'TAX',
-      description: 'GST on brokerage',
-      amount: -22.50,
-      balance: 157500.00,
-      reference: 'TAX001',
-      status: 'COMPLETED',
-      userId: 1,
-      userName: 'admin'
-    },
-    {
-      id: 8,
-      date: '2024-01-26',
-      time: '10:30:18',
-      type: 'CREDIT',
-      category: 'REFUND',
-      description: 'Order cancellation refund',
-      amount: 5000.00,
-      balance: 162500.00,
-      reference: 'REF001',
-      status: 'COMPLETED',
-      userId: 1,
-      userName: 'admin'
-    }
-  ];
-
-  const mockSummary = {
-    totalCredits: 316450.00,
-    totalDebits: 270822.50,
-    netBalance: 45627.50,
-    transactionCount: 8,
-    pendingTransactions: 1,
-    lastUpdated: '2024-01-28 11:45:30'
-  };
-
   useEffect(() => {
     fetchTransactions();
     fetchSummary();
   }, [dateRange, filterType]);
 
+  useEffect(() => {
+    fetchSummary();
+  }, [transactions]);
+
   const fetchTransactions = async () => {
     setLoading(true);
     try {
-      // In real implementation, this would call the API
-      // const response = await apiService.get(`/admin/ledger?range=${dateRange}&type=${filterType}`);
-      // setTransactions(response.data);
-      
-      // For now, use mock data
-      setTimeout(() => {
-        let filtered = mockTransactions;
-        
-        // Apply date filter
-        if (dateRange !== 'all') {
-          const days = parseInt(dateRange.replace('d', ''));
-          const cutoffDate = new Date();
-          cutoffDate.setDate(cutoffDate.getDate() - days);
-          filtered = filtered.filter(t => new Date(t.date) >= cutoffDate);
-        }
-        
-        // Apply type filter
-        if (filterType !== 'all') {
-          filtered = filtered.filter(t => t.type === filterType);
-        }
-        
-        setTransactions(filtered);
-        setLoading(false);
-      }, 1000);
+      const params = {};
+      if (user?.id) {
+        params.user_id = user.id;
+      }
+      const response = await apiService.get('/admin/ledger', params);
+      const data = response?.data || [];
+      let mapped = data.map((entry) => {
+        const createdAt = entry.created_at || new Date().toISOString();
+        const dateObj = new Date(createdAt);
+        const credit = Number(entry.credit || 0);
+        const debit = Number(entry.debit || 0);
+        return {
+          id: entry.id,
+          date: dateObj.toISOString().split('T')[0],
+          time: dateObj.toLocaleTimeString('en-IN'),
+          type: credit > 0 ? 'CREDIT' : 'DEBIT',
+          category: entry.entry_type || 'UNKNOWN',
+          description: entry.remarks || '-',
+          amount: credit > 0 ? credit : -debit,
+          balance: entry.balance || 0,
+          reference: String(entry.id),
+          status: 'COMPLETED',
+          userId: entry.user_id,
+          userName: user?.username || user?.full_name || 'user'
+        };
+      });
+
+      if (dateRange !== 'all') {
+        const days = parseInt(dateRange.replace('d', ''), 10);
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - days);
+        mapped = mapped.filter(t => new Date(t.date) >= cutoffDate);
+      }
+
+      if (filterType !== 'all') {
+        mapped = mapped.filter(t => t.type === filterType);
+      }
+
+      setTransactions(mapped);
     } catch (error) {
       console.error('Failed to fetch transactions:', error);
+    } finally {
       setLoading(false);
     }
   };
 
   const fetchSummary = async () => {
     try {
-      // In real implementation, this would call the API
-      // const response = await apiService.get(`/admin/ledger/summary?range=${dateRange}`);
-      // setSummary(response.data);
-      
-      setSummary(mockSummary);
+      const params = {};
+      if (user?.id) {
+        params.user_id = user.id;
+      }
+      const response = await apiService.get('/admin/ledger/summary', params);
+      const data = response?.data || {};
+      setSummary({
+        totalCredits: data.total_credit || 0,
+        totalDebits: data.total_debit || 0,
+        netBalance: (data.total_credit || 0) - (data.total_debit || 0),
+        transactionCount: transactions.length,
+        pendingTransactions: 0,
+        lastUpdated: new Date().toLocaleString('en-IN')
+      });
     } catch (error) {
       console.error('Failed to fetch summary:', error);
     }

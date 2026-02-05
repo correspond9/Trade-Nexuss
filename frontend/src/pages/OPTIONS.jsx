@@ -1,21 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuthoritativeOptionChain } from '../hooks/useAuthoritativeOptionChain';
+import normalizeUnderlying from '../utils/underlying';
 
 const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) => {
   const [underlyingPrice, setUnderlyingPrice] = useState(null);
   const [strikeInterval, setStrikeInterval] = useState(null);
 
   // Convert selectedIndex to symbol for API calls
-  const getSymbolFromIndex = (index) => {
-    switch(index) {
-      case 'NIFTY 50': return 'NIFTY';
-      case 'NIFTY BANK': return 'BANKNIFTY';
-      case 'SENSEX': return 'SENSEX';
-      default: return 'NIFTY';
-    }
-  };
-
-  const symbol = getSymbolFromIndex(selectedIndex);
+  const symbol = normalizeUnderlying(selectedIndex);
 
   // ✨ Use the authoritative hook to fetch realtime cached data
   const {
@@ -202,7 +194,7 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
             {/* CE Premium Column - Left */}
             <div className="flex items-center justify-between pr-2">
               <span className="text-sm font-semibold text-gray-900">
-                {strikeData.ltpCE > 0 ? strikeData.ltpCE.toFixed(2) : 'N/A'}
+                {strikeData.ltpCE > 0 ? strikeData.ltpCE.toFixed(2) : '0.00'}
               </span>
             <div className="flex space-x-1 ml-2">
                 <button
@@ -288,7 +280,7 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                 </button>
               </div>
               <span className="text-sm font-semibold text-gray-900">
-                {strikeData.ltpPE > 0 ? strikeData.ltpPE.toFixed(2) : 'N/A'}
+                {strikeData.ltpPE > 0 ? strikeData.ltpPE.toFixed(2) : '0.00'}
               </span>
             </div>
           </div>

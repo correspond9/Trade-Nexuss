@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
  * - Real-time data from central cache (WebSocket enhanced)
  * - Smart caching to reduce API calls
  * - Auto-refresh with configurable interval
- * - Error handling with fallback support
+ * - Error handling without fallback pricing
  * - Loading states and metadata
  */
 export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) => {
@@ -77,104 +77,6 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       return chainData;
 
     } catch (err) {
-      if (err.message === 'CACHE_MISS') {
-        try {
-          const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
-          
-          // Step 1: Fetch underlying LTP for estimation
-          const ltpResponse = await fetch(`${baseUrl}/market/underlying-ltp/${underlying}`);
-          let underlyingLtp = null;
-          if (ltpResponse.ok) {
-            const ltpData = await ltpResponse.json();
-            underlyingLtp = ltpData.ltp || ltpData.data?.ltp || null;
-          }
-
-          if (underlyingLtp) {
-            // Step 2: Fetch ATM engine generated strikes
-            const fallbackUrl = `${baseUrl}/option-chain/${underlying}?expiry=${encodeURIComponent(expiry)}&underlying_ltp=${underlyingLtp}`;
-            const fallbackResponse = await fetch(fallbackUrl);
-            if (fallbackResponse.ok) {
-              const fallbackData = await fallbackResponse.json();
-              const strikes = fallbackData?.strikes || [];
-              const strikeInterval = fallbackData?.strike_step || 100;
-              const atmStrike = fallbackData?.atm_strike || Math.round(underlyingLtp / strikeInterval) * strikeInterval;
-              
-              // Step 3: Fetch lot size for this underlying
-              let lotSize = null;
-              try {
-                const instrumentsResponse = await fetch(`${baseUrl}/instruments/search?q=${underlying}&limit=1`);
-                if (instrumentsResponse.ok) {
-                  const instrumentsData = await instrumentsResponse.json();
-                  if (instrumentsData.data && instrumentsData.data.length > 0) {
-                    lotSize = instrumentsData.data[0].lot_size || null;
-                  }
-                }
-              } catch (e) {
-                console.warn('[useAuthoritativeOptionChain] Could not fetch lot size:', e);
-              }
-              
-              // Step 4: Build normalized strike map with LTP fallback (underlying LTP as proxy)
-              // When no live prices available, use underlying LTP / number_of_strikes as rough estimate
-              const strikesMap = {};
-              const strikeEstimate = underlyingLtp * 0.1; // Rough estimate: 10% of underlying LTP
-              
-              strikes.forEach((strike) => {
-                const strikeKey = String(strike);
-                const isAtm = strike === atmStrike;
-                
-                // For options far from ATM, estimate is lower; for ATM and near, higher
-                const distanceFromAtm = Math.abs(strike - atmStrike) / strikeInterval;
-                const estimatedPremium = Math.max(0.05, strikeEstimate / (1 + distanceFromAtm * 0.5));
-                
-                strikesMap[strikeKey] = {
-                  strike_price: strike,
-                  CE: {
-                    token: fallbackData?.strikes_ce_pe?.[strikeKey]?.CE || `CE_${underlying}_${strike}_${expiry}`,
-                    ltp: isAtm ? estimatedPremium : estimatedPremium * 0.8, // ATM typically higher premium
-                    bid: isAtm ? estimatedPremium * 0.95 : estimatedPremium * 0.75,
-                    ask: isAtm ? estimatedPremium * 1.05 : estimatedPremium * 0.85,
-                    greeks: {},
-                    source: 'estimated_from_ltp'
-                  },
-                  PE: {
-                    token: fallbackData?.strikes_ce_pe?.[strikeKey]?.PE || `PE_${underlying}_${strike}_${expiry}`,
-                    ltp: isAtm ? estimatedPremium : estimatedPremium * 0.8,
-                    bid: isAtm ? estimatedPremium * 0.95 : estimatedPremium * 0.75,
-                    ask: isAtm ? estimatedPremium * 1.05 : estimatedPremium * 0.85,
-                    greeks: {},
-                    source: 'estimated_from_ltp'
-                  },
-                };
-              });
-
-              const chainData = {
-                underlying,
-                expiry,
-                lot_size: lotSize || null,
-                strike_interval: strikeInterval,
-                atm_strike: atmStrike,
-                strikes: strikesMap,
-                underlying_ltp: underlyingLtp,
-              };
-
-              console.log(`[useAuthoritativeOptionChain] 📊 Using fallback: ${Object.keys(strikesMap).length} strikes, ATM=${atmStrike}, LotSize=${lotSize}`);
-              
-              setData(chainData);
-              setTimestamp(new Date());
-              setCacheStats({ 
-                fallback: true, 
-                reason: 'cache_miss',
-                underlying_ltp: underlyingLtp,
-                estimated_premiums: true 
-              });
-              return chainData;
-            }
-          }
-        } catch (fallbackErr) {
-          console.error('[useAuthoritativeOptionChain] ❌ Fallback failed:', fallbackErr);
-        }
-      }
-
       const errorMsg = err.message || 'Failed to fetch option chain';
       console.error('[useAuthoritativeOptionChain] ❌', errorMsg);
       setError(errorMsg);

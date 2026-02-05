@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { apiService } from '../services/apiService';
 
 const randomInt = (min, max) =>
@@ -14,6 +14,8 @@ const enrichOrder = (o) => {
   const price = o.price;
   let leg1Price = price;
   let leg2Price = "-";
+  const nowDate = new Date();
+  const defaultDateTime = `${nowDate.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })} ${nowDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
 
   if (isSD) {
     // mock CE/PE prices around given price
@@ -23,81 +25,20 @@ const enrichOrder = (o) => {
 
   return {
     ...o,
-    orderId: randomId(),
-    uniqueId: randomUid(),
-    exchangeOrderId: randomExOrderId(),
+    orderId: o.orderId ?? randomId(),
+    uniqueId: o.uniqueId ?? randomUid(),
+    exchangeOrderId: o.exchangeOrderId ?? randomExOrderId(),
     triggerPrice: o.triggerPrice ?? 0,
     target: o.target ?? 0,
     stopLoss: o.stopLoss ?? 0,
     executedQty: o.executedQty ?? o.qty,
     executionPrice: o.executionPrice ?? o.price,
-    orderDateTime: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" }) + " 09:38",
-    exchangeTime: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" }) + " 09:38",
-    executionTime: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" }) + " 09:39",
+    orderDateTime: o.orderDateTime ?? defaultDateTime,
+    exchangeTime: o.exchangeTime ?? defaultDateTime,
+    executionTime: o.executionTime ?? defaultDateTime,
     leg1Price,
     leg2Price,
   };
-};
-
-const MockAppProvider = ({ children }) => {
-  const baseOrders = [
-    {
-      id: "1",
-      time: "9:38 AM",
-      exTime: "9:39 AM",
-      side: "SELL",
-      symbol: "NIFTY AUG 24650 SD 14 Aug",
-      orderMode: "MARKET",
-      productType: "NORMAL",
-      qty: 375,
-      price: 88.6,
-      status: "Executed",
-    },
-    {
-      id: "2",
-      time: "9:38 AM",
-      exTime: "9:39 AM",
-      side: "BUY",
-      symbol: "NIFTY AUG 24700 CE 14 Aug",
-      orderMode: "MARKET",
-      productType: "NORMAL",
-      qty: 750,
-      price: 22.05,
-      status: "Executed",
-    },
-    {
-      id: "3",
-      time: "9:38 AM",
-      exTime: "9:39 AM",
-      side: "BUY",
-      symbol: "NIFTY AUG 24550 PE 14 Aug",
-      orderMode: "LIMIT",
-      productType: "MIS",
-      qty: 750,
-      price: 16.85,
-      status: "Pending",
-    },
-    {
-      id: "4",
-      time: "9:38 AM",
-      exTime: "9:39 AM",
-      side: "SELL",
-      symbol: "NIFTY AUG 24600 SD 14 Aug",
-      orderMode: "MARKET",
-      productType: "NORMAL",
-      qty: 375,
-      price: 49.6,
-      status: "Executed",
-    },
-  ];
-
-  const orders = baseOrders.map(enrichOrder);
-
-  return (
-    <MockAppContext.Provider value={{ orders }}>
-      {children}
-    </MockAppContext.Provider>
-  );
 };
 
 // ------- Orders Tab -------
@@ -111,27 +52,66 @@ const OrdersTab = () => {
   });
   const [selectedOrderId, setSelectedOrderId] = useState(null);
 
+  const formatTime = (isoLike) => {
+    const date = new Date(isoLike || new Date().toISOString());
+    return date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const formatDateTime = (isoLike) => {
+    const date = new Date(isoLike || new Date().toISOString());
+    return `${date.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })} ${date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  const mapOrder = (order) => {
+    const createdAt = order.created_at || order.createdAt || order.updated_at || new Date().toISOString();
+    const updatedAt = order.updated_at || order.updatedAt || createdAt;
+    const qty = Number(order.quantity ?? order.qty ?? 0);
+    const price = Number(order.price ?? order.execution_price ?? order.executionPrice ?? 0);
+    return enrichOrder({
+      id: order.id ?? randomId(),
+      time: formatTime(createdAt),
+      exTime: formatTime(updatedAt),
+      side: String(order.transaction_type || order.side || 'BUY').toUpperCase(),
+      symbol: order.symbol || 'UNKNOWN',
+      orderMode: order.order_type || order.orderMode || 'MARKET',
+      productType: order.product_type || order.productType || 'MIS',
+      qty,
+      price,
+      status: order.status || 'PENDING',
+      triggerPrice: order.trigger_price ?? order.triggerPrice ?? 0,
+      target: order.target_price ?? order.target ?? 0,
+      stopLoss: order.stop_loss_price ?? order.stopLoss ?? 0,
+      executedQty: order.filled_qty ?? order.executedQty ?? qty,
+      executionPrice: order.execution_price ?? order.executionPrice ?? price,
+      orderDateTime: formatDateTime(createdAt),
+      exchangeTime: formatDateTime(updatedAt),
+      executionTime: formatDateTime(updatedAt)
+    });
+  };
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError('');
+
+      const response = await apiService.get('/trading/orders');
+      if (response && response.data) {
+        setOrders(response.data.map(mapOrder));
+      } else {
+        setOrders([]);
+      }
+    } catch (err) {
+      console.error('Error fetching orders:', err);
+      setError('Failed to load orders');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Fetch orders from API
   useEffect(() => {
-    const fetchOrders = async () => {
-      try {
-        setLoading(true);
-        setError('');
-        
-        const response = await apiService.get('/trading/orders');
-        if (response && response.data) {
-          setOrders(response.data);
-        }
-      } catch (err) {
-        console.error('Error fetching orders:', err);
-        setError('Failed to load orders');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchOrders();
-  }, []);
+  }, [fetchOrders]);
 
   // Manual refresh function
   const handleRefresh = () => {

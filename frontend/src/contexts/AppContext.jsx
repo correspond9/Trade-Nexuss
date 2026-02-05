@@ -63,7 +63,8 @@ export const AppProvider = ({ children }) => {
   // User management
   const createUser = useCallback(async (userData) => {
     try {
-      const newUser = await apiService.post('/users', userData);
+      const response = await apiService.post('/admin/users', userData);
+      const newUser = response?.data || response;
       setUsers(prev => [...prev, newUser]);
       return { success: true, data: newUser };
     } catch (err) {
@@ -74,7 +75,8 @@ export const AppProvider = ({ children }) => {
 
   const updateUser = useCallback(async (userId, userData) => {
     try {
-      const updatedUser = await apiService.put(`/users/${userId}`, userData);
+      const response = await apiService.put(`/admin/users/${userId}`, userData);
+      const updatedUser = response?.data || response;
       setUsers(prev => prev.map(user => 
         user.id === userId ? updatedUser : user
       ));
@@ -87,7 +89,7 @@ export const AppProvider = ({ children }) => {
 
   const deleteUser = useCallback(async (userId) => {
     try {
-      await apiService.delete(`/users/${userId}`);
+      await apiService.delete(`/admin/users/${userId}`);
       setUsers(prev => prev.filter(user => user.id !== userId));
       return { success: true };
     } catch (err) {
@@ -99,7 +101,8 @@ export const AppProvider = ({ children }) => {
   // Order management
   const createOrder = useCallback(async (orderData) => {
     try {
-      const newOrder = await apiService.post('/orders', orderData);
+      const response = await apiService.post('/trading/orders', orderData);
+      const newOrder = response?.data || response;
       setOrders(prev => [...prev, newOrder]);
       return { success: true, data: newOrder };
     } catch (err) {
@@ -124,7 +127,8 @@ export const AppProvider = ({ children }) => {
   // Position management
   const closePosition = useCallback(async (positionId) => {
     try {
-      const closedPosition = await apiService.post(`/positions/${positionId}/close`);
+      const response = await apiService.post(`/positions/${positionId}/close`);
+      const closedPosition = response?.data || response;
       setPositions(prev => prev.map(position => 
         position.id === positionId ? { ...position, ...closedPosition } : position
       ));
@@ -138,7 +142,8 @@ export const AppProvider = ({ children }) => {
   // Basket management
   const createBasket = useCallback(async (basketData) => {
     try {
-      const newBasket = await apiService.post('/baskets', basketData);
+      const response = await apiService.post('/trading/basket-orders', basketData);
+      const newBasket = response?.data || response;
       setBaskets(prev => [...prev, newBasket]);
       return { success: true, data: newBasket };
     } catch (err) {
@@ -151,7 +156,7 @@ export const AppProvider = ({ children }) => {
   const updateIntegrationSettings = useCallback(async (settings) => {
     try {
       // Save to backend
-      const response = await apiService.post('/integration/api-keys', settings);
+      const response = await apiService.post('/credentials/save', settings);
       
       if (response.success) {
         setIntegrationSettings(settings);

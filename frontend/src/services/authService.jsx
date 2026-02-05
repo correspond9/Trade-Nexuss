@@ -1,7 +1,7 @@
 // Simple Authentication Service
 class AuthService {
   constructor() {
-    this.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+    this.baseURL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
     this.cache = new Map();
   }
 
@@ -44,8 +44,10 @@ class AuthService {
       };
     } catch (error) {
       console.error('Login error:', error);
-      // Fallback to mock login for local development
-      return this.mockLogin(email, password);
+      return {
+        success: false,
+        error: error.message || 'Login failed'
+      };
     }
   }
 

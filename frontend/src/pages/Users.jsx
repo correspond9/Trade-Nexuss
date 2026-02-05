@@ -15,23 +15,6 @@ const Users = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddFundsModal, setShowAddFundsModal] = useState(false);
 
-  // Mock data from straddly.com
-  const mockUsers = [
-    {id: 7522, firstName: "C.K.", lastName: "Nanaiah", userType: "USER", email: "shithil7@gmail.com", createdOn: "07-07-2025", mobile: "919116555669", walletBalance: "₹0.00", status: "PENDING"},
-    {id: 7523, firstName: "Dhruv Kirit", lastName: "Gohil", userType: "USER", email: ".", createdOn: "07-07-2025", mobile: "91000000", walletBalance: "₹0.00", status: "PENDING"},
-    {id: 7524, firstName: "Nilesh Pravin", lastName: "Dhoka", userType: "USER", email: ".", createdOn: "07-07-2025", mobile: "910000", walletBalance: "₹0.00", status: "PENDING"},
-    {id: 7526, firstName: "Nikhil", lastName: "Malji", userType: "USER", email: "n8malji@gmail.com", createdOn: "07-07-2025", mobile: "919029648081", walletBalance: "-₹57,504.84", status: "ACTIVE"},
-    {id: 7527, firstName: "Demo", lastName: "Id", userType: "USER", email: ".", createdOn: "07-07-2025", mobile: "918928940525", walletBalance: "₹0.00", status: "ACTIVE"},
-    {id: 7528, firstName: "Arshiya Nusrat", lastName: "Nusrat", userType: "USER", email: "arshiyanusrats@gmail.com", createdOn: "07-07-2025", mobile: "919908583314", walletBalance: "₹15,533.94", status: "ACTIVE"},
-    {id: 7529, firstName: "Mohammed", lastName: "Anees", userType: "USER", email: "sayedaneesfx@gmail.com", createdOn: "07-07-2025", mobile: "919820083970", walletBalance: "₹0.00", status: "ACTIVE"},
-    {id: 7530, firstName: "Anum", lastName: "Begum", userType: "USER", email: "anumshaikh991@gmail.com", createdOn: "07-07-2025", mobile: "919326890165", walletBalance: "-₹8,847.70", status: "ACTIVE"},
-    {id: 7531, firstName: "Chirag", lastName: "Mulani", userType: "USER", email: "chiragmulani115@gmail.com", createdOn: "07-07-2025", mobile: "919898482851", walletBalance: "₹0.00", status: "ACTIVE"},
-    {id: 7532, firstName: "Naresh", lastName: "Bhajanlal", userType: "USER", email: ".", createdOn: "07-07-2025", mobile: "917021761400", walletBalance: "₹0.00", status: "ACTIVE"},
-    {id: 7533, firstName: "Raju", lastName: "Resu", userType: "USER", email: "raju.sd09@gmail.com", createdOn: "07-07-2025", mobile: "918639816880", walletBalance: "-₹1,55,593.54", status: "PENDING"},
-    {id: 7534, firstName: "vansh", lastName: ".", userType: "USER", email: ".", createdOn: "07-07-2025", mobile: "917015952926", walletBalance: "₹0.00", status: "ACTIVE"},
-    {id: 7535, firstName: "", lastName: "Sanjay Lade", userType: "USER", email: "", createdOn: "07-07-2025", mobile: "919769593034", walletBalance: "₹0.00", status: "ACTIVE"}
-  ];
-
   useEffect(() => {
     loadUsers();
   }, []);
@@ -39,8 +22,25 @@ const Users = () => {
   const loadUsers = async () => {
     setLoading(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setUsers(mockUsers);
+      const response = await apiService.get('/admin/users');
+      const data = response?.data || [];
+      const mapped = data.map((u) => {
+        const nameParts = (u.username || '').split(' ');
+        const firstName = nameParts.shift() || '';
+        const lastName = nameParts.join(' ');
+        return {
+          id: u.id,
+          firstName,
+          lastName,
+          userType: u.role || 'USER',
+          email: u.email || '-',
+          createdOn: u.created_at ? new Date(u.created_at).toLocaleDateString('en-IN') : '-',
+          mobile: '-',
+          walletBalance: `₹${Number(u.wallet_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          status: u.status || 'PENDING'
+        };
+      });
+      setUsers(mapped);
     } catch (error) {
       console.error('Error loading users:', error);
     } finally {

@@ -22,6 +22,7 @@ const SuperAdmin = React.lazy(() => import('./pages/SuperAdmin'));
 const Options = React.lazy(() => import('./pages/OPTIONS'));
 const Watchlist = React.lazy(() => import('./pages/WATCHLIST'));
 const StraddlyEmbed = React.lazy(() => import('./pages/StraddlyEmbed'));
+const Commodities = React.lazy(() => import('./pages/Commodities'));
 
 // Wrapper component for Watchlist to provide required props
 const WatchlistWrapper = () => {
@@ -109,6 +110,11 @@ const App = () => {
                 <Route path="trade" element={
                   <React.Suspense fallback={<LoadingSpinner />}>
                     <Trade />
+                  </React.Suspense>
+                } />
+                <Route path="commodities" element={
+                  <React.Suspense fallback={<LoadingSpinner />}>
+                    <Commodities />
                   </React.Suspense>
                 } />
               </Route>

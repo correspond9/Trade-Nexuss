@@ -17,205 +17,95 @@ const Payouts = () => {
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [summary, setSummary] = useState(null);
 
-  // Mock payout data
-  const mockPayouts = [
-    {
-      id: 1,
-      userId: 1,
-      userName: 'admin',
-      userEmail: 'correspond9@gmail.com',
-      type: 'WITHDRAWAL',
-      amount: 25000.00,
-      status: 'PROCESSING',
-      requestDate: '2024-01-28',
-      requestTime: '14:20:15',
-      processedDate: null,
-      processedTime: null,
-      method: 'BANK_TRANSFER',
-      bankDetails: {
-        accountName: 'Admin User',
-        accountNumber: '****1234',
-        bankName: 'HDFC Bank',
-        ifsc: 'HDFC0001234'
-      },
-      reference: 'WD001',
-      reason: 'Monthly profit withdrawal',
-      notes: 'User requested withdrawal for personal expenses',
-      approvedBy: null,
-      processedBy: null,
-      fees: 50.00,
-      netAmount: 24950.00
-    },
-    {
-      id: 2,
-      userId: 2,
-      userName: 'john_doe',
-      userEmail: 'john@example.com',
-      type: 'PAYOUT',
-      amount: 15000.00,
-      status: 'COMPLETED',
-      requestDate: '2024-01-27',
-      requestTime: '10:30:45',
-      processedDate: '2024-01-27',
-      processedTime: '16:45:22',
-      method: 'BANK_TRANSFER',
-      bankDetails: {
-        accountName: 'John Doe',
-        accountNumber: '****5678',
-        bankName: 'ICICI Bank',
-        ifsc: 'ICIC0005678'
-      },
-      reference: 'PAY002',
-      reason: 'Profit sharing',
-      notes: 'Monthly profit sharing payout',
-      approvedBy: 'admin',
-      processedBy: 'admin',
-      fees: 30.00,
-      netAmount: 14970.00
-    },
-    {
-      id: 3,
-      userId: 3,
-      userName: 'jane_smith',
-      userEmail: 'jane@example.com',
-      type: 'WITHDRAWAL',
-      amount: 5000.00,
-      status: 'REJECTED',
-      requestDate: '2024-01-26',
-      requestTime: '09:15:30',
-      processedDate: '2024-01-26',
-      processedTime: '11:30:15',
-      method: 'BANK_TRANSFER',
-      bankDetails: {
-        accountName: 'Jane Smith',
-        accountNumber: '****9012',
-        bankName: 'SBI Bank',
-        ifsc: 'SBIN0009012'
-      },
-      reference: 'WD003',
-      reason: 'Emergency withdrawal',
-      notes: 'Rejected: Insufficient balance',
-      approvedBy: 'admin',
-      processedBy: 'admin',
-      fees: 0.00,
-      netAmount: 0.00
-    },
-    {
-      id: 4,
-      userId: 4,
-      userName: 'bob_wilson',
-      userEmail: 'bob@example.com',
-      type: 'PAYOUT',
-      amount: 35000.00,
-      status: 'PENDING',
-      requestDate: '2024-01-25',
-      requestTime: '15:45:20',
-      processedDate: null,
-      processedTime: null,
-      method: 'BANK_TRANSFER',
-      bankDetails: {
-        accountName: 'Bob Wilson',
-        accountNumber: '****3456',
-        bankName: 'Axis Bank',
-        ifsc: 'UTIB0003456'
-      },
-      reference: 'PAY004',
-      reason: 'Quarterly bonus',
-      notes: 'Quarterly performance bonus payout',
-      approvedBy: null,
-      processedBy: null,
-      fees: 70.00,
-      netAmount: 34930.00
-    },
-    {
-      id: 5,
-      userId: 5,
-      userName: 'alice_brown',
-      userEmail: 'alice@example.com',
-      type: 'WITHDRAWAL',
-      amount: 10000.00,
-      status: 'COMPLETED',
-      requestDate: '2024-01-24',
-      requestTime: '11:20:10',
-      processedDate: '2024-01-24',
-      processedTime: '14:30:45',
-      method: 'BANK_TRANSFER',
-      bankDetails: {
-        accountName: 'Alice Brown',
-        accountNumber: '****7890',
-        bankName: 'Kotak Bank',
-        ifsc: 'KKBK0007890'
-      },
-      reference: 'WD005',
-      reason: 'Investment withdrawal',
-      notes: 'Partial withdrawal for investment purposes',
-      approvedBy: 'admin',
-      processedBy: 'admin',
-      fees: 20.00,
-      netAmount: 9980.00
-    }
-  ];
-
-  const mockSummary = {
-    totalPayouts: 90000.00,
-    pendingAmount: 35000.00,
-    processingAmount: 25000.00,
-    completedAmount: 30000.00,
-    rejectedAmount: 0.00,
-    totalRequests: 5,
-    pendingRequests: 1,
-    processingRequests: 1,
-    completedRequests: 2,
-    rejectedRequests: 1,
-    totalFees: 170.00,
-    lastUpdated: '2024-01-28 14:20:15'
-  };
-
   useEffect(() => {
     fetchPayouts();
-    fetchSummary();
   }, [dateRange, filterStatus]);
+
+  useEffect(() => {
+    fetchSummary();
+  }, [payouts]);
 
   const fetchPayouts = async () => {
     setLoading(true);
     try {
-      // In real implementation, this would call the API
-      // const response = await apiService.get(`/admin/payouts?range=${dateRange}&status=${filterStatus}`);
-      // setPayouts(response.data);
-      
-      // For now, use mock data
-      setTimeout(() => {
-        let filtered = mockPayouts;
-        
-        // Apply date filter
-        if (dateRange !== 'all') {
-          const days = parseInt(dateRange.replace('d', ''));
-          const cutoffDate = new Date();
-          cutoffDate.setDate(cutoffDate.getDate() - days);
-          filtered = filtered.filter(p => new Date(p.requestDate) >= cutoffDate);
-        }
-        
-        // Apply status filter
-        if (filterStatus !== 'all') {
-          filtered = filtered.filter(p => p.status === filterStatus);
-        }
-        
-        setPayouts(filtered);
-        setLoading(false);
-      }, 1000);
+      const [payoutsResponse, usersResponse] = await Promise.all([
+        apiService.get('/admin/payouts'),
+        apiService.get('/admin/users')
+      ]);
+
+      const users = usersResponse?.data || [];
+      const userMap = new Map(users.map((u) => [u.id, u]));
+      const data = payoutsResponse?.data || [];
+      let mapped = data.map((entry) => {
+        const createdAt = entry.created_at || new Date().toISOString();
+        const dateObj = new Date(createdAt);
+        const user = userMap.get(entry.user_id) || {};
+        const amount = Number(entry.debit || 0);
+        return {
+          id: entry.id,
+          userId: entry.user_id,
+          userName: user.username || `User ${entry.user_id}`,
+          userEmail: user.email || '-',
+          type: 'PAYOUT',
+          amount: amount,
+          status: 'COMPLETED',
+          requestDate: dateObj.toISOString().split('T')[0],
+          requestTime: dateObj.toLocaleTimeString('en-IN'),
+          processedDate: dateObj.toISOString().split('T')[0],
+          processedTime: dateObj.toLocaleTimeString('en-IN'),
+          method: 'BANK_TRANSFER',
+          bankDetails: {
+            accountName: user.username || '-',
+            accountNumber: 'N/A',
+            bankName: 'N/A',
+            ifsc: 'N/A'
+          },
+          reference: String(entry.id),
+          reason: entry.remarks || 'Payout',
+          notes: entry.remarks || '',
+          approvedBy: 'system',
+          processedBy: 'system',
+          fees: 0.00,
+          netAmount: amount
+        };
+      });
+
+      if (dateRange !== 'all') {
+        const days = parseInt(dateRange.replace('d', ''), 10);
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - days);
+        mapped = mapped.filter(p => new Date(p.requestDate) >= cutoffDate);
+      }
+
+      if (filterStatus !== 'all') {
+        mapped = mapped.filter(p => p.status === filterStatus);
+      }
+
+      setPayouts(mapped);
     } catch (error) {
       console.error('Failed to fetch payouts:', error);
+    } finally {
       setLoading(false);
     }
   };
 
   const fetchSummary = async () => {
     try {
-      // In real implementation, this would call the API
-      // const response = await apiService.get(`/admin/payouts/summary?range=${dateRange}`);
-      // setSummary(response.data);
-      
-      setSummary(mockSummary);
+      const totalPayouts = payouts.reduce((sum, p) => sum + (p.amount || 0), 0);
+      setSummary({
+        totalPayouts: totalPayouts,
+        pendingAmount: 0,
+        processingAmount: 0,
+        completedAmount: totalPayouts,
+        rejectedAmount: 0,
+        totalRequests: payouts.length,
+        pendingRequests: 0,
+        processingRequests: 0,
+        completedRequests: payouts.length,
+        rejectedRequests: 0,
+        totalFees: 0,
+        lastUpdated: new Date().toLocaleString('en-IN')
+      });
     } catch (error) {
       console.error('Failed to fetch summary:', error);
     }

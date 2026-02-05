@@ -17,105 +17,60 @@ const PositionsUserwise = () => {
   const loadUserPositions = async () => {
     setLoading(true);
     try {
-      // Mock data matching straddly.com structure
-      const mockData = [
-        {
-          userId: '7522',
-          userName: 'C.K. Nanaiah',
-          profit: 5075.00,
-          stopLoss: 2500.00,
-          trialBy: 100000.00,
-          trialAfter: 105075.00,
-          fund: 50000.00,
-          pandl: 5075.00,
-          pandlPercentage: 10.15,
-          positions: [
-            {
-              id: 1,
-              symbol: 'RELIANCE-EQ',
-              exchange: 'NSE',
-              product: 'MIS',
-              quantity: 100,
-              avgPrice: 2500.50,
-              ltp: 2520.75,
-              pnl: 2075.00,
-              type: 'OPEN'
-            },
-            {
-              id: 2,
-              symbol: 'TCS-EQ', 
-              exchange: 'NSE',
-              product: 'NORMAL',
-              quantity: 50,
-              avgPrice: 3450.75,
-              ltp: 3520.75,
-              pnl: 3500.00,
-              type: 'OPEN'
-            }
-          ]
-        },
-        {
-          userId: '7523',
-          userName: 'Demo User',
-          profit: -1250.00,
-          stopLoss: 3000.00,
-          trialBy: 75000.00,
-          trialAfter: 73750.00,
-          fund: 25000.00,
-          pandl: -1250.00,
-          pandlPercentage: -5.00,
-          positions: [
-            {
-              id: 3,
-              symbol: 'INFY-EQ',
-              exchange: 'NSE',
-              product: 'MIS',
-              quantity: 75,
-              avgPrice: 1550.25,
-              ltp: 1530.50,
-              pnl: -1481.25,
-              type: 'OPEN'
-            }
-          ]
-        },
-        {
-          userId: '7524',
-          userName: 'Test Trader',
-          profit: 8900.00,
-          stopLoss: 2000.00,
-          trialBy: 120000.00,
-          trialAfter: 128900.00,
-          fund: 75000.00,
-          pandl: 8900.00,
-          pandlPercentage: 11.87,
-          positions: [
-            {
-              id: 4,
-              symbol: 'HDFC-EQ',
-              exchange: 'NSE',
-              product: 'NORMAL',
-              quantity: 150,
-              avgPrice: 1450.00,
-              ltp: 1505.50,
-              pnl: 8325.00,
-              type: 'OPEN'
-            },
-            {
-              id: 5,
-              symbol: 'SBIN-EQ',
-              exchange: 'NSE',
-              product: 'MIS',
-              quantity: 200,
-              avgPrice: 550.25,
-              ltp: 558.75,
-              pnl: 1700.00,
-              type: 'OPEN'
-            }
-          ]
-        }
-      ];
-      
-      setUserPositions(mockData);
+      const [positionsResponse, usersResponse] = await Promise.all([
+        apiService.get('/portfolio/positions'),
+        apiService.get('/admin/users')
+      ]);
+
+      const users = usersResponse?.data || [];
+      const userMap = new Map(users.map((u) => [u.id, u]));
+      const positions = positionsResponse?.data || [];
+
+      const grouped = new Map();
+      positions.forEach((pos) => {
+        const userId = pos.user_id;
+        const entry = grouped.get(userId) || { user: userMap.get(userId), positions: [] };
+        entry.positions.push(pos);
+        grouped.set(userId, entry);
+      });
+
+      const mapped = Array.from(grouped.entries()).map(([userId, entry]) => {
+        const user = entry.user || {};
+        const fund = Number(user.wallet_balance || 0);
+        const positionsList = entry.positions.map((pos) => {
+          const ltp = pos.quantity ? pos.avg_price + (pos.mtm / pos.quantity) : pos.avg_price;
+          const pnl = (pos.mtm || 0) + (pos.realizedPnl || 0);
+          return {
+            id: pos.id,
+            symbol: pos.symbol,
+            exchange: pos.exchange_segment,
+            product: pos.product_type,
+            quantity: pos.quantity,
+            avgPrice: pos.avg_price,
+            ltp: ltp,
+            pnl: pnl,
+            type: pos.status
+          };
+        });
+
+        const profit = positionsList.reduce((sum, pos) => sum + (pos.pnl || 0), 0);
+        const pandlPercentage = fund ? (profit / fund) * 100 : 0;
+
+        return {
+          userId: String(userId),
+          userName: user.username || `User ${userId}`,
+          profit: profit,
+          stopLoss: 0.0,
+          trialBy: fund,
+          trialAfter: fund + profit,
+          fund: fund,
+          pandl: profit,
+          pandlPercentage: pandlPercentage,
+          positions: positionsList
+        };
+      });
+
+      setUserPositions(mapped);
     } catch (error) {
       console.error('Error loading user positions:', error);
     } finally {

@@ -24,119 +24,42 @@ const PositionsMIS = () => {
   const loadPositions = async () => {
     setLoading(true);
     try {
-      // Mock live MIS trades data
-      const mockData = [
-        {
-          id: 1,
-          userId: '7522',
-          userName: 'C.K. Nanaiah',
-          symbol: 'RELIANCE-EQ',
-          exchange: 'NSE',
-          product: 'MIS',
-          quantity: 100,
-          avgPrice: 2500.50,
-          ltp: 2520.75,
-          pnl: 2075.00,
-          pnlPercentage: 0.83,
-          tradeTime: '09:15:30',
-          orderType: 'BUY',
-          status: 'OPEN',
-          dayChange: 20.75,
-          dayChangePercentage: 0.83
-        },
-        {
-          id: 2,
-          userId: '7523',
-          userName: 'Dhruv Kirit Gohil',
-          symbol: 'TCS-EQ',
-          exchange: 'NSE',
-          product: 'MIS',
-          quantity: 50,
-          avgPrice: 3200.00,
-          ltp: 3185.25,
-          pnl: -737.50,
-          pnlPercentage: -0.46,
-          tradeTime: '09:16:45',
-          orderType: 'SELL',
-          status: 'OPEN',
-          dayChange: -14.75,
-          dayChangePercentage: -0.46
-        },
-        {
-          id: 3,
-          userId: '7524',
-          userName: 'Test Trader',
-          symbol: 'INFY-EQ',
-          exchange: 'NSE',
-          product: 'MIS',
-          quantity: 75,
-          avgPrice: 1550.25,
-          ltp: 1530.50,
-          pnl: -1481.25,
-          pnlPercentage: -1.27,
-          tradeTime: '09:18:12',
-          orderType: 'SELL',
-          status: 'OPEN',
-          dayChange: -19.75,
-          dayChangePercentage: -1.27
-        },
-        {
-          id: 4,
-          userId: '7525',
-          userName: 'Demo User',
-          symbol: 'HDFC-EQ',
-          exchange: 'NSE',
-          product: 'MIS',
-          quantity: 150,
-          avgPrice: 1450.00,
-          ltp: 1505.50,
-          pnl: 8325.00,
-          pnlPercentage: 3.83,
-          tradeTime: '09:20:30',
-          orderType: 'BUY',
-          status: 'OPEN',
-          dayChange: 55.50,
-          dayChangePercentage: 3.83
-        },
-        {
-          id: 5,
-          userId: '7526',
-          userName: 'Live Trader',
-          symbol: 'SBIN-EQ',
-          exchange: 'NSE',
-          product: 'MIS',
-          quantity: 200,
-          avgPrice: 550.25,
-          ltp: 558.75,
-          pnl: 1700.00,
-          pnlPercentage: 1.55,
-          tradeTime: '09:22:15',
-          orderType: 'BUY',
-          status: 'OPEN',
-          dayChange: 8.50,
-          dayChangePercentage: 1.55
-        },
-        {
-          id: 6,
-          userId: '7522',
-          userName: 'C.K. Nanaiah',
-          symbol: 'WIPRO-EQ',
-          exchange: 'NSE',
-          product: 'MIS',
-          quantity: 80,
-          avgPrice: 420.50,
-          ltp: 425.75,
-          pnl: 420.00,
-          pnlPercentage: 1.25,
-          tradeTime: '09:25:00',
-          orderType: 'BUY',
-          status: 'OPEN',
-          dayChange: 5.25,
-          dayChangePercentage: 1.25
-        }
-      ];
-      
-      setPositions(mockData);
+      const [positionsResponse, usersResponse] = await Promise.all([
+        apiService.get('/portfolio/positions'),
+        apiService.get('/admin/users')
+      ]);
+
+      const users = usersResponse?.data || [];
+      const userMap = new Map(users.map((u) => [u.id, u.username || `User ${u.id}`]));
+      const data = (positionsResponse?.data || []).filter((pos) => pos.product_type === 'MIS');
+      const mapped = data.map((pos) => {
+        const ltp = pos.quantity ? pos.avg_price + (pos.mtm / pos.quantity) : pos.avg_price;
+        const pnl = (pos.mtm || 0) + (pos.realizedPnl || 0);
+        const notional = Math.abs((pos.avg_price || 0) * (pos.quantity || 0));
+        const pnlPercentage = notional ? (pnl / notional) * 100 : 0;
+        const dayChange = ltp - (pos.avg_price || 0);
+        const dayChangePercentage = pos.avg_price ? (dayChange / pos.avg_price) * 100 : 0;
+        return {
+          id: pos.id,
+          userId: String(pos.user_id),
+          userName: userMap.get(pos.user_id) || `User ${pos.user_id}`,
+          symbol: pos.symbol,
+          exchange: pos.exchange_segment,
+          product: pos.product_type,
+          quantity: pos.quantity,
+          avgPrice: pos.avg_price,
+          ltp: ltp,
+          pnl: pnl,
+          pnlPercentage: pnlPercentage,
+          tradeTime: pos.updated_at ? new Date(pos.updated_at).toLocaleTimeString('en-IN') : '',
+          orderType: pos.quantity >= 0 ? 'BUY' : 'SELL',
+          status: pos.status,
+          dayChange: dayChange,
+          dayChangePercentage: dayChangePercentage
+        };
+      });
+
+      setPositions(mapped);
       setLastUpdate(new Date());
     } catch (error) {
       console.error('Error loading MIS positions:', error);

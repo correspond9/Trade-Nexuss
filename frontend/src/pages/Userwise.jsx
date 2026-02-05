@@ -14,58 +14,6 @@ const Userwise = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
 
-  // Mock user statistics data
-  const mockUserStats = {
-    overview: {
-      totalTrades: 1247,
-      winningTrades: 743,
-      losingTrades: 504,
-      winRate: 59.5,
-      totalPnL: 45890.50,
-      totalVolume: 2847650.00,
-      averageTradeSize: 2283.45,
-      sharpeRatio: 1.34,
-      maxDrawdown: -8.2
-    },
-    performance: {
-      daily: [
-        { date: '2024-01-22', pnl: 1250.50, trades: 12, winRate: 66.7 },
-        { date: '2024-01-23', pnl: -450.25, trades: 8, winRate: 37.5 },
-        { date: '2024-01-24', pnl: 2100.75, trades: 15, winRate: 73.3 },
-        { date: '2024-01-25', pnl: 890.00, trades: 10, winRate: 60.0 },
-        { date: '2024-01-26', pnl: -320.15, trades: 6, winRate: 33.3 },
-        { date: '2024-01-27', pnl: 1560.30, trades: 14, winRate: 71.4 },
-        { date: '2024-01-28', pnl: 2340.80, trades: 18, winRate: 77.8 }
-      ],
-      weekly: [
-        { week: 'W1', pnl: 5230.25, trades: 67, winRate: 61.2 },
-        { week: 'W2', pnl: 8450.80, trades: 89, winRate: 65.2 },
-        { week: 'W3', pnl: -1230.50, trades: 45, winRate: 42.2 },
-        { week: 'W4', pnl: 12440.95, trades: 112, winRate: 68.8 }
-      ],
-      monthly: [
-        { month: 'Oct', pnl: 12450.75, trades: 287, winRate: 58.5 },
-        { month: 'Nov', pnl: 18900.25, trades: 342, winRate: 62.3 },
-        { month: 'Dec', pnl: 28760.50, trades: 418, winRate: 64.1 },
-        { month: 'Jan', pnl: 45890.50, trades: 524, winRate: 59.5 }
-      ]
-    },
-    instruments: [
-      { symbol: 'RELIANCE', trades: 145, pnl: 8450.25, winRate: 68.3, volume: 245000.00 },
-      { symbol: 'TCS', trades: 98, pnl: 5230.50, winRate: 72.4, volume: 189000.00 },
-      { symbol: 'HDFCBANK', trades: 87, pnl: 3120.75, winRate: 64.4, volume: 156000.00 },
-      { symbol: 'INFY', trades: 76, pnl: 2890.00, winRate: 59.2, volume: 134000.00 },
-      { symbol: 'NIFTY', trades: 234, pnl: 15670.80, winRate: 61.5, volume: 567000.00 }
-    ],
-    recentTrades: [
-      { id: 1, symbol: 'RELIANCE', type: 'BUY', quantity: 100, price: 2456.75, pnl: 1250.50, time: '09:15:23', status: 'PROFIT' },
-      { id: 2, symbol: 'TCS', type: 'SELL', quantity: 50, price: 3890.25, pnl: -450.25, time: '09:45:12', status: 'LOSS' },
-      { id: 3, symbol: 'NIFTY', type: 'BUY', quantity: 75, price: 19845.30, pnl: 2100.75, time: '10:15:45', status: 'PROFIT' },
-      { id: 4, symbol: 'HDFCBANK', type: 'SELL', quantity: 150, price: 1678.90, pnl: 890.00, time: '11:30:22', status: 'PROFIT' },
-      { id: 5, symbol: 'INFY', type: 'BUY', quantity: 200, price: 1456.75, pnl: -320.15, time: '14:20:18', status: 'LOSS' }
-    ]
-  };
-
   useEffect(() => {
     if (selectedUser) {
       fetchUserStats();
@@ -75,17 +23,74 @@ const Userwise = () => {
   const fetchUserStats = async () => {
     setLoading(true);
     try {
-      // In real implementation, this would call the API
-      // const response = await apiService.get(`/admin/users/${selectedUser.id}/stats?range=${dateRange}`);
-      // setUserStats(response.data);
-      
-      // For now, use mock data
-      setTimeout(() => {
-        setUserStats(mockUserStats);
-        setLoading(false);
-      }, 1000);
+      const [ordersResponse, positionsResponse] = await Promise.all([
+        apiService.get('/trading/orders', { user_id: selectedUser.id }),
+        apiService.get('/portfolio/positions', { user_id: selectedUser.id })
+      ]);
+
+      const orders = ordersResponse?.data || [];
+      const positions = positionsResponse?.data || [];
+
+      const totalTrades = orders.length;
+      const pnlByPosition = positions.map((pos) => Number(pos.mtm || 0) + Number(pos.realizedPnl || 0));
+      const winningTrades = pnlByPosition.filter((p) => p > 0).length;
+      const losingTrades = pnlByPosition.filter((p) => p < 0).length;
+      const winRate = winningTrades + losingTrades > 0 ? (winningTrades / (winningTrades + losingTrades)) * 100 : 0;
+      const totalPnL = pnlByPosition.reduce((sum, p) => sum + p, 0);
+      const totalVolume = orders.reduce((sum, o) => sum + (Number(o.quantity || 0) * Number(o.price || 0)), 0);
+      const averageTradeSize = totalTrades ? totalVolume / totalTrades : 0;
+
+      const instrumentsMap = new Map();
+      orders.forEach((o) => {
+        const symbol = o.symbol || 'UNKNOWN';
+        const entry = instrumentsMap.get(symbol) || { trades: 0, pnl: 0, volume: 0 };
+        entry.trades += 1;
+        entry.volume += Number(o.quantity || 0) * Number(o.price || 0);
+        instrumentsMap.set(symbol, entry);
+      });
+
+      const instruments = Array.from(instrumentsMap.entries()).map(([symbol, info]) => ({
+        symbol,
+        trades: info.trades,
+        pnl: info.pnl,
+        winRate: 0,
+        volume: info.volume
+      }));
+
+      const recentTrades = orders.slice(0, 10).map((o) => ({
+        id: o.id,
+        symbol: o.symbol || 'UNKNOWN',
+        type: o.transaction_type || 'BUY',
+        quantity: Number(o.quantity || 0),
+        price: Number(o.price || 0),
+        pnl: 0,
+        time: o.created_at ? new Date(o.created_at).toLocaleTimeString('en-IN') : '',
+        status: 'N/A'
+      }));
+
+      setUserStats({
+        overview: {
+          totalTrades,
+          winningTrades,
+          losingTrades,
+          winRate,
+          totalPnL,
+          totalVolume,
+          averageTradeSize,
+          sharpeRatio: 0,
+          maxDrawdown: 0
+        },
+        performance: {
+          daily: [],
+          weekly: [],
+          monthly: []
+        },
+        instruments,
+        recentTrades
+      });
     } catch (error) {
       console.error('Failed to fetch user stats:', error);
+    } finally {
       setLoading(false);
     }
   };

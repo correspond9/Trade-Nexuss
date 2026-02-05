@@ -25,151 +25,44 @@ const PositionsNormal = () => {
   const loadPositions = async () => {
     setLoading(true);
     try {
-      // Mock Normal (carry forward) positions data
-      const mockData = [
-        {
-          id: 1,
-          userId: '7527',
-          userName: 'Carry Forward Trader 1',
-          symbol: 'RELIANCE-EQ',
-          exchange: 'NSE',
-          product: 'NORMAL',
-          quantity: 200,
-          avgPrice: 2450.00,
-          ltp: 2520.75,
-          pnl: 14150.00,
-          pnlPercentage: 2.89,
-          tradeDate: '2024-01-15',
-          carryForwardDays: 14,
+      const [positionsResponse, usersResponse] = await Promise.all([
+        apiService.get('/portfolio/positions'),
+        apiService.get('/admin/users')
+      ]);
+
+      const users = usersResponse?.data || [];
+      const userMap = new Map(users.map((u) => [u.id, u.username || `User ${u.id}`]));
+      const data = (positionsResponse?.data || []).filter((pos) => pos.product_type === 'NORMAL');
+      const mapped = data.map((pos) => {
+        const ltp = pos.quantity ? pos.avg_price + (pos.mtm / pos.quantity) : pos.avg_price;
+        const pnl = (pos.mtm || 0) + (pos.realizedPnl || 0);
+        const notional = Math.abs((pos.avg_price || 0) * (pos.quantity || 0));
+        const pnlPercentage = notional ? (pnl / notional) * 100 : 0;
+        const dayChange = ltp - (pos.avg_price || 0);
+        const dayChangePercentage = pos.avg_price ? (dayChange / pos.avg_price) * 100 : 0;
+        return {
+          id: pos.id,
+          userId: String(pos.user_id),
+          userName: userMap.get(pos.user_id) || `User ${pos.user_id}`,
+          symbol: pos.symbol,
+          exchange: pos.exchange_segment,
+          product: pos.product_type,
+          quantity: pos.quantity,
+          avgPrice: pos.avg_price,
+          ltp: ltp,
+          pnl: pnl,
+          pnlPercentage: pnlPercentage,
+          tradeDate: pos.updated_at ? new Date(pos.updated_at).toISOString().split('T')[0] : '',
+          carryForwardDays: 0,
           brokerage: 0.00,
-          status: 'OPEN',
-          dayChange: 70.75,
-          dayChangePercentage: 2.89,
-          holdingPeriod: '14 days'
-        },
-        {
-          id: 2,
-          userId: '7528',
-          userName: 'Long Term Investor',
-          symbol: 'TCS-EQ',
-          exchange: 'NSE',
-          product: 'NORMAL',
-          quantity: 100,
-          avgPrice: 2950.00,
-          ltp: 3520.75,
-          pnl: 57075.00,
-          pnlPercentage: 19.35,
-          tradeDate: '2023-12-01',
-          carryForwardDays: 59,
-          brokerage: 0.00,
-          status: 'OPEN',
-          dayChange: 20.75,
-          dayChangePercentage: 0.59,
-          holdingPeriod: '59 days'
-        },
-        {
-          id: 3,
-          userId: '7529',
-          userName: 'Position Holder',
-          symbol: 'INFY-EQ',
-          exchange: 'NSE',
-          product: 'NORMAL',
-          quantity: 150,
-          avgPrice: 1350.25,
-          ltp: 1530.50,
-          pnl: 27037.50,
-          pnlPercentage: 13.33,
-          tradeDate: '2024-01-10',
-          carryForwardDays: 19,
-          brokerage: 0.00,
-          status: 'OPEN',
-          dayChange: -19.50,
-          dayChangePercentage: -1.26,
-          holdingPeriod: '19 days'
-        },
-        {
-          id: 4,
-          userId: '7530',
-          userName: 'Swing Trader',
-          symbol: 'HDFC-EQ',
-          exchange: 'NSE',
-          product: 'NORMAL',
-          quantity: 300,
-          avgPrice: 1380.00,
-          ltp: 1505.50,
-          pnl: 37650.00,
-          pnlPercentage: 9.09,
-          tradeDate: '2024-01-05',
-          carryForwardDays: 24,
-          brokerage: 0.00,
-          status: 'OPEN',
-          dayChange: 15.50,
-          dayChangePercentage: 1.03,
-          holdingPeriod: '24 days'
-        },
-        {
-          id: 5,
-          userId: '7531',
-          userName: 'Portfolio Manager',
-          symbol: 'SBIN-EQ',
-          exchange: 'NSE',
-          product: 'NORMAL',
-          quantity: 500,
-          avgPrice: 520.00,
-          ltp: 558.75,
-          pnl: 19375.00,
-          pnlPercentage: 7.45,
-          tradeDate: '2023-11-20',
-          carryForwardDays: 70,
-          brokerage: 0.00,
-          status: 'OPEN',
-          dayChange: 8.75,
-          dayChangePercentage: 1.57,
-          holdingPeriod: '70 days'
-        },
-        {
-          id: 6,
-          userId: '7532',
-          userName: 'Value Investor',
-          symbol: 'WIPRO-EQ',
-          exchange: 'NSE',
-          product: 'NORMAL',
-          quantity: 250,
-          avgPrice: 380.00,
-          ltp: 425.75,
-          pnl: 11437.50,
-          pnlPercentage: 12.05,
-          tradeDate: '2023-10-15',
-          carryForwardDays: 106,
-          brokerage: 0.00,
-          status: 'OPEN',
-          dayChange: 5.25,
-          dayChangePercentage: 1.25,
-          holdingPeriod: '106 days'
-        },
-        {
-          id: 7,
-          userId: '7527',
-          userName: 'Carry Forward Trader 1',
-          symbol: 'MARUTI-EQ',
-          exchange: 'NSE',
-          product: 'NORMAL',
-          quantity: 100,
-          avgPrice: 9800.00,
-          ltp: 10250.00,
-          pnl: 45000.00,
-          pnlPercentage: 4.59,
-          tradeDate: '2024-01-12',
-          carryForwardDays: 17,
-          brokerage: 0.00,
-          status: 'OPEN',
-          dayChange: 150.00,
-          dayChangePercentage: 1.49,
-          holdingPeriod: '17 days'
-        }
-      ];
-      
-      setPositions(mockData);
+          status: pos.status,
+          dayChange: dayChange,
+          dayChangePercentage: dayChangePercentage,
+          holdingPeriod: ''
+        };
+      });
+
+      setPositions(mapped);
       setLastUpdate(new Date());
     } catch (error) {
       console.error('Error loading Normal positions:', error);

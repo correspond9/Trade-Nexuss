@@ -7,6 +7,7 @@ const Sidebar = () => {
   const sidebarItems = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊' },
     { name: 'Trade', path: '/trade', icon: '💹' },
+    { name: 'Commodities', path: '/commodities', icon: '🛢️' },
     { name: 'Users', path: '/users', icon: '👥' },
     { name: 'Userwise', path: '/userwise', icon: '📈' },
     { name: 'Payouts', path: '/payouts', icon: '💰' },
