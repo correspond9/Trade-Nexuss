@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"chat.tools.terminal.autoApprove": {
+			"/^D:/4\\.PROJECTS/Broking_Terminal_V2/data_server_backend/\\.venv/Scripts/python\\.exe -c \"from dhanhq\\.marketfeed import DhanFeed; import inspect; print\\(\\[m for m in dir\\(DhanFeed\\) if not m\\.startswith\\('_'\\)\\]\\)\"$/": {
+				"approve": true,
+				"matchCommandLine": true
+			},
+			"/^D:/4\\.PROJECTS/Broking_Terminal_V2/data_server_backend/\\.venv/Scripts/python\\.exe -c \"from dhanhq\\.marketfeed import DhanFeed; import inspect; print\\('subscribe_symbols', inspect\\.signature\\(DhanFeed\\.subscribe_symbols\\)\\); print\\('subscribe_instruments', inspect\\.signature\\(DhanFeed\\.subscribe_instruments\\)\\); print\\('unsubscribe_symbols', inspect\\.signature\\(DhanFeed\\.unsubscribe_symbols\\)\\)\"$/": {
+				"approve": true,
+				"matchCommandLine": true
+			},
+			"/^D:/4\\.PROJECTS/Broking_Terminal_V2/data_server_backend/\\.venv/Scripts/python\\.exe -c \"import inspect; from dhanhq\\.marketfeed import DhanFeed; import dhanhq\\.marketfeed as mf; import textwrap; print\\(textwrap\\.dedent\\(inspect\\.getsource\\(DhanFeed\\.subscribe_symbols\\)\\)\\[:800\\]\\)\"$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
+		}
+	}
+}

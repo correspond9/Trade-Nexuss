@@ -12,7 +12,8 @@ from typing import Dict, Optional
 # Exchange codes understood by DhanHQ feed
 EXCHANGE_CODE_IDX = 0
 EXCHANGE_CODE_NSE = 1
-EXCHANGE_CODE_BSE = 2
+EXCHANGE_CODE_NSE_FNO = 2
+EXCHANGE_CODE_BSE = 4
 EXCHANGE_CODE_MCX = 5
 
 # Canonical index instruments we always want on feed

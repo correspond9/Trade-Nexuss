@@ -10,7 +10,21 @@ _lock = threading.Lock()
 def update_price(symbol: str, price: float):
     """Update price for a symbol"""
     with _lock:
-        prices[symbol] = price
+        # ✨ NEW: Handle both underlying and option symbols
+        # Extract underlying symbol from option tokens (e.g., CE_NIFTY_... -> NIFTY)
+        if "_" in symbol:
+            # This is an option token, extract underlying
+            parts = symbol.split("_")
+            if len(parts) >= 2:
+                underlying = parts[1]  # NIFTY from CE_NIFTY_...
+                if underlying in _DASHBOARD_SYMBOLS:
+                    prices[underlying] = price
+                    print(f"[PRICE] Updated {underlying} from option {symbol}: {price}")
+        else:
+            # This is a direct underlying symbol
+            if symbol in _DASHBOARD_SYMBOLS:
+                prices[symbol] = price
+                print(f"[PRICE] Updated {symbol}: {price}")
 
 def get_prices():
     """Get all dashboard prices"""

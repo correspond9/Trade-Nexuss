@@ -166,125 +166,129 @@ def _find_next_expiry(symbol: str, exchange_id: Optional[int] = None) -> Optiona
     return target[1]
 
 
-def load_tier_b_chains():
+async def load_tier_b_chains():
     """
-    PHASE 3: Pre-load ~2,272 Tier B subscriptions at startup
+    PHASE 3: Pre-load Tier B subscriptions at startup
     
     Tier B includes:
-    - Index options (NIFTY50, BANKNIFTY, SENSEX, FINNIFTY, MIDCPNIFTY, BANKEX)
-    - MCX futures and options (CRUDEOIL, NATURALGAS)
+    - Index options (NIFTY50, BANKNIFTY, SENSEX) from option chain service
+    - MCX futures and options (CRUDEOIL, NATURALGAS) from fallback
     
-    Total: ~2,272 subscriptions (9.1% of 25,000 limit)
+    Total: ~612 subscriptions from option chains + MCX contracts
     """
     try:
         from app.market.subscription_manager import SUBSCRIPTION_MGR
         from app.market.atm_engine import ATM_ENGINE
         from app.market.live_prices import get_prices
-        from app.market.instrument_master.registry import REGISTRY
+        from app.services.authoritative_option_chain_service import authoritative_option_chain_service
 
         print("\n" + "="*70)
-        print("[STARTUP-PHASE3] Loading Full Tier B Subscriptions (2,272 instruments)")
+        print("[STARTUP-PHASE3] Loading Tier B Subscriptions from Option Chain Service")
         print("="*70)
-
-        def _select_expiries(symbol: str, count: int) -> list:
-            expiries = REGISTRY.get_expiries_for_underlying(symbol) or REGISTRY.get_expiries_for_symbol(symbol)
-            return expiries[:count]
-
-        # Define Tier B instruments with dynamic expiries from instrument master
-        tier_b_instruments = [
-            ("NIFTY", _select_expiries("NIFTY", 16)),
-            ("BANKNIFTY", _select_expiries("BANKNIFTY", 7)),
-            ("SENSEX", _select_expiries("SENSEX", 7)),
-            ("FINNIFTY", _select_expiries("FINNIFTY", 7)),
-            ("MIDCPNIFTY", _select_expiries("MIDCPNIFTY", 7)),
-            ("BANKEX", _select_expiries("BANKEX", 7)),
-        ]
-        
-        mcx_instruments = [
-            ("CRUDEOIL", _select_expiries("CRUDEOIL", 4)),
-            ("NATURALGAS", _select_expiries("NATURALGAS", 4)),
-        ]
 
         all_prices = get_prices()
         total_subscribed = 0
         total_failed = 0
 
-        # Subscribe to index options
-        print("\n[INDEX OPTIONS] Subscribing to full option chains...")
-        for symbol, expiries in tier_b_instruments:
-            underlying_ltp = all_prices.get(symbol) or 25000  # Fallback if price not available yet
-            print(f"  {symbol}: {len(expiries)} expiries, LTP={underlying_ltp}")
+        # ✨ NEW: Load option chains from authoritative service
+        print("\n[INDEX OPTIONS] Loading from option chain service...")
+        try:
+            # Initialize and populate the option chain service
+            await authoritative_option_chain_service.populate_cache_with_market_aware_data()
             
-            for expiry in expiries:
-                option_chain = ATM_ENGINE.generate_chain(symbol, expiry, underlying_ltp)
-                strikes = option_chain["strikes"]
+            # Get available underlyings
+            underlyings = authoritative_option_chain_service.get_available_underlyings()
+            print(f"  Found underlyings: {underlyings}")
+            
+            for underlying in underlyings:
+                expiries = authoritative_option_chain_service.get_available_expiries(underlying)
+                print(f"  {underlying}: {len(expiries)} expiries")
                 
-                for strike in strikes:
-                    for option_type in ["CE", "PE"]:
-                        token = f"{symbol}_{expiry}_{strike}{option_type}"
-                        success, msg, ws_id = SUBSCRIPTION_MGR.subscribe(
-                            token=token,
-                            symbol=symbol,
-                            expiry=expiry,
-                            strike=float(strike),
-                            option_type=option_type,
-                            tier="TIER_B"
-                        )
-                        if success:
-                            total_subscribed += 1
+                underlying_ltp = all_prices.get(underlying) or 25000  # Fallback
+                
+                for expiry in expiries:
+                    # Get option chain from cache
+                    option_chain = authoritative_option_chain_service.get_option_chain_from_cache(underlying, expiry)
+                    if not option_chain:
+                        print(f"    ❌ No option chain for {underlying} {expiry}")
+                        continue
+                    
+                    # Subscribe all strikes
+                    strikes = option_chain.get('strikes', {})
+                    print(f"    📊 {expiry}: {len(strikes)} strikes")
+                    
+                    for strike_price, strike_data in strikes.items():
+                        # Subscribe CE option
+                        ce_token = strike_data.get('CE', {}).get('token')
+                        if ce_token:
+                            success, msg, ws_id = SUBSCRIPTION_MGR.subscribe(
+                                token=str(ce_token),
+                                symbol=underlying,
+                                expiry=expiry,
+                                strike=float(strike_price),
+                                option_type="CE",
+                                tier="TIER_B"
+                            )
+                            if success:
+                                total_subscribed += 1
+                            else:
+                                total_failed += 1
                         else:
                             total_failed += 1
-
-        print(f"  ✓ Index options subscribed: {total_subscribed}")
-
-        # Subscribe to MCX contracts
-        print("\n[MCX CONTRACTS] Subscribing to futures and options...")
-        mcx_subscribed = 0
-        for symbol, expiries in mcx_instruments:
-            underlying_ltp = all_prices.get(symbol) or 5500  # Fallback if price not available yet
-            print(f"  {symbol}: {len(expiries)} expiries, LTP={underlying_ltp}")
+                        
+                        # Subscribe PE
+                        pe_token = strike_data.get('PE', {}).get('token')
+                        if pe_token:
+                            success, msg, ws_id = SUBSCRIPTION_MGR.subscribe(
+                                token=str(pe_token),
+                                symbol=underlying,
+                                expiry=expiry,
+                                strike=float(strike_price),
+                                option_type="PE",
+                                tier="TIER_B"
+                            )
+                            if success:
+                                total_subscribed += 1
+                            else:
+                                total_failed += 1
             
-            for expiry in expiries:
-                # Subscribe to futures
-                token_fut = f"{symbol}_{expiry}_FUT"
-                success, msg, ws_id = SUBSCRIPTION_MGR.subscribe(
-                    token=token_fut,
-                    symbol=symbol,
-                    expiry=expiry,
-                    strike=None,
-                    option_type=None,
-                    tier="TIER_B"
-                )
-                if success:
-                    total_subscribed += 1
-                    mcx_subscribed += 1
-                else:
-                    total_failed += 1
+            print(f"  ✓ Index options subscribed: {total_subscribed}")
+            
+        except Exception as e:
+            print(f"  ❌ Failed to load option chains: {e}")
+            print(f"  ⚠️ Falling back to hardcoded indices...")
+            
+            # Fallback to hardcoded indices
+            tier_b_instruments = [
+                ("NIFTY", ["2026-02-10", "2026-02-17"]),  # Example expiries
+                ("BANKNIFTY", ["2026-02-10", "2026-02-17"]),
+                ("SENSEX", ["2026-02-10", "2026-02-17"]),
+            ]
+            
+            for symbol, expiries in tier_b_instruments:
+                underlying_ltp = all_prices.get(symbol) or 25000
+                print(f"  {symbol}: {len(expiries)} expiries, LTP={underlying_ltp}")
                 
-                # Subscribe to ATM ±2 options
-                option_chain = ATM_ENGINE.generate_chain(symbol, expiry, underlying_ltp)
-                strikes = option_chain["strikes"]
-                atm_idx = len(strikes) // 2
-                selected_strikes = strikes[max(0, atm_idx-2):min(len(strikes), atm_idx+3)]
-                
-                for strike in selected_strikes:
-                    for option_type in ["CE", "PE"]:
-                        token_opt = f"{symbol}_{expiry}_{strike}{option_type}"
-                        success, msg, ws_id = SUBSCRIPTION_MGR.subscribe(
-                            token=token_opt,
-                            symbol=symbol,
-                            expiry=expiry,
-                            strike=float(strike),
-                            option_type=option_type,
-                            tier="TIER_B"
-                        )
-                        if success:
-                            total_subscribed += 1
-                            mcx_subscribed += 1
-                        else:
-                            total_failed += 1
-
-        print(f"  ✓ MCX contracts subscribed: {mcx_subscribed}")
+                for expiry in expiries:
+                    # Generate ATM-based strikes (simplified)
+                    atm_strike = round(underlying_ltp / 50) * 50  # NIFTY step = 50
+                    strikes = [atm_strike + (i * 50) for i in range(-10, 11)]  # ATM ± 10 strikes
+                    
+                    for strike in strikes:
+                        for option_type in ["CE", "PE"]:
+                            token = f"{symbol}_{expiry}_{strike}{option_type}"
+                            success, msg, ws_id = SUBSCRIPTION_MGR.subscribe(
+                                token=token,
+                                symbol=symbol,
+                                expiry=expiry,
+                                strike=float(strike),
+                                option_type=option_type,
+                                tier="TIER_B"
+                            )
+                            if success:
+                                total_subscribed += 1
+                            else:
+                                total_failed += 1
 
         # Print summary
         stats = SUBSCRIPTION_MGR.get_ws_stats()
@@ -295,6 +299,11 @@ def load_tier_b_chains():
         print(f"✓ Total subscriptions: {stats['total_subscriptions']:,}")
         print(f"✓ System utilization: {stats['utilization_percent']:.1f}%")
         print(f"✓ Subscribed: {total_subscribed:,} | Failed: {total_failed:,}")
+        
+        # ✨ NEW: Sync subscriptions to database for persistence
+        print(f"\n[DB] Syncing subscriptions to database...")
+        SUBSCRIPTION_MGR.sync_to_db()
+        print(f"✓ Database sync completed")
         
         print(f"\nWebSocket Distribution:")
         for ws_id, count in sorted(stats['ws_usage'].items()):
@@ -309,7 +318,7 @@ def load_tier_b_chains():
         print(f"Continuing without Tier B pre-loading...")
         print("="*70 + "\n")
 
-def on_start():
+async def on_start():
     """Application startup - initialize managers and scheduler"""
     print("\n" + "="*70)
     print("[STARTUP] Initializing Broking Terminal V2 Backend")
@@ -351,7 +360,7 @@ def on_start():
     # Load Tier B chains (Phase 3) before starting the feed so default
     # subscriptions already exist when we compute initial targets.
     print("[STARTUP] Loading Tier B pre-loaded chains...")
-    load_tier_b_chains()
+    await load_tier_b_chains()
     
     # Start official Dhan WebSocket feed after Tier B is registered
     print("[STARTUP] Starting Dhan WebSocket feed...")

@@ -1,0 +1,96 @@
+"""Market Data Orchestrator core."""
+from __future__ import annotations
+
+import time
+from threading import RLock
+from typing import Dict, Optional, Tuple
+
+from app.market_orchestrator.exchange_router import ExchangeRouter
+from app.market_orchestrator.market_cache_manager import MarketCacheManager
+from app.market_orchestrator.reconnect_manager import ReconnectManager
+from app.market_orchestrator.session_manager import SessionManager
+from app.market_orchestrator.subscription_registry import SubscriptionEntry, SubscriptionRegistry
+from app.market_orchestrator.websocket_controller import WebSocketController
+
+
+class RestThrottle:
+    def __init__(self) -> None:
+        self._lock = RLock()
+        self._last_call: Dict[str, float] = {}
+
+    def wait_for_slot(self, key: str, min_interval: float) -> None:
+        with self._lock:
+            last = self._last_call.get(key, 0.0)
+            now = time.monotonic()
+            wait = min_interval - (now - last)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_call[key] = time.monotonic()
+
+
+class MarketDataOrchestrator:
+    def __init__(self) -> None:
+        self.registry = SubscriptionRegistry()
+        self.ws_controller = WebSocketController()
+        self.cache_manager = MarketCacheManager()
+        self.exchange_router = ExchangeRouter()
+        self.session_manager = SessionManager()
+        self.reconnect_manager = ReconnectManager()
+        self.rest_throttle = RestThrottle()
+        self.last_tick_time: Optional[float] = None
+        self._lock = RLock()
+
+    def subscribe(self, token: str, exchange: str, segment: str, symbol: str, expiry: Optional[str] = None, priority: Optional[str] = None, meta: Optional[Dict[str, object]] = None) -> Tuple[bool, str, Optional[int]]:
+        if self.registry.exists(token):
+            entry = self.registry.get(token)
+            return True, "already_subscribed", entry.websocket_id if entry else None
+
+        ok, ws_id, reason = self.ws_controller.add_token(token)
+        if not ok:
+            return False, reason, None
+
+        entry = SubscriptionEntry(
+            token=token,
+            exchange=exchange,
+            segment=segment,
+            symbol=symbol,
+            expiry=expiry,
+            websocket_id=ws_id,
+            active=True,
+            meta=meta or {},
+        )
+        self.registry.add(entry)
+        return True, "subscribed", ws_id
+
+    def unsubscribe(self, token: str) -> bool:
+        removed = self.ws_controller.remove_token(token)
+        self.registry.remove(token)
+        return removed
+
+    def on_tick(self, tick: Dict) -> None:
+        with self._lock:
+            self.last_tick_time = time.time()
+        self.cache_manager.update_from_tick(tick)
+        self.exchange_router.route_tick(tick)
+
+    def on_disconnect(self, ws_id: int, error: Optional[str] = None) -> None:
+        self.ws_controller.mark_inactive(ws_id)
+        self.reconnect_manager.mark_disconnected(ws_id, error=error)
+
+    def on_connected(self, ws_id: int, handle: object) -> None:
+        self.ws_controller.register_handle(ws_id, handle)
+        self.reconnect_manager.mark_connected(ws_id)
+
+    def rest_call(self, key: str, min_interval: float, func, *args, **kwargs):
+        self.rest_throttle.wait_for_slot(key, min_interval)
+        return func(*args, **kwargs)
+
+    def get_status(self) -> Dict[str, object]:
+        ws_status = self.ws_controller.get_status()
+        return {
+            "total_ws_connections": ws_status["total_ws_connections"],
+            "total_subscriptions": ws_status["total_subscriptions"],
+            "tokens_per_ws": ws_status["tokens_per_ws"],
+            "last_tick_time": self.last_tick_time,
+            "cache_status": self.cache_manager.cache_status(),
+        }

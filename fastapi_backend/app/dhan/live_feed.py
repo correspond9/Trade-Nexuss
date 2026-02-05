@@ -14,12 +14,20 @@ RATE LIMITING & CONNECTION PROTECTION:
 import threading
 import time
 import asyncio
+import importlib
+import inspect
 from datetime import datetime, timedelta
 from typing import Dict, Optional
-from dhanhq import DhanContext, dhanhq as DhanHQClient, MarketFeed
+from dhanhq import dhanhq as DhanHQClient
+
+try:
+    from dhanhq.marketfeed import DhanFeed as _DhanFeed
+except Exception:
+    _DhanFeed = None
 
 from app.market.live_prices import update_price
-from app.market.subscription_manager import SUBSCRIPTION_MGR
+from app.market.subscription_manager import SUBSCRIPTION_MGR, _resolve_security_metadata
+from app.market_orchestrator import get_orchestrator
 from app.market.security_ids import (
     EXCHANGE_CODE_BSE,
     EXCHANGE_CODE_IDX,
@@ -44,8 +52,98 @@ _EXPIRY_FORMATS = ("%d%b%Y", "%d%B%Y", "%d%b%y", "%Y-%m-%d")
 _REST_CLIENT_LOCK = threading.Lock()
 _REST_CLIENT: Optional[DhanHQClient] = None
 _LAST_CLOSE_CACHE: Dict[str, Dict[str, object]] = {}
+
+
+def _exchange_name_from_code(exchange_code: Optional[int], segment: Optional[str] = None) -> str:
+    if segment:
+        segment_upper = str(segment).upper()
+        if "MCX" in segment_upper:
+            return "MCX"
+        if "BSE" in segment_upper:
+            return "BSE"
+        if "NSE" in segment_upper or "NFO" in segment_upper:
+            return "NSE"
+    if exchange_code == EXCHANGE_CODE_MCX:
+        return "MCX"
+    if exchange_code == EXCHANGE_CODE_BSE:
+        return "BSE"
+    return "NSE"
+def _ensure_rest_client(creds) -> Optional[DhanHQClient]:
+    """Create/reuse a DhanHQ REST client for quote/close lookups."""
+    global _REST_CLIENT
+    if _REST_CLIENT:
+        return _REST_CLIENT
+    token = getattr(creds, "auth_token", None) or getattr(creds, "daily_token", None)
+    if not creds or not creds.client_id or not token:
+        return None
+    with _REST_CLIENT_LOCK:
+        if _REST_CLIENT:
+            return _REST_CLIENT
+        # Handle dhanhq client signature differences across versions
+        try:
+            _REST_CLIENT = DhanHQClient(creds.client_id, token)
+        except TypeError:
+            try:
+                _REST_CLIENT = DhanHQClient(creds.client_id)
+            except TypeError:
+                _REST_CLIENT = DhanHQClient(token)
+        return _REST_CLIENT
+
 _LAST_CLOSE_CACHE_LOCK = threading.Lock()
 _LAST_CLOSE_TTL = timedelta(hours=6)
+
+
+def _resolve_dhan_feed_class():
+    if _DhanFeed is not None:
+        return _DhanFeed
+    try:
+        marketfeed = importlib.import_module("dhanhq.marketfeed")
+    except Exception as exc:
+        raise ImportError("dhanhq.marketfeed not available") from exc
+
+    for name in (
+        "DhanFeed",
+        "MarketFeed",
+        "MarketFeedV2",
+        "DhanMarketFeed",
+        "MarketFeedWS",
+    ):
+        cls = getattr(marketfeed, name, None)
+        if cls is not None:
+            return cls
+    raise ImportError("No compatible Dhan feed class found in dhanhq.marketfeed")
+
+
+def _create_dhan_feed(client_id: str, token: str, instruments):
+    feed_cls = _resolve_dhan_feed_class()
+    try:
+        source = inspect.getsource(feed_cls)
+    except Exception:
+        source = ""
+
+    wants_creds = "get_client_id" in source or "get_access_token" in source
+    if wants_creds:
+        class _Creds:
+            def __init__(self, cid: str, tok: str):
+                self._cid = cid
+                self._tok = tok
+
+            def get_client_id(self):
+                return self._cid
+
+            def get_access_token(self):
+                return self._tok
+
+        creds_obj = _Creds(client_id, token)
+        try:
+            return feed_cls(creds_obj, instruments)
+        except TypeError:
+            return feed_cls(creds_obj, token, instruments)
+
+    try:
+        return feed_cls(client_id, token, instruments, version="v2")
+    except TypeError:
+        return feed_cls(client_id, token, instruments)
 
 # ==================== RATE LIMITING & CONNECTION PROTECTION ====================
 # Exponential backoff to avoid IP banning from DhanHQ API
@@ -134,23 +232,6 @@ def _exchange_segment_from_code(exchange_code: int) -> Optional[str]:
     return None
 
 
-def _ensure_rest_client(creds) -> Optional[DhanHQClient]:
-    """Create/reuse a DhanHQ REST client for quote/close lookups."""
-    global _REST_CLIENT
-    if _REST_CLIENT:
-        return _REST_CLIENT
-    token = getattr(creds, "auth_token", None) or getattr(creds, "daily_token", None)
-    if not creds or not creds.client_id or not token:
-        return None
-    with _REST_CLIENT_LOCK:
-        if _REST_CLIENT:
-            return _REST_CLIENT
-        dhan_context = DhanContext(client_id=creds.client_id, access_token=token)
-        dhan_client = DhanHQClient(dhan_context)
-        _REST_CLIENT = dhan_client
-        return _REST_CLIENT
-
-
 def _parse_last_close(response: Dict[str, object], exchange_segment: str, security_id: str) -> Optional[float]:
     """Parse last close from DhanHQ /marketfeed/quote response."""
     if not isinstance(response, dict):
@@ -227,6 +308,7 @@ def _get_last_close_price(security_id: str, exchange_code: Optional[int]) -> Opt
     try:
         response = client.quote_data({exchange_segment: [int(security_id)]})
         last_close = _parse_last_close(response, exchange_segment, security_id)
+
         if last_close is None:
             return None
         with _LAST_CLOSE_CACHE_LOCK:
@@ -317,13 +399,139 @@ def _refresh_subscription_map(subscriptions: Dict[str, Dict[str, object]]):
 
 def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
     """Return desired security targets keyed by security ID."""
-    security_targets = _build_default_index_targets()
-    security_targets.update(_resolve_mcx_feed_targets())
+    security_targets = {}
+    subscription_map = {}
+
+    def _ensure_mapper_loaded() -> None:
+        try:
+            from app.services.dhan_security_id_mapper import dhan_security_mapper
+            if dhan_security_mapper.security_id_cache:
+                return
+
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            if loop.is_running():
+                # Avoid blocking a running loop; skip and rely on later sync.
+                return
+
+            loop.run_until_complete(dhan_security_mapper.load_security_ids())
+        except Exception:
+            return
+    
+    # ✨ NEW: Include ALL Tier B subscriptions from subscription manager
+    try:
+        # ✨ CRITICAL: Load subscriptions from database first
+        SUBSCRIPTION_MGR._load_from_database()
+        from app.services.dhan_security_id_mapper import dhan_security_mapper
+        _ensure_mapper_loaded()
+        
+        tier_b_count = 0
+        for token, sub_info in SUBSCRIPTION_MGR.subscriptions.items():
+            symbol = (sub_info.get("symbol_canonical") or sub_info.get("symbol") or "").upper()
+            tier = sub_info.get("tier", "").upper()
+            
+            # Only include Tier B (always-on) subscriptions
+            if tier != "TIER_B":
+                continue
+                
+            # Resolve missing security metadata (DB-loaded subscriptions do not persist exchange/security_id)
+            sec_id = sub_info.get("security_id")
+            exchange = sub_info.get("exchange")
+            if not sec_id or exchange is None:
+                resolved = _resolve_security_metadata(
+                    symbol=symbol,
+                    expiry=sub_info.get("expiry"),
+                    strike=sub_info.get("strike"),
+                    option_type=sub_info.get("option_type"),
+                )
+                sec_id = resolved.get("security_id") or sec_id
+                exchange = resolved.get("exchange") if resolved.get("exchange") is not None else exchange
+
+            # Prefer real numeric security IDs for options from Dhan CSV mapper
+            opt_type = (sub_info.get("option_type") or "").upper()
+            if opt_type in ("CE", "PE"):
+                token_key = None
+                if isinstance(sec_id, str) and sec_id.startswith(("CE_", "PE_")):
+                    token_key = sec_id
+                elif isinstance(token, str) and token.startswith(("CE_", "PE_")):
+                    token_key = token
+                else:
+                    expiry_key = sub_info.get("expiry")
+                    strike_key = sub_info.get("strike")
+                    if symbol and expiry_key and strike_key is not None:
+                        token_key = f"{opt_type}_{symbol}_{float(strike_key)}_{expiry_key}"
+
+                if token_key:
+                    mapped_id = dhan_security_mapper.get_security_id(token_key)
+                    option_data = dhan_security_mapper.get_option_data(token_key) if mapped_id else None
+                    if mapped_id:
+                        sec_id = str(mapped_id)
+                        if option_data and exchange is None:
+                            segment = (option_data.get("segment") or "").upper()
+                            if "BSE" in segment and "FNO" in segment:
+                                exchange = 8
+                            else:
+                                exchange = 2
+
+            # Fallbacks (keep feed alive even if resolution fails)
+            if not sec_id:
+                sec_id = token
+            # Fallback exchange for options when metadata is missing or defaulted to index
+            if opt_type in ("CE", "PE") and (exchange is None or exchange == 0):
+                exchange = 8 if symbol in {"SENSEX", "BANKEX"} else 2
+            elif exchange is None:
+                exchange = 0
+            
+            # Skip non-numeric option tokens when mapper can't resolve
+            if opt_type in ("CE", "PE"):
+                try:
+                    int(str(sec_id))
+                except (TypeError, ValueError):
+                    continue
+
+            if not sec_id:
+                continue
+            
+            sec_id_str = str(sec_id)
+            security_targets[sec_id_str] = {
+                "exchange": exchange,
+                "symbol": symbol,
+            }
+            
+            # Build subscription map for option chains
+            expiry = sub_info.get("expiry")
+            strike = sub_info.get("strike")
+            option_type = sub_info.get("option_type")
+            
+            if expiry and (strike is not None) and option_type:
+                subscription_map[sec_id_str] = {
+                    "symbol": symbol,
+                    "expiry": expiry,
+                    "strike": strike,
+                    "option_type": option_type,
+                }
+            
+            tier_b_count += 1
+        
+        print(f"[SYNC] Found {tier_b_count} Tier B subscriptions to sync")
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to load Tier B subscriptions: {e}")
+        # Fallback to hardcoded defaults
+        security_targets = _build_default_index_targets()
+        security_targets.update(_resolve_mcx_feed_targets())
 
     # Include option instruments for NIFTY/BANKNIFTY/SENSEX (ATM-based strike windows)
     option_symbols = {"NIFTY", "BANKNIFTY", "SENSEX"}
-    subscription_map: Dict[str, Dict[str, object]] = {}
     try:
+        from app.services.dhan_security_id_mapper import dhan_security_mapper
         for _, sub_info in SUBSCRIPTION_MGR.subscriptions.items():
             symbol = (sub_info.get("symbol_canonical") or sub_info.get("symbol") or "").upper()
             option_type = (sub_info.get("option_type") or "").upper()
@@ -334,6 +542,47 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
 
             sec_id = sub_info.get("security_id")
             exchange = sub_info.get("exchange")
+            if not sec_id or exchange is None:
+                resolved = _resolve_security_metadata(
+                    symbol=symbol,
+                    expiry=sub_info.get("expiry"),
+                    strike=sub_info.get("strike"),
+                    option_type=option_type,
+                )
+                sec_id = resolved.get("security_id") or sec_id
+                exchange = resolved.get("exchange") if resolved.get("exchange") is not None else exchange
+
+            token_key = None
+            if isinstance(sec_id, str) and sec_id.startswith(("CE_", "PE_")):
+                token_key = sec_id
+            elif isinstance(token, str) and token.startswith(("CE_", "PE_")):
+                token_key = token
+            else:
+                expiry_key = sub_info.get("expiry")
+                strike_key = sub_info.get("strike")
+                if symbol and expiry_key and strike_key is not None:
+                    token_key = f"{option_type}_{symbol}_{float(strike_key)}_{expiry_key}"
+
+            if token_key:
+                mapped_id = dhan_security_mapper.get_security_id(token_key)
+                option_data = dhan_security_mapper.get_option_data(token_key) if mapped_id else None
+                if mapped_id:
+                    sec_id = str(mapped_id)
+                    if option_data and exchange is None:
+                        segment = (option_data.get("segment") or "").upper()
+                        if "BSE" in segment and "FNO" in segment:
+                            exchange = 8
+                        else:
+                            exchange = 2
+            if option_type in ("CE", "PE") and (exchange is None or exchange == 0):
+                exchange = 8 if symbol in {"SENSEX", "BANKEX"} else 2
+
+            if option_type in ("CE", "PE"):
+                try:
+                    int(str(sec_id))
+                except (TypeError, ValueError):
+                    continue
+
             if not sec_id or exchange is None:
                 continue
 
@@ -348,8 +597,15 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
                 "strike": sub_info.get("strike"),
                 "option_type": option_type,
             }
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[ERROR] Failed to load option subscriptions: {e}")
+
+    # Always include underlying index targets for live ATM/LTP updates
+    try:
+        default_index_targets = _build_default_index_targets()
+        security_targets.update(default_index_targets)
+    except Exception as e:
+        print(f"[ERROR] Failed to add default index targets: {e}")
 
     if not security_targets:
         # Absolute fallback to ensure feed never starves
@@ -367,6 +623,24 @@ def on_message_callback(feed, message):
     """Callback when market data is received"""
     if not message:
         return
+
+    def _extract_ltp(payload: Dict[str, object]) -> Optional[float]:
+        if not isinstance(payload, dict):
+            return None
+        for key in ("LTP", "ltp", "last_traded_price", "lastTradedPrice", "last_price", "lastPrice", "last"):
+            if key in payload and payload[key] is not None:
+                value = payload.get(key)
+                if isinstance(value, str):
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        continue
+                if isinstance(value, (int, float)):
+                    return float(value)
+        data = payload.get("data")
+        if isinstance(data, dict):
+            return _extract_ltp(data)
+        return None
     
     try:
         # Extract security_id from message
@@ -384,9 +658,7 @@ def on_message_callback(feed, message):
         # If this security_id is an option instrument, update option LTP in cache
         option_meta = _security_id_subscription_map.get(sec_id_str)
         if option_meta:
-            ltp = message.get("LTP")
-            if isinstance(ltp, str):
-                ltp = float(ltp)
+            ltp = _extract_ltp(message)
             if ltp is None or ltp == 0:
                 return
 
@@ -401,12 +673,27 @@ def on_message_callback(feed, message):
                 )
             except Exception as cache_e:
                 print(f"[WARN] Failed to update option cache for {sec_id_str}: {cache_e}")
+
+            try:
+                orchestrator = get_orchestrator()
+                exchange_name = _exchange_name_from_code(option_meta.get("exchange"), option_meta.get("segment"))
+                segment_name = (option_meta.get("segment") or exchange_name).upper()
+                orchestrator.on_tick({
+                    "exchange": exchange_name,
+                    "segment": segment_name,
+                    "symbol": option_meta.get("symbol"),
+                    "expiry": option_meta.get("expiry"),
+                    "strike": option_meta.get("strike"),
+                    "option_type": option_meta.get("option_type"),
+                    "ltp": ltp,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+            except Exception:
+                pass
             return
         
         # Extract LTP (Last Traded Price) for underlying
-        ltp = message.get("LTP")
-        if isinstance(ltp, str):
-            ltp = float(ltp)
+        ltp = _extract_ltp(message)
 
         if ltp is None or ltp == 0:
             exchange_code = _subscribed_securities.get(sec_id_str)
@@ -418,6 +705,23 @@ def on_message_callback(feed, message):
 
         update_price(symbol, ltp)
         print(f"[PRICE] {symbol} = {ltp}")
+
+        try:
+            orchestrator = get_orchestrator()
+            is_index = symbol in ("NIFTY", "BANKNIFTY", "SENSEX")
+            exchange_name = "NSE"
+            if is_index:
+                exchange_name = "NSE"
+            orchestrator.on_tick({
+                "exchange": exchange_name,
+                "segment": exchange_name,
+                "symbol": symbol,
+                "ltp": ltp,
+                "is_index": is_index,
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+        except Exception:
+            pass
         
         # ✨ NEW: Update the option chain cache with new underlying price
         # This ensures option strikes are re-estimated when underlying price changes
@@ -464,6 +768,20 @@ def sync_subscriptions_with_watchlist():
                     try:
                         _market_feed.subscribe_symbols([(exchange, sec_id, 15)])
                         _subscribed_securities[sec_id] = exchange
+                        try:
+                            orchestrator = get_orchestrator()
+                            exchange_name = _exchange_name_from_code(exchange, meta.get("segment") if meta else None)
+                            segment_name = (meta.get("segment") or exchange_name).upper() if meta else exchange_name
+                            orchestrator.subscribe(
+                                token=str(sec_id),
+                                exchange=exchange_name,
+                                segment=segment_name,
+                                symbol=meta.get("symbol") if meta else str(sec_id),
+                                expiry=meta.get("expiry") if meta else None,
+                                meta=meta or {},
+                            )
+                        except Exception:
+                            pass
                         print(f"[SUBSCRIBE] Security {sec_id} subscribed")
                     except Exception as e:
                         print(f"[WARN] Failed to subscribe {sec_id}: {e}")
@@ -478,6 +796,11 @@ def sync_subscriptions_with_watchlist():
                     try:
                         _market_feed.unsubscribe_symbols([(exchange, sec_id, 15)])
                         _subscribed_securities.pop(sec_id, None)
+                        try:
+                            orchestrator = get_orchestrator()
+                            orchestrator.unsubscribe(str(sec_id))
+                        except Exception:
+                            pass
                         print(f"[UNSUBSCRIBE] Security {sec_id} unsubscribed")
                     except Exception as e:
                         print(f"[WARN] Failed to unsubscribe {sec_id}: {e}")
@@ -541,25 +864,41 @@ def start_live_feed():
                         continue
                     instruments.append((exchange, sec_id, 15))  # 15 = Ticker mode
                 
-                # Create DhanContext and MarketFeed
-                dhan_context = DhanContext(client_id=creds.client_id, access_token=token)
-                
-                _market_feed = MarketFeed(
-                    dhan_context=dhan_context,
-                    instruments=instruments,
-                    version="v2"
-                )
+                # Create DhanFeed (compatible with multiple dhanhq versions)
+                _market_feed = _create_dhan_feed(creds.client_id, token, instruments)
                 
                 print(f"[OK] Starting Dhan WebSocket feed (Phase 4 Dynamic)")
                 print(f"[OK] Initial subscriptions: {len(instruments)} securities")
                 print(f"[INFO] Rate limiting active: max {_max_consecutive_failures} failures before cooldown")
                 
-                # Track subscriptions
+                # Track subscriptions and register with WebSocket Manager
                 _subscribed_securities.update({sec: exchange for exchange, sec, _ in instruments})
+
+                # Register subscriptions with orchestrator
+                orchestrator = get_orchestrator()
+                for exchange, sec_id, _ in instruments:
+                    meta = initial_targets.get(str(sec_id)) or {}
+                    exchange_name = _exchange_name_from_code(exchange, meta.get("segment"))
+                    segment_name = (meta.get("segment") or exchange_name).upper()
+                    success, _reason, assigned_ws_id = orchestrator.subscribe(
+                        token=str(sec_id),
+                        exchange=exchange_name,
+                        segment=segment_name,
+                        symbol=meta.get("symbol") or str(sec_id),
+                        expiry=meta.get("expiry"),
+                        meta=meta,
+                    )
+                    if success:
+                        print(f"[WS-MGR] Registered {sec_id} with WS-{assigned_ws_id}")
+                
                 _record_connection_attempt(success=True)
                 
                 print("[OK] Connecting to DhanHQ WebSocket...")
 
+                # Mark WebSocket connection as active in orchestrator
+                orchestrator.on_connected(1, _market_feed)  # Use WS-1 for the main feed
+                print("[WS-MGR] WebSocket connection marked as active")
+                
                 # Establish and maintain WebSocket connection once
                 _market_feed.run_forever()
 

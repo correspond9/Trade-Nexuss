@@ -10,6 +10,7 @@ from collections import defaultdict
 from app.storage.db import SessionLocal
 from app.storage.models import Subscription, SubscriptionLog
 from app.market.instrument_master.registry import REGISTRY
+from app.market_orchestrator import get_orchestrator
 from app.market.security_ids import (
     canonical_symbol,
     get_default_equity_security,
@@ -21,16 +22,30 @@ _EXPIRY_FORMATS = ("%d%b%Y", "%d%B%Y", "%d%b%y", "%Y-%m-%d")
 _EXCHANGE_CODE_MAP = {
     "IDX": 0,
     "NSE": 1,
-    "NFO": 1,
-    "BSE": 2,
+    "NFO": 2,
+    "NSE_FNO": 2,
+    "BSE": 4,
+    "BSE_FNO": 8,
     "MCX": 5,
+}
+_EXCHANGE_CODE_TO_NAME = {
+    0: "NSE",
+    1: "NSE",
+    2: "NSE",
+    4: "BSE",
+    8: "BSE",
+    5: "MCX",
 }
 
 
-def _normalize_expiry(expiry: Optional[str]) -> Optional[date]:
+def _normalize_expiry(expiry: Optional[object]) -> Optional[date]:
     if not expiry:
         return None
-    text = expiry.strip().upper()
+    if isinstance(expiry, datetime):
+        return expiry.date()
+    if isinstance(expiry, date):
+        return expiry
+    text = str(expiry).strip().upper()
     for fmt in _EXPIRY_FORMATS:
         try:
             return datetime.strptime(text, fmt).date()
@@ -61,6 +76,20 @@ def _determine_exchange(row_exchange: Optional[str], symbol: str) -> Optional[in
     if equity_meta:
         return equity_meta.get("exchange")
     return None
+
+
+def _exchange_name_from_meta(exchange_code: Optional[int], segment: Optional[str]) -> str:
+    if segment:
+        segment_upper = segment.upper()
+        if "MCX" in segment_upper:
+            return "MCX"
+        if "BSE" in segment_upper:
+            return "BSE"
+        if "NSE" in segment_upper or "NFO" in segment_upper:
+            return "NSE"
+    if exchange_code is None:
+        return "UNKNOWN"
+    return _EXCHANGE_CODE_TO_NAME.get(exchange_code, "UNKNOWN")
 
 
 def _resolve_security_metadata(
@@ -110,6 +139,36 @@ def _resolve_security_metadata(
             "symbol": canonical,
         }
 
+    # Fallback: try DhanHQ security ID mapper for options
+    if opt_type and normalized_expiry and strike_val is not None:
+        try:
+            from app.services.dhan_security_id_mapper import dhan_security_mapper
+
+            expiry_iso = normalized_expiry.isoformat()
+            token_key = f"{opt_type}_{canonical}_{strike_val}_{expiry_iso}"
+            security_id = dhan_security_mapper.get_security_id(token_key)
+            option_data = dhan_security_mapper.get_option_data(token_key) if security_id else None
+
+            if security_id:
+                segment = option_data.get("segment") if option_data else None
+                segment_upper = (segment or "").upper()
+                exchange = _EXCHANGE_CODE_MAP.get("NFO")
+                if "BSE" in segment_upper and "FNO" in segment_upper:
+                    exchange = _EXCHANGE_CODE_MAP.get("BSE_FNO", 8)
+
+                return {
+                    "security_id": str(security_id),
+                    "exchange": exchange,
+                    "segment": segment,
+                    "symbol": canonical,
+                }
+        except Exception:
+            pass
+
+    # If option metadata cannot be resolved, do NOT fall back to index IDs
+    if opt_type and normalized_expiry and strike_val is not None:
+        return {}
+
     # Fallback to predefined maps (e.g., MCX near-month placeholders or indices)
     default_equity = get_default_equity_security(symbol_upper)
     if default_equity:
@@ -142,6 +201,9 @@ class SubscriptionManager:
         self.ws_usage = {i: 0 for i in range(1, 6)}  # ws_1 to ws_5 instrument counts
         self.lock = threading.RLock()
         self.db = SessionLocal()
+        
+        # ✨ NEW: Load existing subscriptions from database
+        self._load_from_database()
     
     def subscribe(
         self,
@@ -169,26 +231,38 @@ class SubscriptionManager:
         with self.lock:
             if token in self.subscriptions:
                 return (True, f"Already subscribed: {token}", self.subscriptions[token]["ws_id"])
-            
-            # Check rate limit
-            current_total = sum(self.ws_usage.values())
-            if current_total >= 25000:
-                # Rate limit hit - should not happen for Tier B, evict LRU Tier A
-                if tier == "TIER_A":
-                    evicted = self._evict_lru_tier_a()
-                    if evicted:
-                        current_total -= 1
-                    else:
-                        return (False, "Rate limit: No Tier A chains to evict", None)
-                else:
-                    return (False, "Rate limit: 25,000 instruments at capacity", None)
-            
-            # Find least-loaded WS
-            ws_id = min(self.ws_usage, key=self.ws_usage.get)
-            self.ws_usage[ws_id] += 1
-            
+
             metadata = _resolve_security_metadata(symbol, expiry, strike, option_type)
             canonical = canonical_symbol(symbol)
+            exchange_name = _exchange_name_from_meta(metadata.get("exchange"), metadata.get("segment"))
+            segment_name = (metadata.get("segment") or exchange_name).upper()
+
+            orchestrator = get_orchestrator()
+            ok, reason, ws_id = orchestrator.subscribe(
+                token=str(token),
+                exchange=exchange_name,
+                segment=segment_name,
+                symbol=canonical or symbol,
+                expiry=expiry,
+                meta=metadata,
+            )
+
+            if not ok and tier == "TIER_A":
+                evicted = self._evict_lru_tier_a()
+                if evicted:
+                    ok, reason, ws_id = orchestrator.subscribe(
+                        token=str(token),
+                        exchange=exchange_name,
+                        segment=segment_name,
+                        symbol=canonical or symbol,
+                        expiry=expiry,
+                        meta=metadata,
+                    )
+
+            if not ok or ws_id is None:
+                return (False, f"Rate limit: {reason}", None)
+
+            self.ws_usage[ws_id] = self.ws_usage.get(ws_id, 0) + 1
 
             # Store subscription
             self.subscriptions[token] = {
@@ -223,7 +297,10 @@ class SubscriptionManager:
             
             sub = self.subscriptions[token]
             ws_id = sub["ws_id"]
-            self.ws_usage[ws_id] -= 1
+            orchestrator = get_orchestrator()
+            orchestrator.unsubscribe(str(token))
+            if ws_id in self.ws_usage:
+                self.ws_usage[ws_id] = max(self.ws_usage[ws_id] - 1, 0)
             
             del self.subscriptions[token]
             
@@ -259,11 +336,22 @@ class SubscriptionManager:
     
     def get_ws_stats(self) -> Dict:
         """Get WebSocket load stats"""
+        orchestrator = get_orchestrator()
+        status = orchestrator.get_status()
+        ws_usage = {}
+        for key, value in status.get("tokens_per_ws", {}).items():
+            key_str = str(key)
+            if not key_str.startswith("ws"):
+                continue
+            ws_id = int(key_str.replace("ws", ""))
+            ws_usage[ws_id] = int(value)
+
         with self.lock:
+            total = sum(ws_usage.values()) if ws_usage else sum(self.ws_usage.values())
             return {
-                "total_subscriptions": sum(self.ws_usage.values()),
-                "ws_usage": dict(self.ws_usage),
-                "utilization_percent": (sum(self.ws_usage.values()) / 25000) * 100,
+                "total_subscriptions": total,
+                "ws_usage": ws_usage or dict(self.ws_usage),
+                "utilization_percent": (total / 25000) * 100 if total else 0.0,
                 "tier_a_count": len([s for s in self.subscriptions.values() if s["tier"] == "TIER_A"]),
                 "tier_b_count": len([s for s in self.subscriptions.values() if s["tier"] == "TIER_B"])
             }
@@ -297,6 +385,63 @@ class SubscriptionManager:
         """Log subscription event to database"""
         # Disabled temporarily due to database locking issues
         pass
+    
+    def _load_from_database(self):
+        """Load existing subscriptions from database"""
+        try:
+            from app.storage.models import Subscription
+            orchestrator = get_orchestrator()
+            active_subs = self.db.query(Subscription).filter(Subscription.active == True).all()
+            
+            loaded_count = 0
+            for sub in active_subs:
+                token = sub.instrument_token
+                metadata = _resolve_security_metadata(
+                    symbol=sub.symbol,
+                    expiry=sub.expiry_date,
+                    strike=sub.strike_price,
+                    option_type=sub.option_type,
+                )
+                exchange_name = _exchange_name_from_meta(metadata.get("exchange"), metadata.get("segment"))
+                segment_name = (metadata.get("segment") or exchange_name).upper()
+                ok, _reason, ws_id = orchestrator.subscribe(
+                    token=str(token),
+                    exchange=exchange_name,
+                    segment=segment_name,
+                    symbol=sub.symbol,
+                    expiry=sub.expiry_date,
+                    meta=metadata,
+                )
+                if not ok or ws_id is None:
+                    ws_id = sub.ws_connection_id or 1
+
+                self.subscriptions[token] = {
+                    "symbol": sub.symbol,
+                    "symbol_canonical": sub.symbol,  # Could be normalized
+                    "expiry": sub.expiry_date,
+                    "strike": sub.strike_price,
+                    "option_type": sub.option_type,
+                    "tier": sub.tier,
+                    "subscribed_at": sub.subscribed_at,
+                    "ws_id": ws_id,
+                    "active": True,
+                    "exchange": metadata.get("exchange"),
+                    "security_id": metadata.get("security_id"),
+                    "segment": metadata.get("segment"),
+                }
+                
+                # Update WS usage
+                self.ws_usage[ws_id] = self.ws_usage.get(ws_id, 0) + 1
+                
+                loaded_count += 1
+            
+            if loaded_count > 0:
+                print(f"[DB] Loaded {loaded_count} subscriptions from database")
+            else:
+                print("[DB] No active subscriptions found in database")
+                
+        except Exception as e:
+            print(f"[ERROR] Failed to load subscriptions from database: {e}")
     
     def sync_to_db(self):
         """Sync all current subscriptions to database"""

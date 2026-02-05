@@ -31,6 +31,30 @@ def _ensure_dhan_credentials_columns():
             conn.commit()
 
 
+def _ensure_user_accounts_columns():
+    """Add missing columns to user_accounts table if needed."""
+    with engine.connect() as conn:
+        try:
+            result = conn.execute(text("PRAGMA table_info(user_accounts)"))
+            existing = {row[1] for row in result.fetchall()}
+        except Exception:
+            existing = set()
+
+        if not existing:
+            return
+
+        additions = []
+        if "password_salt" not in existing:
+            additions.append("ALTER TABLE user_accounts ADD COLUMN password_salt VARCHAR")
+        if "password_hash" not in existing:
+            additions.append("ALTER TABLE user_accounts ADD COLUMN password_hash VARCHAR")
+
+        for stmt in additions:
+            conn.execute(text(stmt))
+        if additions:
+            conn.commit()
+
+
 def init_db():
     """Initialize database tables and ensure schema is up to date."""
     print(f"[DB] Initializing database at: {DB_PATH}")
@@ -41,6 +65,7 @@ def init_db():
         print("[DB] ✓ All tables created/verified")
         
         _ensure_dhan_credentials_columns()
+        _ensure_user_accounts_columns()
         print("[DB] ✓ Schema migrations complete")
         
         # Verify we can query the credentials table

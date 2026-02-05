@@ -259,10 +259,30 @@ async def get_subscription_details(token: str):
 async def get_underlying_ltp(symbol: str):
     """Return latest underlying LTP from live price cache"""
     from app.market.live_prices import get_price
+    from app.market.live_prices import update_price
+    from app.services.authoritative_option_chain_service import authoritative_option_chain_service
     symbol_upper = symbol.upper()
     ltp = get_price(symbol_upper)
     if ltp is None:
-        raise HTTPException(status_code=404, detail=f"No LTP available for {symbol_upper}")
+        # Fallback to REST quote to recover missing index LTP (e.g., BANKNIFTY)
+        market_data = await authoritative_option_chain_service._fetch_market_data_from_api(symbol_upper)
+        if not market_data:
+            raise HTTPException(status_code=404, detail=f"No LTP available for {symbol_upper}")
+
+        ltp = market_data.get("current_price")
+        if ltp is None:
+            raise HTTPException(status_code=404, detail=f"No LTP available for {symbol_upper}")
+
+        update_price(symbol_upper, float(ltp))
+
+    # Update ATM in cache for indices on every request (keeps strike window current)
+    try:
+        authoritative_option_chain_service.update_option_price_from_websocket(
+            symbol=symbol_upper,
+            ltp=float(ltp)
+        )
+    except Exception:
+        pass
     return {
         "status": "success",
         "symbol": symbol_upper,

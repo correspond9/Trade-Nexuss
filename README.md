@@ -1,4 +1,4 @@
-# 🚀 Broking Terminal V2 - Data Server Backend
+# 🚀 Trade-Nexuss - Data Server Backend
 
 A high-performance FastAPI backend for real-time options trading data with WebSocket integration and comprehensive market data management.
 
@@ -40,9 +40,9 @@ A high-performance FastAPI backend for real-time options trading data with WebSo
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/broking-terminal-v2.git
-   cd broking-terminal-v2/data_server_backend
-   ```
+git clone https://github.com/yourusername/Trade-Nexuss.git
+cd Trade-Nexuss/data_server_backend
+```
 
 2. **Set up virtual environment**
    ```bash

@@ -113,17 +113,21 @@ class AuthoritativeOptionChainService:
     
     def __init__(self):
         # Central cache - the single source of truth
-        self.option_chain_cache: Dict[str, Dict[str, OptionChainSkeleton]] = {}
+        self.option_chain_cache: Dict[str, Dict] = {}
+        self.atm_cache: Dict[str, float] = {}
+        self.expiry_cache: Dict[str, List[str]] = {}
+        self.instrument_master_cache: Dict[str, Dict] = {}
+        self.dhan_base_url = "https://api.dhan.co"
+        self.cache_ttl = timedelta(minutes=5)
+        self.last_cache_update: Dict[str, datetime] = {}
         
-        # Registries
+        # ✨ RESTORED: Critical registries that were accidentally removed
         self.expiry_registry = ExpiryRegistry()
         self.atm_registry = ATMRegistry()
         
-        # Instrument master cache (for metadata only)
-        self.instrument_master_cache: Dict[str, Dict[str, Any]] = {}
-        
-        # WebSocket token mapping - COMPLIANT WITH LIMITS
-        self.token_to_websocket: Dict[str, int] = {}
+        # ✨ NEW: Initialize security ID mapper
+        from .dhan_security_id_mapper import dhan_security_mapper
+        self.security_mapper = dhan_security_mapper
         self.websocket_subscriptions: Dict[int, Set[str]] = {}
         self.websocket_token_count: Dict[int, int] = {}  # Track tokens per WS
         
@@ -321,6 +325,10 @@ class AuthoritativeOptionChainService:
             
             logger.info("🚀 Starting market-aware cache population...")
             
+            # ✨ NEW: Load security IDs from official DhanHQ CSV
+            logger.info("📋 Loading DhanHQ security IDs from official CSV...")
+            await self.security_mapper.load_security_ids()
+            
             # Get a sample underlying to check market status
             # All NSE/BSE underlyings have same market hours
             sample_underlying = "NIFTY"
@@ -353,7 +361,8 @@ class AuthoritativeOptionChainService:
             try:
                 closing_prices_data = get_closing_prices()
                 if not closing_prices_data:
-                    raise Exception("No closing prices available")
+                    logger.warning("⚠️ No closing prices available; leaving cache empty")
+                    return True
                 
                 self.populate_with_closing_prices_sync(closing_prices_data)
                 stats = self.get_cache_statistics()
@@ -517,14 +526,15 @@ class AuthoritativeOptionChainService:
                 
                 # Load index options from registry
                 index_symbols = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"]
+                # Use DhanHQ index security IDs for REST quote/expiry API
                 index_mapping = {
-                    "NIFTY": {"segment": "NSE_IDX", "security_id": 13626},
-                    "BANKNIFTY": {"segment": "NSE_IDX", "security_id": 14152},
-                    "SENSEX": {"segment": "BSE_IDX", "security_id": 265},
-                    "FINNIFTY": {"segment": "NSE_IDX", "security_id": 16063},
-                    "MIDCPNIFTY": {"segment": "NSE_IDX", "security_id": 16266},
+                    "NIFTY": {"segment": "IDX_I", "security_id": 13},
+                    "BANKNIFTY": {"segment": "IDX_I", "security_id": 25},
+                    "SENSEX": {"segment": "IDX_I", "security_id": 51},
+                    "FINNIFTY": {"segment": "IDX_I", "security_id": None},
+                    "MIDCPNIFTY": {"segment": "IDX_I", "security_id": None},
                     # BANKEX ID not present in compliance rules; use registry if available
-                    "BANKEX": {"segment": "BSE_IDX", "security_id": None},
+                    "BANKEX": {"segment": "IDX_I", "security_id": None},
                 }
                 
                 for symbol in index_symbols:
@@ -622,39 +632,50 @@ class AuthoritativeOptionChainService:
             instrument_meta = self.instrument_master_cache[underlying]
             security_id = instrument_meta["security_id"]
             
-            # Fetch LTP from DhanHQ quote API
+            # Fetch LTP from DhanHQ marketfeed/quote API
             headers = {
                 "access-token": creds["access_token"],
                 "client-id": creds["client_id"],
                 "Content-Type": "application/json"
             }
-            
-            # Get current price (LTP)
-            quote_url = f"{self.dhan_base_url}/v2/market-data/quote/{security_id}"
-            
+
+            quote_url = f"{self.dhan_base_url}/v2/marketfeed/quote"
+            quote_payload = {instrument_meta["segment"]: [int(security_id)]}
+
             async with aiohttp.ClientSession() as session:
-                async with session.get(quote_url, headers=headers, timeout=10) as response:
+                async with session.post(quote_url, json=quote_payload, headers=headers, timeout=10) as response:
                     if response.status == 200:
                         quote_data = await response.json()
-                        ltp = quote_data.get("data", {}).get("ltp")
-                        
+                        segment_data = quote_data.get("data", {}).get(instrument_meta["segment"], {})
+                        sec_payload = segment_data.get(str(security_id)) or segment_data.get(int(security_id))
+                        if isinstance(sec_payload, list) and sec_payload:
+                            sec_payload = sec_payload[0]
+
+                        ltp = None
+                        if isinstance(sec_payload, dict):
+                            ltp = sec_payload.get("ltp") or sec_payload.get("LTP")
+                            if ltp is None:
+                                ohlc = sec_payload.get("ohlc") or sec_payload.get("OHLC")
+                                if isinstance(ohlc, dict):
+                                    ltp = ohlc.get("close") or ohlc.get("prev_close")
+
                         if not ltp:
                             logger.error(f"❌ No LTP data found for {underlying}")
                             return None
-                        
+
                         # Fetch expiries from DhanHQ API
                         expiry_url = f"{self.dhan_base_url}/v2/optionchain/expirylist"
                         payload = {
                             "UnderlyingScrip": security_id,
                             "UnderlyingSeg": instrument_meta["segment"]
                         }
-                        
+
                         await self._enforce_rest_rate_limit("data")
                         async with session.post(expiry_url, json=payload, headers=headers, timeout=10) as expiry_response:
                             if expiry_response.status == 200:
                                 expiry_data = await expiry_response.json()
                                 expiries = expiry_data.get("data", [])
-                                
+
                                 return {
                                     "underlying": underlying,
                                     "current_price": float(ltp),
@@ -662,7 +683,8 @@ class AuthoritativeOptionChainService:
                                     "source": "dhanhq_api"
                                 }
                             else:
-                                logger.error(f"❌ DhanHQ expiry API error for {underlying}: {expiry_response.status}")
+                                error_text = await expiry_response.text()
+                                logger.error(f"❌ DhanHQ expiry API error for {underlying}: {expiry_response.status} - {error_text}")
                                 return None
                     else:
                         error_text = await response.text()
@@ -882,12 +904,75 @@ class AuthoritativeOptionChainService:
             strike_interval = self.index_options[symbol]["strike_interval"]
 
             # For index chains with WebSocket option ticks, do NOT overwrite CE/PE premiums here.
-            # We still update the ATM marker using rounded LTP (universal rule).
+            # We still update the ATM marker using rounded LTP (universal rule), and if the
+            # current strike window is far away from the new ATM, rebuild the strike window
+            # with estimated premiums so UI stays relevant.
             if symbol in {"NIFTY", "BANKNIFTY", "SENSEX"}:
+                new_atm = round(ltp / strike_interval) * strike_interval
                 for expiry in self.option_chain_cache[symbol]:
                     skeleton = self.option_chain_cache[symbol][expiry]
-                    skeleton.atm_strike = round(ltp / strike_interval) * strike_interval
+                    strike_prices = list(skeleton.strikes.keys())
+                    if strike_prices:
+                        min_strike = min(strike_prices)
+                        max_strike = max(strike_prices)
+                        # Rebuild if ATM moved by >= 1 interval or outside the current window
+                        if abs(new_atm - skeleton.atm_strike) >= strike_interval or new_atm < min_strike or new_atm > max_strike:
+                            display_strikes = self._generate_display_strikes(new_atm, strike_interval, 25)
+                            old_strikes = set(strike_prices)
+                            new_strikes = set(display_strikes)
+                            new_strikes_dict: Dict[float, StrikeData] = {}
+                            for strike_price in display_strikes:
+                                existing = skeleton.strikes.get(strike_price)
+                                if existing:
+                                    try:
+                                        strike_key = float(strike_price)
+                                        if existing.CE and isinstance(existing.CE.token, str) and existing.CE.token.startswith("CE_"):
+                                            mapped = self.security_mapper.get_security_id(f"CE_{symbol}_{strike_key}_{expiry}")
+                                            if mapped:
+                                                existing.CE.token = str(mapped)
+                                        if existing.PE and isinstance(existing.PE.token, str) and existing.PE.token.startswith("PE_"):
+                                            mapped = self.security_mapper.get_security_id(f"PE_{symbol}_{strike_key}_{expiry}")
+                                            if mapped:
+                                                existing.PE.token = str(mapped)
+                                    except Exception:
+                                        pass
+                                    new_strikes_dict[strike_price] = existing
+                                    continue
+
+                                strike_key = float(strike_price)
+                                ce_key = f"CE_{symbol}_{strike_key}_{expiry}"
+                                pe_key = f"PE_{symbol}_{strike_key}_{expiry}"
+                                ce_id = self.security_mapper.get_security_id(ce_key)
+                                pe_id = self.security_mapper.get_security_id(pe_key)
+
+                                ce_data = OptionData(
+                                    token=str(ce_id) if ce_id else ce_key,
+                                    ltp=0.0,
+                                    bid=0.0,
+                                    ask=0.0,
+                                )
+                                pe_data = OptionData(
+                                    token=str(pe_id) if pe_id else pe_key,
+                                    ltp=0.0,
+                                    bid=0.0,
+                                    ask=0.0,
+                                )
+                                new_strikes_dict[strike_price] = StrikeData(
+                                    strike_price=strike_price,
+                                    CE=ce_data,
+                                    PE=pe_data,
+                                )
+
+                            skeleton.strikes = new_strikes_dict
+
+                            try:
+                                self._sync_tier_b_subscriptions(symbol, expiry, old_strikes, new_strikes)
+                            except Exception as sync_e:
+                                logger.warning(f"⚠️ Failed to sync Tier B subscriptions for {symbol} {expiry}: {sync_e}")
+
+                    skeleton.atm_strike = new_atm
                     skeleton.last_updated = datetime.now()
+
                 self.atm_registry.atm_strikes[symbol] = ltp
                 self.atm_registry.last_updated[symbol] = datetime.now()
                 return 0
@@ -907,18 +992,17 @@ class AuthoritativeOptionChainService:
                             new_strikes_dict[strike_price] = existing
                             continue
 
-                        estimated_premium = self._estimate_premium(ltp, strike_price, strike_interval)
                         ce_data = OptionData(
                             token=f"CE_{symbol}_{strike_price}_{expiry}",
-                            ltp=estimated_premium,
-                            bid=estimated_premium * 0.98,
-                            ask=estimated_premium * 1.02,
+                            ltp=0.0,
+                            bid=0.0,
+                            ask=0.0,
                         )
                         pe_data = OptionData(
                             token=f"PE_{symbol}_{strike_price}_{expiry}",
-                            ltp=estimated_premium,
-                            bid=estimated_premium * 0.98,
-                            ask=estimated_premium * 1.02,
+                            ltp=0.0,
+                            bid=0.0,
+                            ask=0.0,
                         )
                         new_strikes_dict[strike_price] = StrikeData(
                             strike_price=strike_price,
@@ -933,36 +1017,9 @@ class AuthoritativeOptionChainService:
                 skeleton.atm_strike = new_atm
                 skeleton.last_updated = datetime.now()
                 
-                for strike_price_str, strike_data in skeleton.strikes.items():
-                    try:
-                        strike_price = float(strike_price_str)
-                        distance_from_ltp = abs(strike_price - ltp)
-                        moneyness = distance_from_ltp / skeleton.strike_interval
-                        
-                        # Decay premium based on distance from ATM
-                        base_premium = ltp * 0.1
-                        decay_factor = 1 + (moneyness * 0.3)
-                        estimated_premium = max(0.05, base_premium / decay_factor)
-                        
-                        # Update CE (Call)
-                        strike_data.CE.ltp = estimated_premium
-                        strike_data.CE.bid = estimated_premium * 0.98
-                        strike_data.CE.ask = estimated_premium * 1.02
-                        
-                        # Update PE (Put)
-                        strike_data.PE.ltp = estimated_premium
-                        strike_data.PE.bid = estimated_premium * 0.98
-                        strike_data.PE.ask = estimated_premium * 1.02
-                        
-                        updated_count += 2  # CE + PE
-                    
-                    except Exception as strike_e:
-                        logger.error(f"❌ Failed to update strike {strike_price_str}: {strike_e}")
-            
+            self.atm_registry.atm_strikes[symbol] = ltp
+            self.atm_registry.last_updated[symbol] = datetime.now()
             if updated_count > 0:
-                # Update ATM registry with new underlying LTP
-                self.atm_registry.atm_strikes[symbol] = ltp
-                self.atm_registry.last_updated[symbol] = datetime.now()
                 logger.info(f"📈 Updated {symbol}: LTP={ltp}, {updated_count} options updated")
             
             return updated_count
@@ -1018,6 +1075,61 @@ class AuthoritativeOptionChainService:
         except Exception as e:
             logger.error(f"❌ Failed to update option tick for {symbol} {expiry} {strike} {option_type}: {e}")
             return 0
+
+    def _sync_tier_b_subscriptions(
+        self,
+        symbol: str,
+        expiry: str,
+        old_strikes: Set[float],
+        new_strikes: Set[float],
+    ) -> None:
+        """Ensure Tier B subscriptions track the current strike window after ATM shift."""
+        if not old_strikes and not new_strikes:
+            return
+
+        try:
+            from app.market.subscription_manager import SUBSCRIPTION_MGR
+        except Exception:
+            return
+
+        # Unsubscribe old strikes (match by metadata, not token name)
+        if old_strikes:
+            to_remove = []
+            for token, sub in list(SUBSCRIPTION_MGR.subscriptions.items()):
+                if (sub.get("symbol") or "").upper() != symbol:
+                    continue
+                if sub.get("expiry") != expiry:
+                    continue
+                strike = sub.get("strike")
+                if strike is None:
+                    continue
+                try:
+                    strike_val = float(strike)
+                except (TypeError, ValueError):
+                    continue
+                if strike_val not in old_strikes:
+                    continue
+                opt_type = (sub.get("option_type") or "").upper()
+                if opt_type not in ("CE", "PE"):
+                    continue
+                to_remove.append(token)
+
+            for token in to_remove:
+                SUBSCRIPTION_MGR.unsubscribe(token, reason="ATM_SHIFT")
+
+        # Subscribe new strikes using canonical option token keys
+        if new_strikes:
+            for strike_price in new_strikes:
+                for opt_type in ("CE", "PE"):
+                    token = f"{opt_type}_{symbol}_{strike_price}_{expiry}"
+                    SUBSCRIPTION_MGR.subscribe(
+                        token=token,
+                        symbol=symbol,
+                        expiry=expiry,
+                        strike=float(strike_price),
+                        option_type=opt_type,
+                        tier="TIER_B",
+                    )
     
     def add_subscription_compliant(self, token: str, websocket_id: Optional[int] = None) -> bool:
         """
@@ -1100,16 +1212,6 @@ class AuthoritativeOptionChainService:
             strikes.append(atm)
         return sorted(set(strikes))
 
-    def _estimate_premium(self, underlying_ltp: float, strike_price: float, strike_interval: float) -> float:
-        """Estimate option premium based on distance from ATM."""
-        if not underlying_ltp or not strike_interval:
-            return 0.0
-        distance_from_ltp = abs(strike_price - underlying_ltp)
-        moneyness = distance_from_ltp / strike_interval
-        base_premium = underlying_ltp * 0.1
-        decay_factor = 1 + (moneyness * 0.3)
-        return max(0.05, base_premium / decay_factor)
-
     def _derive_atm_from_chain(self, strikes: List[Dict[str, Any]], fallback_price: float, strike_interval: float) -> float:
         """
         UNIVERSAL ATM RULE (non-straddle tabs):
@@ -1124,6 +1226,25 @@ class AuthoritativeOptionChainService:
         Always use rounded underlying LTP to nearest strike interval.
         """
         return round(fallback_price / strike_interval) * strike_interval
+
+    def _find_nearest_closing_expiry(self, closing_prices: Dict[str, Any], target_expiry: str) -> Optional[str]:
+        """Find nearest expiry key in closing_prices to the target expiry date."""
+        target_date = self._parse_expiry_date(target_expiry)
+        if not target_date:
+            return None
+
+        candidates = []
+        for exp in closing_prices.keys():
+            exp_date = self._parse_expiry_date(exp)
+            if not exp_date:
+                continue
+            candidates.append((abs((exp_date - target_date).days), exp))
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda x: x[0])
+        return candidates[0][1]
     
     async def populate_with_live_data(self) -> None:
         """
@@ -1146,10 +1267,50 @@ class AuthoritativeOptionChainService:
                     # Fetch live market data
                     market_data = await self._fetch_market_data_from_api(underlying)
                     if not market_data:
-                        logger.warning(f"  ⚠️ Failed to fetch market data for {underlying}, skipping")
-                        continue
+                        # Fallback: derive expiries from Dhan CSV mapper or registry
+                        try:
+                            mapper_expiries = sorted({
+                                data.get("expiry")
+                                for data in self.security_mapper.csv_data.values()
+                                if data.get("symbol") == underlying
+                            })
+                            mapper_expiries = [e for e in mapper_expiries if e]
+
+                            expiries = []
+                            if mapper_expiries:
+                                expiries = mapper_expiries
+                                source = "mapper_fallback"
+                            else:
+                                from app.market.instrument_master.registry import REGISTRY
+                                if not REGISTRY.loaded:
+                                    REGISTRY.load()
+                                raw_expiries = REGISTRY.get_expiries_for_underlying(underlying)
+                                for exp in raw_expiries:
+                                    parsed = self._parse_expiry_date(exp)
+                                    if parsed:
+                                        expiries.append(parsed.isoformat())
+                                source = "registry_fallback"
+
+                            market_data = {
+                                "underlying": underlying,
+                                "current_price": 0,
+                                "expiries": expiries,
+                                "source": source,
+                            }
+                            logger.warning(f"  ⚠️ Using {source} expiries for {underlying}: {len(expiries)}")
+                        except Exception as reg_e:
+                            logger.warning(f"  ⚠️ Failed to fetch market data for {underlying}, skipping: {reg_e}")
+                            continue
                     
                     current_price = live_prices.get(underlying) or market_data.get("current_price", 0)
+                    if not current_price:
+                        try:
+                            from app.market.closing_prices import get_closing_prices
+                            closing_data = get_closing_prices() or {}
+                            current_price = closing_data.get(underlying, {}).get("current_price", 0)
+                        except Exception:
+                            pass
+                    
                     expiries = market_data.get("expiries", [])
                     selected_expiries = self._select_current_next_expiries(underlying, expiries)
                     
@@ -1167,8 +1328,9 @@ class AuthoritativeOptionChainService:
                             # Fetch option chain data from API
                             option_chain_data = await self._fetch_option_chain_from_api(underlying, expiry)
                             if not option_chain_data:
-                                logger.warning(f"    ⚠️ No option chain data for {underlying} {expiry}")
-                                continue
+                                logger.warning(f"    ⚠️ No option chain data for {underlying} {expiry} - using estimated strikes")
+                                option_chain_data = {"strikes": []}
+                            use_mapper_only = not option_chain_data.get("strikes")
                             
                             # ATM per-expiry (prefer chain data; fallback to underlying LTP)
                             strike_interval = self.index_options[underlying]["strike_interval"]
@@ -1190,46 +1352,150 @@ class AuthoritativeOptionChainService:
                                 except (ValueError, KeyError):
                                     continue
 
+                            # If we have no REST option chain, derive strikes from CSV mapper to ensure tokens exist
+                            registry_strike_tokens = {}
+                            if use_mapper_only:
+                                try:
+                                    # Prefer Dhan CSV mapper strikes (authoritative tokens)
+                                    for data in self.security_mapper.csv_data.values():
+                                        if data.get("symbol") != underlying:
+                                            continue
+                                        if data.get("expiry") != expiry:
+                                            continue
+                                        try:
+                                            strike_val = float(data.get("strike"))
+                                        except (TypeError, ValueError):
+                                            continue
+                                        opt_type = (data.get("option_type") or "").strip().upper()
+                                        sec_id = data.get("security_id")
+                                        if not sec_id or opt_type not in ("CE", "PE"):
+                                            continue
+                                        registry_strike_tokens.setdefault(strike_val, {})[opt_type] = str(sec_id)
+
+                                    # Fallback to instrument master if mapper is empty
+                                    if not registry_strike_tokens:
+                                        from app.market.instrument_master.registry import REGISTRY
+                                        records = REGISTRY.get_by_symbol_expiry(underlying, expiry)
+                                        if not records:
+                                            records = REGISTRY.by_underlying_expiry.get((underlying.upper(), expiry), [])
+                                        if not records:
+                                            # fallback to normalized expiry match
+                                            target_expiry = REGISTRY._normalize_expiry(expiry)
+                                            if target_expiry:
+                                                for row in REGISTRY.by_underlying.get(underlying.upper(), []):
+                                                    row_expiry = REGISTRY._normalize_expiry(row.get("SM_EXPIRY_DATE", ""))
+                                                    if row_expiry and row_expiry == target_expiry:
+                                                        records.append(row)
+
+                                        for row in records:
+                                            try:
+                                                strike_val = float(row.get("STRIKE_PRICE"))
+                                            except (TypeError, ValueError):
+                                                continue
+                                            opt_type = (row.get("OPTION_TYPE") or "").strip().upper()
+                                            sec_id = row.get("SECURITY_ID") or row.get("SecurityId")
+                                            if not sec_id or opt_type not in ("CE", "PE"):
+                                                continue
+                                            registry_strike_tokens.setdefault(strike_val, {})[opt_type] = str(sec_id)
+
+                                    # Build display strikes from registry strikes around ATM
+                                    available_strikes = sorted(registry_strike_tokens.keys())
+                                    if available_strikes:
+                                        if atm_strike in available_strikes:
+                                            center_idx = available_strikes.index(atm_strike)
+                                        else:
+                                            center_idx = min(range(len(available_strikes)), key=lambda i: abs(available_strikes[i] - atm_strike))
+                                        start = max(0, center_idx - 25)
+                                        end = min(len(available_strikes), center_idx + 26)
+                                        display_strikes = available_strikes[start:end]
+                                except Exception:
+                                    pass
+
                             # Build strikes for display (51 strikes)
                             strikes_dict = {}
                             for strike_price in display_strikes:
                                 strike_data = dhan_strikes.get(strike_price, {})
 
-                                # Extract CE data from nested structure
-                                ce_obj = strike_data.get("ce", {}) or strike_data.get("CE", {}) or {}
-                                ce_ltp = float(ce_obj.get("ltp") or ce_obj.get("lastPrice") or strike_data.get("ce_ltp") or 0)
-                                ce_bid = float(ce_obj.get("bid") or ce_obj.get("bidPrice") or strike_data.get("ce_bid") or 0)
-                                ce_ask = float(ce_obj.get("ask") or ce_obj.get("askPrice") or strike_data.get("ce_ask") or 0)
-                                ce_oi = int(ce_obj.get("oi") or ce_obj.get("openInterest") or strike_data.get("ce_oi") or 0)
-                                ce_volume = int(ce_obj.get("volume") or strike_data.get("ce_volume") or 0)
-                                ce_iv = float(ce_obj.get("iv") or strike_data.get("ce_iv") or 0)
-                                ce_token = ce_obj.get("token") or ce_obj.get("security_id") or strike_data.get("ce_security_id") or f"CE_{underlying}_{strike_price}_{expiry}"
+                                if use_mapper_only:
+                                    token_pair = registry_strike_tokens.get(strike_price) or registry_strike_tokens.get(float(strike_price))
+                                    if not token_pair:
+                                        continue
+                                    ce_token = token_pair.get("CE")
+                                    pe_token = token_pair.get("PE")
+                                    if not ce_token or not pe_token:
+                                        continue
 
-                                # Extract PE data from nested structure
-                                pe_obj = strike_data.get("pe", {}) or strike_data.get("PE", {}) or {}
-                                pe_ltp = float(pe_obj.get("ltp") or pe_obj.get("lastPrice") or strike_data.get("pe_ltp") or 0)
-                                pe_bid = float(pe_obj.get("bid") or pe_obj.get("bidPrice") or strike_data.get("pe_bid") or 0)
-                                pe_ask = float(pe_obj.get("ask") or pe_obj.get("askPrice") or strike_data.get("pe_ask") or 0)
-                                pe_oi = int(pe_obj.get("oi") or pe_obj.get("openInterest") or strike_data.get("pe_oi") or 0)
-                                pe_volume = int(pe_obj.get("volume") or strike_data.get("pe_volume") or 0)
-                                pe_iv = float(pe_obj.get("iv") or strike_data.get("pe_iv") or 0)
-                                pe_token = pe_obj.get("token") or pe_obj.get("security_id") or strike_data.get("pe_security_id") or f"PE_{underlying}_{strike_price}_{expiry}"
+                                    ce_ltp = 0.0
+                                    pe_ltp = 0.0
+                                    ce_bid = 0.0
+                                    ce_ask = 0.0
+                                    pe_bid = 0.0
+                                    pe_ask = 0.0
+                                    ce_oi = 0
+                                    pe_oi = 0
+                                    ce_volume = 0
+                                    pe_volume = 0
+                                    ce_iv = 0
+                                    pe_iv = 0
+                                    ce_obj = {}
+                                    pe_obj = {}
 
-                                # If still no LTP from API, estimate it
-                                if ce_ltp <= 0:
-                                    ce_ltp = self._estimate_premium(current_price, strike_price, strike_interval)
-                                if pe_ltp <= 0:
-                                    pe_ltp = self._estimate_premium(current_price, strike_price, strike_interval)
+                                    # Keep premiums at zero when only tokens are available
+                                    if ce_ltp <= 0:
+                                        ce_ltp = 0.0
+                                    if pe_ltp <= 0:
+                                        pe_ltp = 0.0
+                                else:
+                                    # Extract CE data from nested structure
+                                    ce_obj = strike_data.get("ce", {}) or strike_data.get("CE", {}) or {}
+                                    ce_ltp = float(ce_obj.get("ltp") or ce_obj.get("lastPrice") or strike_data.get("ce_ltp") or 0)
+                                    ce_bid = float(ce_obj.get("bid") or ce_obj.get("bidPrice") or strike_data.get("ce_bid") or 0)
+                                    ce_ask = float(ce_obj.get("ask") or ce_obj.get("askPrice") or strike_data.get("ce_ask") or 0)
+                                    ce_oi = int(ce_obj.get("oi") or ce_obj.get("openInterest") or strike_data.get("ce_oi") or 0)
+                                    ce_volume = int(ce_obj.get("volume") or strike_data.get("ce_volume") or 0)
+                                    ce_iv = float(ce_obj.get("iv") or strike_data.get("ce_iv") or 0)
 
-                                # Fallback for bid/ask if not provided
-                                if ce_bid <= 0:
-                                    ce_bid = ce_ltp * 0.99
-                                if ce_ask <= 0:
-                                    ce_ask = ce_ltp * 1.01
-                                if pe_bid <= 0:
-                                    pe_bid = pe_ltp * 0.99
-                                if pe_ask <= 0:
-                                    pe_ask = pe_ltp * 1.01
+                                    # Try to get real security ID first
+                                    ce_token = ce_obj.get("token") or ce_obj.get("security_id") or strike_data.get("ce_security_id")
+                                    if not ce_token:
+                                        real_ce_security_id = self.security_mapper.get_security_id(f"CE_{underlying}_{strike_price}_{expiry}")
+                                        if real_ce_security_id:
+                                            ce_token = str(real_ce_security_id)
+                                        else:
+                                            ce_token = f"CE_{underlying}_{strike_price}_{expiry}"
+
+                                    # Extract PE data from nested structure
+                                    pe_obj = strike_data.get("pe", {}) or strike_data.get("PE", {}) or {}
+                                    pe_ltp = float(pe_obj.get("ltp") or pe_obj.get("lastPrice") or strike_data.get("pe_ltp") or 0)
+                                    pe_bid = float(pe_obj.get("bid") or pe_obj.get("bidPrice") or strike_data.get("pe_bid") or 0)
+                                    pe_ask = float(pe_obj.get("ask") or pe_obj.get("askPrice") or strike_data.get("pe_ask") or 0)
+                                    pe_oi = int(pe_obj.get("oi") or pe_obj.get("openInterest") or strike_data.get("pe_oi") or 0)
+                                    pe_volume = int(pe_obj.get("volume") or strike_data.get("pe_volume") or 0)
+                                    pe_iv = float(pe_obj.get("iv") or strike_data.get("pe_iv") or 0)
+
+                                    pe_token = pe_obj.get("token") or pe_obj.get("security_id") or strike_data.get("pe_security_id")
+                                    if not pe_token:
+                                        real_pe_security_id = self.security_mapper.get_security_id(f"PE_{underlying}_{strike_price}_{expiry}")
+                                        if real_pe_security_id:
+                                            pe_token = str(real_pe_security_id)
+                                        else:
+                                            pe_token = f"PE_{underlying}_{strike_price}_{expiry}"
+
+                                    # If still no LTP from API, keep zero
+                                    if ce_ltp <= 0:
+                                        ce_ltp = 0.0
+                                    if pe_ltp <= 0:
+                                        pe_ltp = 0.0
+
+                                    # No bid/ask fallback; keep zero unless provided
+                                    if ce_bid <= 0:
+                                        ce_bid = 0.0
+                                    if ce_ask <= 0:
+                                        ce_ask = 0.0
+                                    if pe_bid <= 0:
+                                        pe_bid = 0.0
+                                    if pe_ask <= 0:
+                                        pe_ask = 0.0
 
                                 ce_data = OptionData(
                                     token=ce_token,
@@ -1324,13 +1590,13 @@ class AuthoritativeOptionChainService:
                 logger.info(f"  Processing {underlying} at {current_price:.2f}")
                 
                 for expiry in selected_expiries:
-                    if expiry not in closing_prices:
-                        logger.warning(f"  ⚠️ No closing prices for {underlying} {expiry}")
-                        continue
+                    closing_prices_for_expiry = closing_prices.get(expiry) or {}
+                    if not closing_prices_for_expiry:
+                        logger.warning(f"  ⚠️ No closing prices for {underlying} {expiry}; leaving premiums at 0")
 
                     strike_interval = self.index_options[underlying]["strike_interval"]
                     atm_strike = self._derive_atm_from_closing_prices(
-                        closing_prices.get(expiry, {}),
+                        closing_prices_for_expiry,
                         current_price,
                         strike_interval,
                     )
@@ -1338,17 +1604,15 @@ class AuthoritativeOptionChainService:
 
                     strikes_dict = {}
                     for strike in display_strikes:
-                        prices = closing_prices[expiry].get(str(strike), {})
-                        estimated = self._estimate_premium(current_price, strike, strike_interval)
-
-                        ce_ltp = prices.get("CE", 0.0) or estimated
-                        pe_ltp = prices.get("PE", 0.0) or estimated
+                        prices = closing_prices_for_expiry.get(str(strike), {})
+                        ce_ltp = prices.get("CE", 0.0) or 0.0
+                        pe_ltp = prices.get("PE", 0.0) or 0.0
 
                         ce_data = OptionData(
                             token=f"CE_{underlying}_{strike}_{expiry}",
                             ltp=ce_ltp,
-                            bid=ce_ltp * 0.99,
-                            ask=ce_ltp * 1.01,
+                            bid=0.0,
+                            ask=0.0,
                             iv=prices.get("IV", 0.0),
                             greeks={
                                 "delta": prices.get("delta_CE", 0.0),
@@ -1361,8 +1625,8 @@ class AuthoritativeOptionChainService:
                         pe_data = OptionData(
                             token=f"PE_{underlying}_{strike}_{expiry}",
                             ltp=pe_ltp,
-                            bid=pe_ltp * 0.99,
-                            ask=pe_ltp * 1.01,
+                            bid=0.0,
+                            ask=0.0,
                             iv=prices.get("IV", 0.0),
                             greeks={
                                 "delta": prices.get("delta_PE", 0.0),
