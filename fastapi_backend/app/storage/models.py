@@ -66,6 +66,15 @@ class SubscriptionLog(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
 
 
+class Notification(Base):
+    """Admin notification entries."""
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True)
+    message = Column(Text, nullable=False)
+    level = Column(String, default="WARN")  # INFO | WARN | ERROR
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ==================== MOCK EXCHANGE MODELS ====================
 
 class BrokeragePlan(Base):

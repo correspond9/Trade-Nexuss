@@ -64,6 +64,7 @@ class ExchangeRouter:
                 ltp=tick.get("ltp"),
                 bid=tick.get("bid"),
                 ask=tick.get("ask"),
+                depth=tick.get("depth"),
                 oi=tick.get("oi"),
                 volume=tick.get("volume"),
                 iv=tick.get("iv"),

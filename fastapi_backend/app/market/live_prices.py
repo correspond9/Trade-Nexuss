@@ -7,6 +7,19 @@ prices = {symbol: None for symbol in _DASHBOARD_SYMBOLS}
 
 _lock = threading.Lock()
 
+def _normalize_symbol(symbol: str) -> str:
+    if not symbol:
+        return symbol
+    text = symbol.strip().upper()
+    if text in {"NIFTY 50", "NIFTY50"}:
+        return "NIFTY"
+    if text in {"BANK NIFTY", "NIFTY BANK", "BANKNIFTY"}:
+        return "BANKNIFTY"
+    if text in {"SENSEX", "BSE SENSEX", "S&P BSE SENSEX", "SENSEX 50"}:
+        return "SENSEX"
+    return text
+
+
 def update_price(symbol: str, price: float):
     """Update price for a symbol"""
     with _lock:
@@ -16,15 +29,16 @@ def update_price(symbol: str, price: float):
             # This is an option token, extract underlying
             parts = symbol.split("_")
             if len(parts) >= 2:
-                underlying = parts[1]  # NIFTY from CE_NIFTY_...
+                underlying = _normalize_symbol(parts[1])  # NIFTY from CE_NIFTY_...
                 if underlying in _DASHBOARD_SYMBOLS:
                     prices[underlying] = price
                     print(f"[PRICE] Updated {underlying} from option {symbol}: {price}")
         else:
             # This is a direct underlying symbol
-            if symbol in _DASHBOARD_SYMBOLS:
-                prices[symbol] = price
-                print(f"[PRICE] Updated {symbol}: {price}")
+            normalized = _normalize_symbol(symbol)
+            if normalized in _DASHBOARD_SYMBOLS:
+                prices[normalized] = price
+                print(f"[PRICE] Updated {normalized}: {price}")
 
 def get_prices():
     """Get all dashboard prices"""

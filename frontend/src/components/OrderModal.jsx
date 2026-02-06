@@ -11,9 +11,15 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
   const [selectedBasket, setSelectedBasket] = useState('');
   const [newBasketName, setNewBasketName] = useState('');
   const [basketType, setBasketType] = useState('existing');
-  const [margin, setMargin] = useState(0);
+  const [basketOptions, setBasketOptions] = useState([]);
+  const [basketLoading, setBasketLoading] = useState(false);
+  const [margin, setMargin] = useState(null);
   const [marginError, setMarginError] = useState('');
-  const [availableMargin, setAvailableMargin] = useState(0);
+  const [availableMargin, setAvailableMargin] = useState(null);
+  const [limitPrice, setLimitPrice] = useState('');
+  const [depthOpen, setDepthOpen] = useState(false);
+  const [depthLoading, setDepthLoading] = useState(false);
+  const [depthData, setDepthData] = useState(null);
   
   // Super Order states
   const [isSuperOrder, setIsSuperOrder] = useState(false);
@@ -108,14 +114,232 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
   }, [orderType]);
 
   useEffect(() => {
-    // Fetch margin from Dhan API when modal opens
+    if (!isOpen) return;
+    setQuantity(1);
+    setOrderTypeSelection('Normal');
+    setPriceType('Market');
+    setIsBasketOrder(false);
+    setSelectedBasket('');
+    setNewBasketName('');
+    setBasketType('existing');
+    setBasketOptions([]);
+    setBasketLoading(false);
+    setMargin(null);
+    setMarginError('');
+    setAvailableMargin(null);
+    setIsSuperOrder(false);
+    setTargetPrice('');
+    setStopLossPrice('');
+    setTrailingJump(0);
+    setCurrentOrderType(orderType);
+    setLimitPrice(orderData?.ltp ?? '');
+    setDepthOpen(false);
+    setDepthLoading(false);
+    setDepthData(orderData?.depth ? { ...orderData.depth } : {
+      bids: orderData?.depth?.bids || [],
+      asks: orderData?.depth?.asks || [],
+      bid: orderData?.bid ?? null,
+      ask: orderData?.ask ?? null,
+      ltp: orderData?.ltp ?? null,
+    });
+  }, [isOpen, orderType, orderData]);
+
+  const normalizeUnderlying = (text) => {
+    const value = String(text || '').trim().toUpperCase();
+    if (value === 'NIFTY 50' || value === 'NIFTY50') return 'NIFTY';
+    if (value === 'BANK NIFTY' || value === 'NIFTY BANK' || value === 'BANKNIFTY') return 'BANKNIFTY';
+    if (value === 'BSE SENSEX' || value === 'S&P BSE SENSEX' || value === 'SENSEX 50') return 'SENSEX';
+    return value;
+  };
+
+  const normalizeExpiry = (value) => {
+    if (!value) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+
+    const parts = text.split(' ').filter(Boolean);
+    if (parts.length === 2) {
+      const [dayRaw, monRaw] = parts;
+      const day = dayRaw.padStart(2, '0');
+      const months = {
+        Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
+        Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12'
+      };
+      const month = months[monRaw.slice(0, 1).toUpperCase() + monRaw.slice(1, 3).toLowerCase()];
+      if (month) {
+        const year = new Date().getFullYear();
+        return `${year}-${month}-${day}`;
+      }
+    }
+
+    const parsed = new Date(text);
+    if (!Number.isNaN(parsed.valueOf())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+    return text;
+  };
+
+  const parseOptionMeta = useCallback((data) => {
+    const symbolText = String(data?.symbol || '').trim();
+    const parts = symbolText.split(' ').filter(Boolean);
+    let optionType = String(data?.optionType || '').toUpperCase();
+    let strike = data?.strike;
+    let underlying = '';
+
+    if (parts.length >= 3) {
+      optionType = optionType || parts[parts.length - 1].toUpperCase();
+      strike = strike ?? parseFloat(parts[parts.length - 2]);
+      underlying = parts.slice(0, parts.length - 2).join(' ');
+    } else {
+      underlying = symbolText;
+    }
+
+    return {
+      underlying: normalizeUnderlying(underlying),
+      optionType,
+      strike: strike != null ? Number(strike) : null,
+      expiry: normalizeExpiry(data?.expiry_iso ?? data?.expiry) || data?.expiry || null,
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || !orderData) return;
+    if (orderData?.depth) return;
+
+    const meta = parseOptionMeta(orderData);
+    if (!meta.underlying || !meta.expiry || !meta.optionType || meta.strike == null) return;
+
+    const loadDepth = async () => {
+      try {
+        setDepthLoading(true);
+        const response = await fetch(
+          `${API_BASE}/market/option-depth?underlying=${encodeURIComponent(meta.underlying)}&expiry=${encodeURIComponent(meta.expiry)}&strike=${encodeURIComponent(meta.strike)}&option_type=${encodeURIComponent(meta.optionType)}`
+        );
+        if (!response.ok) {
+          setDepthData(null);
+          return;
+        }
+        const result = await response.json();
+        if (result?.status === 'success') {
+          setDepthData({
+            bids: result?.data?.bids || [],
+            asks: result?.data?.asks || [],
+            bid: result?.data?.bid ?? null,
+            ask: result?.data?.ask ?? null,
+            ltp: result?.data?.ltp ?? null,
+          });
+        } else {
+          setDepthData(null);
+        }
+      } catch (error) {
+        console.warn('Failed to load depth:', error);
+        setDepthData(null);
+      } finally {
+        setDepthLoading(false);
+      }
+    };
+
+    loadDepth();
+  }, [API_BASE, isOpen, orderData, parseOptionMeta]);
+
+  useEffect(() => {
+    if (!isOpen || !isBasketOrder) return;
+    const loadBaskets = async () => {
+      try {
+        setBasketLoading(true);
+        const response = await apiService.get('/trading/basket-orders');
+        setBasketOptions(response?.data || []);
+      } catch (error) {
+        console.error('Failed to load baskets:', error);
+        setBasketOptions([]);
+      } finally {
+        setBasketLoading(false);
+      }
+    };
+    loadBaskets();
+  }, [isOpen, isBasketOrder]);
+
+  useEffect(() => {
+    // Fetch margin when modal opens or inputs change
     if (isOpen && orderData) {
       fetchMargin();
     }
-  }, [isOpen, orderData, quantity, currentOrderType, priceType]);
+  }, [isOpen, orderData, quantity, currentOrderType, priceType, orderTypeSelection, limitPrice]);
+
+  const resolveExchangeSegment = (data) => {
+    if (data?.exchange_segment) return data.exchange_segment;
+    if (data?.exchangeSegment) return data.exchangeSegment;
+    const exchange = String(data?.exchange || '').toUpperCase();
+    const symbol = String(data?.symbol || '').toUpperCase();
+    const instrumentType = String(data?.instrumentType || '').toUpperCase();
+    if (exchange.includes('MCX')) return 'MCX_COM';
+    if (instrumentType.includes('OPT') || symbol.includes(' CE') || symbol.includes(' PE')) return 'NSE_FNO';
+    return 'NSE_EQ';
+  };
+
+  const resolveProductType = () => (orderTypeSelection === 'MIS' ? 'MIS' : 'NORMAL');
 
   const fetchMargin = async () => {
     try {
+      const lotSize = Number(orderData?.lotSize || 1);
+      const effectiveQty = Math.max(1, Number(quantity || 1)) * lotSize;
+      const priceForMargin = priceType === 'Limit'
+        ? Number(limitPrice || orderData?.ltp || 0)
+        : Number(orderData?.ltp || 0);
+      const productType = resolveProductType();
+      const exchangeSegment = resolveExchangeSegment(orderData);
+      const transactionType = currentOrderType;
+      const optionMeta = parseOptionMeta(orderData);
+
+      const legs = orderData?.legs?.length ? orderData.legs : null;
+      const hasMultiLegs = Array.isArray(legs) && legs.length > 1;
+      const canUseMulti = hasMultiLegs && legs.every((leg) => leg?.security_id || leg?.securityId);
+
+      if (canUseMulti) {
+        const scripts = legs.map((leg) => {
+          const meta = parseOptionMeta(leg);
+          const legLot = Number(leg?.lotSize || lotSize || 1);
+          const legQty = Math.max(1, Number(quantity || 1)) * legLot;
+          const legPrice = priceType === 'Limit'
+            ? Number(leg?.ltp ?? priceForMargin)
+            : Number(leg?.ltp ?? priceForMargin);
+          return {
+            exchange_segment: resolveExchangeSegment(leg),
+            transaction_type: String(leg?.action || transactionType).toUpperCase(),
+            quantity: legQty,
+            product_type: productType,
+            security_id: leg?.security_id || leg?.securityId,
+            price: legPrice,
+            symbol: leg?.symbol,
+            expiry: meta?.expiry || null,
+            strike: meta?.strike ?? null,
+            option_type: meta?.optionType || null,
+          };
+        });
+
+        const response = await fetch(`${API_BASE}/margin/calculate-multi`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            scripts,
+            include_positions: true,
+            include_orders: true,
+          })
+        });
+
+        const data = await response.json();
+        const hasMargin = typeof data?.margin === 'number';
+        if (data?.success || hasMargin) {
+          setMargin(hasMargin ? data.margin : null);
+          setMarginError(data?.source === 'MOCK' ? 'Live margin unavailable; using fallback.' : '');
+          setAvailableMargin(typeof data?.availableMargin === 'number' ? data.availableMargin : null);
+          return;
+        }
+      }
+
       const response = await fetch(`${API_BASE}/margin/calculate`, {
         method: 'POST',
         headers: {
@@ -123,30 +347,62 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
         },
         body: JSON.stringify({
           symbol: orderData.symbol,
-          quantity: quantity,
+          exchange_segment: exchangeSegment,
+          transaction_type: transactionType,
+          security_id: orderData.security_id || orderData.id || null,
+            expiry: optionMeta?.expiry || null,
+            strike: optionMeta?.strike ?? null,
+            option_type: optionMeta?.optionType || null,
+          quantity: effectiveQty,
           orderType: currentOrderType,
           priceType: priceType,
-          price: priceType === 'Limit' ? orderData.ltp : 0,
-          lotSize: orderData.lotSize
+          price: priceForMargin,
+          lotSize: lotSize,
+          product_type: productType
         })
       });
       
       const data = await response.json();
       
-      if (data.success) {
-        setMargin(data.margin);
-        setMarginError('');
-        setAvailableMargin(data.availableMargin);
+      const hasMargin = typeof data?.margin === 'number';
+      if (data?.success || hasMargin) {
+        setMargin(hasMargin ? data.margin : null);
+        setMarginError(data?.source === 'MOCK' ? 'Live margin unavailable; using fallback.' : '');
+        setAvailableMargin(typeof data?.availableMargin === 'number' ? data.availableMargin : null);
       } else {
         // Keep blank if server fails to fetch margin
         setMarginError('');
-        setMargin(0);
+        setMargin(null);
       }
     } catch (error) {
       console.error('Margin calculation error:', error);
       // Keep blank if server fails
       setMarginError('');
-      setMargin(0);
+      setMargin(null);
+    }
+  };
+
+  const notifyUpdates = (targets) => {
+    const safeTargets = Array.isArray(targets) ? targets : [];
+    if (safeTargets.includes('orders')) {
+      apiService.clearCacheEntry('/trading/orders');
+    }
+    if (safeTargets.includes('positions')) {
+      apiService.clearCacheEntry('/portfolio/positions');
+    }
+    if (safeTargets.includes('baskets')) {
+      apiService.clearCacheEntry('/trading/basket-orders');
+    }
+    if (typeof window !== 'undefined') {
+      if (safeTargets.includes('orders')) {
+        window.dispatchEvent(new CustomEvent('orders:updated'));
+      }
+      if (safeTargets.includes('positions')) {
+        window.dispatchEvent(new CustomEvent('positions:updated'));
+      }
+      if (safeTargets.includes('baskets')) {
+        window.dispatchEvent(new CustomEvent('baskets:updated'));
+      }
     }
   };
 
@@ -156,8 +412,16 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
   };
 
   const handleSubmit = async () => {
+    const productType = resolveProductType();
+    const exchangeSegment = resolveExchangeSegment(orderData);
+    const lotSize = Number(orderData?.lotSize || 1);
+    const effectiveQty = Math.max(1, Number(quantity || 1)) * lotSize;
+    const resolvedPrice = priceType === 'Limit'
+      ? Number(limitPrice || orderData?.ltp || 0)
+      : 0;
+
     // Check if sufficient margin is available
-    if (margin > availableMargin) {
+    if (margin != null && availableMargin != null && margin > availableMargin) {
       setMarginError('Insufficient margin available');
       return;
     }
@@ -171,67 +435,133 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
         }
 
         const superOrderPayload = {
-          security_id: orderData.id || orderData.security_id,
-          exchange_segment: orderData.exchange || 'MCX_COM',
+          symbol: orderData.symbol,
+          security_id: orderData.security_id || orderData.id || null,
+          exchange_segment: exchangeSegment,
           transaction_type: currentOrderType,
-          quantity: quantity,
+          quantity: effectiveQty,
           order_type: priceType === 'Market' ? 'MARKET' : 'LIMIT',
-          product_type: orderTypeSelection === 'MIS' ? 'INTRADAY' : 'DELIVERY',
-          price: priceType === 'Market' ? 0 : orderData.ltp,
+          product_type: productType,
+          price: priceType === 'Market' ? 0 : resolvedPrice,
+          is_super: true,
           target_price: parseFloat(targetPrice),
           stop_loss_price: parseFloat(stopLossPrice),
-          trailing_jump: parseFloat(trailingJump)
+          trailing_jump: parseFloat(trailingJump || 0)
         };
 
-        const response = await apiService.post('/trading/orders', {
-          security_id: orderData.id || orderData.security_id,
-          exchange_segment: orderData.exchange || 'MCX_COM',
-          transaction_type: currentOrderType,
-          quantity: quantity,
-          order_type: priceType === 'Market' ? 'MARKET' : 'LIMIT',
-          product_type: orderTypeSelection === 'MIS' ? 'INTRADAY' : 'DELIVERY',
-          price: priceType === 'Market' ? 0 : orderData.ltp,
-          target_price: parseFloat(targetPrice),
-          stop_loss_price: parseFloat(stopLossPrice),
-          trailing_jump: parseFloat(trailingJump)
-        });
+        const response = await apiService.post('/trading/orders', superOrderPayload);
         
         if (response) {
           console.log('Super order placed successfully:', response);
+          notifyUpdates(['orders', 'positions']);
           onClose();
         } else {
           setMarginError('Failed to place super order');
         }
       } else {
         // Place Regular Order
-        const orderPayload = {
-          symbol: orderData.symbol,
-          action: currentOrderType,
-          quantity: quantity,
-          orderTypeSelection,
-          priceType,
-          price: priceType === 'Limit' ? orderData.ltp : 0,
-          lotSize: orderData.lotSize,
-          expiry: orderData.expiry,
-          legs: orderData.legs || null,
-          isBasketOrder,
-          basketId: selectedBasket || null,
-          basketName: selectedBasket === '' ? newBasketName : null,
-          margin: margin
-        };
+        if (isBasketOrder) {
+          const legs = (orderData.legs?.length ? orderData.legs : [orderData]).map((leg) => {
+            const legLot = Number(leg?.lotSize || orderData?.lotSize || 1);
+            const legQty = Math.max(1, Number(quantity || 1)) * legLot;
+            const legPrice = priceType === 'Market'
+              ? 0
+              : Number(leg?.ltp ?? resolvedPrice);
+            return {
+              symbol: leg.symbol,
+              security_id: leg.security_id || leg.id || null,
+              exchange_segment: resolveExchangeSegment(leg),
+              transaction_type: String(leg.action || currentOrderType).toUpperCase(),
+              quantity: legQty,
+              order_type: priceType === 'Market' ? 'MARKET' : 'LIMIT',
+              product_type: productType,
+              price: legPrice
+            };
+          });
+
+          if (basketType === 'existing') {
+            if (!selectedBasket) {
+              setMarginError('Please select a basket');
+              return;
+            }
+            const response = await apiService.post(`/trading/basket-orders/${selectedBasket}/legs`, {
+              legs
+            });
+            if (response) {
+              console.log('Basket order updated successfully:', response);
+              notifyUpdates(['baskets']);
+              onClose();
+            } else {
+              setMarginError('Failed to update basket');
+            }
+            return;
+          }
+
+          const basketName = newBasketName.trim();
+          if (!basketName) {
+            setMarginError('Basket name is required');
+            return;
+          }
+
+          const response = await apiService.post('/trading/basket-orders', {
+            name: basketName,
+            legs
+          });
+
+          if (response) {
+            console.log('Basket order created successfully:', response);
+            notifyUpdates(['baskets']);
+            onClose();
+          } else {
+            setMarginError('Failed to create basket order');
+          }
+          return;
+        }
+
+        const legs = orderData.legs?.length ? orderData.legs : null;
+        if (legs && legs.length > 1) {
+          const responses = [];
+          for (const leg of legs) {
+            const legLot = Number(leg?.lotSize || orderData?.lotSize || 1);
+            const legQty = Math.max(1, Number(quantity || 1)) * legLot;
+            const legPrice = priceType === 'Market'
+              ? 0
+              : Number(leg?.ltp ?? resolvedPrice);
+            responses.push(await apiService.post('/trading/orders', {
+              symbol: leg.symbol,
+              security_id: leg.security_id || leg.id || null,
+              exchange_segment: resolveExchangeSegment(leg),
+              transaction_type: String(leg.action || currentOrderType).toUpperCase(),
+              quantity: legQty,
+              order_type: priceType === 'Market' ? 'MARKET' : 'LIMIT',
+              product_type: productType,
+              price: legPrice
+            }));
+          }
+          if (responses.length) {
+            console.log('Multi-leg order placed successfully:', responses);
+            notifyUpdates(['orders', 'positions']);
+            onClose();
+          } else {
+            setMarginError('Failed to place multi-leg order');
+          }
+          return;
+        }
 
         const response = await apiService.post('/trading/orders', {
-          security_id: orderData.id || orderData.security_id,
-          quantity: quantity,
+          symbol: orderData.symbol,
+          security_id: orderData.security_id || orderData.id || null,
+          exchange_segment: exchangeSegment,
           transaction_type: currentOrderType,
+          quantity: effectiveQty,
           order_type: priceType === 'Market' ? 'MARKET' : 'LIMIT',
-          product_type: orderTypeSelection === 'MIS' ? 'INTRADAY' : 'DELIVERY',
-          exchange: orderData.exchange || 'NSE_EQ',
-          price: priceType === 'Market' ? null : orderData.ltp
+          product_type: productType,
+          price: priceType === 'Market' ? 0 : resolvedPrice
         });
 
         if (response) {
           console.log('Order placed successfully:', response);
+          notifyUpdates(['orders', 'positions']);
           onClose();
         } else {
           setMarginError('Failed to place order');
@@ -239,7 +569,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
       }
     } catch (error) {
       console.error('Order placement error:', error);
-      setMarginError('Failed to place order. Please try again.');
+      setMarginError(error?.message || 'Failed to place order. Please try again.');
     }
   };
 
@@ -295,7 +625,9 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
               </h2>
               <p className="text-xs text-gray-600">
                 {orderData.symbol}
-                {orderData.expiry && <span className="text-xs"> ({orderData.expiry})</span>}
+                {(orderData.expiry_display || orderData.expiry) && (
+                  <span className="text-xs"> ({orderData.expiry_display || orderData.expiry})</span>
+                )}
               </p>
             </div>
           </div>
@@ -396,9 +728,17 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
                       className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
                     >
                       <option value="">Select Basket</option>
-                      <option value="BASKET_1">NIFTY Options</option>
-                      <option value="BASKET_2">Bank NIFTY</option>
-                      <option value="BASKET_3">Stock Portfolio</option>
+                      {basketLoading && (
+                        <option value="" disabled>Loading...</option>
+                      )}
+                      {!basketLoading && basketOptions.length === 0 && (
+                        <option value="" disabled>No baskets available</option>
+                      )}
+                      {!basketLoading && basketOptions.map((basket) => (
+                        <option key={basket.id} value={basket.id}>
+                          {basket.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}
@@ -477,6 +817,8 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
                 <input
                   type="number"
                   disabled={priceType === 'Market'}
+                  value={priceType === 'Market' ? '' : limitPrice}
+                  onChange={(e) => setLimitPrice(e.target.value)}
                   className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
                   placeholder={priceType === 'Market' ? 'Market' : 'Enter Price'}
                 />
@@ -585,11 +927,58 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
               {/* Margin */}
               <div>
                 <div className="text-xs font-medium text-gray-700">
-                  Margin: ₹{margin.toFixed(2)}
+                  Margin: {margin == null ? '—' : `₹${margin.toFixed(2)}`}
                 </div>
                 {marginError && (
                   <div className="text-xs text-red-600 mt-1">
                     {marginError}
+                  </div>
+                )}
+              </div>
+
+              {/* Depth */}
+              <div>
+                <div className="text-[11px] text-gray-600 mb-1">
+                  <span className="font-semibold text-gray-700">Best Bid/Ask:</span>{' '}
+                  <span>Bid {Number(depthData?.bid || orderData?.bid || orderData?.ltp || 0).toFixed(2)}</span>
+                  <span className="mx-1">|</span>
+                  <span>Ask {Number(depthData?.ask || orderData?.ask || orderData?.ltp || 0).toFixed(2)}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDepthOpen((prev) => !prev)}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                >
+                  {depthOpen ? 'Hide' : 'Show'} Top 5 Bid/Ask
+                </button>
+                {depthOpen && (
+                  <div className="mt-2 text-[11px] text-gray-600">
+                    {depthLoading && <div>Loading depth...</div>}
+                    {!depthLoading && (!depthData || (!depthData?.bids?.length && !depthData?.asks?.length)) && (
+                      <div>No depth available.</div>
+                    )}
+                    {!depthLoading && depthData && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <div className="font-semibold text-gray-700">Bids</div>
+                          {depthData.bids?.slice(0, 5).map((level, idx) => (
+                            <div key={`bid-${idx}`} className="flex justify-between">
+                              <span>{Number(level.price || 0).toFixed(2)}</span>
+                              <span>{Number(level.qty || 0).toFixed(0)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-gray-700">Asks</div>
+                          {depthData.asks?.slice(0, 5).map((level, idx) => (
+                            <div key={`ask-${idx}`} className="flex justify-between">
+                              <span>{Number(level.price || 0).toFixed(2)}</span>
+                              <span>{Number(level.qty || 0).toFixed(0)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

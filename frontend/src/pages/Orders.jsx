@@ -15,7 +15,7 @@ const enrichOrder = (o) => {
   let leg1Price = price;
   let leg2Price = "-";
   const nowDate = new Date();
-  const defaultDateTime = `${nowDate.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })} ${nowDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
+  const defaultDateTime = `${nowDate.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" })} ${nowDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}`;
 
   if (isSD) {
     // mock CE/PE prices around given price
@@ -54,12 +54,12 @@ const OrdersTab = () => {
 
   const formatTime = (isoLike) => {
     const date = new Date(isoLike || new Date().toISOString());
-    return date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
   };
 
   const formatDateTime = (isoLike) => {
     const date = new Date(isoLike || new Date().toISOString());
-    return `${date.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })} ${date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
+    return `${date.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" })} ${date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}`;
   };
 
   const mapOrder = (order) => {
@@ -67,6 +67,8 @@ const OrdersTab = () => {
     const updatedAt = order.updated_at || order.updatedAt || createdAt;
     const qty = Number(order.quantity ?? order.qty ?? 0);
     const price = Number(order.price ?? order.execution_price ?? order.executionPrice ?? 0);
+    const statusRaw = String(order.status || 'PENDING');
+    const status = statusRaw.toUpperCase();
     return enrichOrder({
       id: order.id ?? randomId(),
       time: formatTime(createdAt),
@@ -77,7 +79,8 @@ const OrdersTab = () => {
       productType: order.product_type || order.productType || 'MIS',
       qty,
       price,
-      status: order.status || 'PENDING',
+      status,
+      rejectionReason: order.remarks || order.rejection_reason || order.reason || '',
       triggerPrice: order.trigger_price ?? order.triggerPrice ?? 0,
       target: order.target_price ?? order.target ?? 0,
       stopLoss: order.stop_loss_price ?? order.stopLoss ?? 0,
@@ -111,6 +114,12 @@ const OrdersTab = () => {
   // Fetch orders from API
   useEffect(() => {
     fetchOrders();
+  }, [fetchOrders]);
+
+  useEffect(() => {
+    const handleOrdersUpdated = () => fetchOrders();
+    window.addEventListener('orders:updated', handleOrdersUpdated);
+    return () => window.removeEventListener('orders:updated', handleOrdersUpdated);
   }, [fetchOrders]);
 
   // Manual refresh function
@@ -299,8 +308,9 @@ const OrdersTab = () => {
 
   const statusStyle = (status) => {
     const base = { fontWeight: 600 };
-    if (status === "Executed") return { ...base, color: "#16a34a" };
-    if (status === "Rejected") return { ...base, color: "#dc2626" };
+    const normalized = String(status || '').toUpperCase();
+    if (normalized === "EXECUTED") return { ...base, color: "#16a34a" };
+    if (normalized === "REJECTED") return { ...base, color: "#dc2626" };
     return { ...base, color: "#111827" }; // Pending/others
   };
 
@@ -488,6 +498,9 @@ const OrdersTab = () => {
               selectedOrder.qty.toLocaleString("en-IN")
             )}
             {renderDetailsRow("Order Status", selectedOrder.status)}
+            {selectedOrder.status === "REJECTED" && selectedOrder.rejectionReason && (
+              renderDetailsRow("Rejection Reason", selectedOrder.rejectionReason)
+            )}
             {renderDetailsRow(
               "Executed Quantity",
               selectedOrder.executedQty.toLocaleString("en-IN")

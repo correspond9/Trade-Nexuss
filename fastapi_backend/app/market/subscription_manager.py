@@ -132,6 +132,12 @@ def _resolve_security_metadata(
             continue
 
         exchange = _determine_exchange(row.get("EXCH_ID"), canonical)
+        if opt_type in ("CE", "PE"):
+            row_exchange = (row.get("EXCH_ID") or "").strip().upper()
+            if row_exchange == "BSE":
+                exchange = _EXCHANGE_CODE_MAP.get("BSE_FNO", 8)
+            elif row_exchange == "NSE":
+                exchange = _EXCHANGE_CODE_MAP.get("NSE_FNO", 2)
         return {
             "security_id": str(security_id).strip(),
             "exchange": exchange,

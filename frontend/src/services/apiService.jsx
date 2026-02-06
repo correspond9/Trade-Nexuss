@@ -652,7 +652,7 @@ class ApiService {
       // Handle other HTTP errors
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        throw new Error(errorData.message || errorData.detail || `HTTP error! status: ${response.status}`);
       }
 
       // Handle empty responses
@@ -672,7 +672,12 @@ class ApiService {
     const cacheKey = `${endpoint}?${JSON.stringify(params)}`;
 
     // Skip cache for search endpoints to always get fresh data
-    const skipCache = endpoint.includes('/market/dhan/instruments') || endpoint.includes('/search/search');
+    const skipCache =
+      endpoint.includes('/market/dhan/instruments') ||
+      endpoint.includes('/search/search') ||
+      endpoint.includes('/trading/orders') ||
+      endpoint.includes('/portfolio/positions') ||
+      endpoint.includes('/trading/basket-orders');
 
     // Check cache first (unless skipping cache)
     if (!skipCache && this.cache.has(cacheKey)) {

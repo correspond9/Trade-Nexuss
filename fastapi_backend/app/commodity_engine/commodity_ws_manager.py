@@ -92,6 +92,8 @@ class _CommodityWSConnection(threading.Thread):
             self.feed.run_forever()
         except Exception as exc:
             logger.error(f"[MCX-WS] Connection {self.connection_id} run_forever failed: {exc}")
+            if "429" in str(exc):
+                self.manager.block("HTTP_429")
             return
 
         while not self._stop.is_set():
@@ -102,6 +104,8 @@ class _CommodityWSConnection(threading.Thread):
                 time.sleep(0.01)
             except Exception as exc:
                 logger.error(f"[MCX-WS] Connection {self.connection_id} error: {exc}")
+                if "429" in str(exc):
+                    self.manager.block("HTTP_429")
                 time.sleep(1)
 
 
@@ -113,6 +117,18 @@ class CommodityWebSocketManager:
         self.last_quotes: Dict[str, Dict[str, object]] = {}
         self.credentials: Optional[Dict[str, str]] = None
         self._lock = threading.RLock()
+        self._block_until = 0.0
+        self._last_start_attempt = 0.0
+        self._min_start_interval = 30.0
+        self._cooldown_seconds = 300.0
+
+    def block(self, reason: str) -> None:
+        now = time.time()
+        self._block_until = now + self._cooldown_seconds
+        logger.warning(f"[MCX-WS] Blocking reconnection for {self._cooldown_seconds}s due to {reason}")
+
+    def reset_block(self) -> None:
+        self._block_until = 0.0
 
     async def refresh_credentials(self) -> None:
         self.credentials = await fetch_dhan_credentials()
@@ -140,6 +156,14 @@ class CommodityWebSocketManager:
         self.connections = []
 
     async def start(self):
+        now = time.time()
+        if now < self._block_until:
+            logger.warning("[MCX-WS] Start skipped (cooldown active)")
+            return
+        if (now - self._last_start_attempt) < self._min_start_interval:
+            logger.warning("[MCX-WS] Start skipped (min interval)")
+            return
+        self._last_start_attempt = now
         await self.refresh_credentials()
         self.build_token_index()
         tokens = list(self.token_index.keys())
@@ -246,6 +270,8 @@ class CommodityWebSocketManager:
             "connected_connections": connected,
             "total_connections": len(self.connections),
             "per_connection": connections,
+            "cooldown_active": time.time() < self._block_until,
+            "cooldown_until": self._block_until if self._block_until else None,
         }
 
 

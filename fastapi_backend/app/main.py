@@ -14,6 +14,7 @@ from app.rest.market_api_v2 import router as market_v2_router
 from app.rest.mock_exchange import router as mock_exchange_router
 from app.commodity_engine import commodity_engine
 from app.commodity_engine.commodity_rest import router as commodity_router
+from app.admin.admin_panel import router as admin_router
 from app.lifecycle.hooks import on_start, on_stop
 from app.market.instrument_master.registry import load_instruments
 from app.market.atm_engine import get_atm_engine
@@ -163,6 +164,7 @@ app.include_router(mock_exchange_router, prefix="/api/v2")
 app.include_router(mock_exchange_router, prefix="/api/v1")
 app.include_router(mock_exchange_router, prefix="/api")
 app.include_router(commodity_router)
+app.include_router(admin_router)
 
 # Serve static files (JS, CSS if any)
 import os

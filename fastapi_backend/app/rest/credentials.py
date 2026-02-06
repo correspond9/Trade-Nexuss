@@ -3,7 +3,7 @@ from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 from app.storage.db import SessionLocal
 from app.storage.models import DhanCredential
-from app.dhan.live_feed import start_live_feed
+from app.market_orchestrator import get_orchestrator
 
 router = APIRouter()
 
@@ -88,8 +88,8 @@ def save_credentials(c: CredSaveIn):
 
         db.commit()
 
-        # Start WebSocket feed immediately after credentials are saved
-        start_live_feed()
+        # Start market data streams immediately after credentials are saved
+        get_orchestrator().start_streams_sync()
 
         return {
             "success": True,
@@ -208,8 +208,8 @@ def save_creds(c: CredIn):
         db.add(row)
         db.commit()
 
-        # Start WebSocket feed immediately after credentials are saved
-        start_live_feed()
+        # Start market data streams immediately after credentials are saved
+        get_orchestrator().start_streams_sync()
 
         return {"status": "saved"}
     finally:

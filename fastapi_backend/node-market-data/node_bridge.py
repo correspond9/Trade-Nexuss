@@ -12,6 +12,10 @@ def start_node_bridge():
                 r = requests.get(NODE_URL, timeout=1).json()
                 if "NIFTY" in r:
                     update_price("NIFTY", float(r["NIFTY"]))
+                if "BANKNIFTY" in r:
+                    update_price("BANKNIFTY", float(r["BANKNIFTY"]))
+                if "NIFTY BANK" in r:
+                    update_price("BANKNIFTY", float(r["NIFTY BANK"]))
                 if "SENSEX" in r:
                     update_price("SENSEX", float(r["SENSEX"]))
                 if "CRUDEOIL" in r:

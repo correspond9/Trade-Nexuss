@@ -76,12 +76,14 @@ class MarketCacheManager:
         option_type = tick.get("option_type")
         strike = tick.get("strike")
         is_index = bool(tick.get("is_index"))
+        ltp = tick.get("ltp")
+        depth = tick.get("depth")
 
         fields = {
             "exchange": exchange,
             "symbol": symbol,
             "expiry": expiry,
-            "ltp": tick.get("ltp"),
+            "ltp": ltp,
             "bid": tick.get("bid"),
             "ask": tick.get("ask"),
             "volume": tick.get("volume"),
@@ -95,8 +97,28 @@ class MarketCacheManager:
             self.update_future(exchange, symbol, str(expiry), fields)
         elif is_index:
             self.set_index(symbol, fields)
+            try:
+                if ltp is not None:
+                    from app.market.live_prices import update_price
+                    update_price(symbol, float(ltp))
+            except Exception:
+                pass
         else:
             self.set_equity(exchange, symbol, fields)
+            try:
+                if ltp is not None:
+                    from app.market.live_prices import update_price, get_dashboard_symbols
+                    if symbol in get_dashboard_symbols():
+                        update_price(symbol, float(ltp))
+            except Exception:
+                pass
+
+        if depth is not None:
+            try:
+                from app.market.market_state import state
+                state.setdefault("depth", {})[symbol] = depth
+            except Exception:
+                pass
 
     def cache_status(self) -> Dict[str, object]:
         options_count = len(list_option_chains()) if list_option_chains else 0

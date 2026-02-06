@@ -182,6 +182,7 @@ const Commodities = () => {
       ltp: leg.ltp,
       lotSize: leg.lotSize,
       expiry: leg.expiry,
+      exchange_segment: 'MCX_COM',
       legs: null,
     });
     setModalOrderType(leg.action || 'BUY');

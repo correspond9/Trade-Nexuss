@@ -29,13 +29,80 @@ class ExecutionEngine:
         self.queue_manager = OrderQueueManager()
 
     def _snapshot_for_order(self, symbol: str, exchange_segment: str) -> Dict[str, object]:
+        symbol_text = (symbol or "").upper().strip()
+        parts = symbol_text.split()
+        try:
+            from app.market.market_state import state
+            depth = (state.get("depth") or {}).get(symbol_text)
+            if isinstance(depth, dict):
+                bids = depth.get("bids") or depth.get("bid") or []
+                asks = depth.get("asks") or depth.get("ask") or []
+                best_bid = bids[0].get("price") if bids else None
+                best_ask = asks[0].get("price") if asks else None
+                bid_qty = bids[0].get("qty") if bids else None
+                ask_qty = asks[0].get("qty") if asks else None
+                if best_bid is not None or best_ask is not None:
+                    return {
+                        "best_bid": best_bid,
+                        "best_ask": best_ask,
+                        "bid_qty": bid_qty,
+                        "ask_qty": ask_qty,
+                        "last_update_time": datetime.utcnow().isoformat(),
+                    }
+        except Exception:
+            pass
+        if len(parts) >= 3 and parts[-1] in {"CE", "PE"}:
+            try:
+                strike_val = float(parts[-2])
+                expiry_hint = None
+                if len(parts) >= 4 and any(ch.isalpha() for ch in parts[-3]) and any(ch.isdigit() for ch in parts[-3]):
+                    expiry_hint = parts[-3]
+                    underlying = " ".join(parts[:-3]).strip()
+                else:
+                    underlying = " ".join(parts[:-2]).strip()
+                if underlying:
+                    try:
+                        from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+                        chains = authoritative_option_chain_service.option_chain_cache.get(underlying, {})
+                        best = None
+                        for expiry, skeleton in chains.items():
+                            if expiry_hint and expiry != expiry_hint:
+                                continue
+                            leg = skeleton.strikes.get(strike_val)
+                            if not leg:
+                                leg = skeleton.strikes.get(float(strike_val))
+                            if not leg:
+                                continue
+                            data = leg.CE if parts[-1] == "CE" else leg.PE
+                            if not data:
+                                continue
+                            best = data
+                            break
+
+                        if best:
+                            bid = best.bid if best.bid is not None else best.ltp
+                            ask = best.ask if best.ask is not None else best.ltp
+                            return {
+                                "best_bid": bid,
+                                "best_ask": ask,
+                                "bid_qty": None,
+                                "ask_qty": None,
+                                "last_update_time": datetime.utcnow().isoformat(),
+                            }
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         symbol_upper = (symbol or "").upper()
         exchange_prefix = (exchange_segment or "").split("_")[0].upper()
         equity = get_equity(exchange_prefix, symbol_upper)
         if equity:
+            bid = equity.get("bid") or equity.get("ltp")
+            ask = equity.get("ask") or equity.get("ltp")
             return {
-                "best_bid": equity.get("bid"),
-                "best_ask": equity.get("ask"),
+                "best_bid": bid,
+                "best_ask": ask,
                 "bid_qty": equity.get("bid_qty"),
                 "ask_qty": equity.get("ask_qty"),
                 "last_update_time": equity.get("timestamp"),
@@ -44,9 +111,11 @@ class ExecutionEngine:
         futures = list_futures(exchange=exchange_prefix, symbol=symbol_upper)
         if futures:
             entry = futures[0]
+            bid = entry.get("bid") or entry.get("ltp")
+            ask = entry.get("ask") or entry.get("ltp")
             return {
-                "best_bid": entry.get("bid"),
-                "best_ask": entry.get("ask"),
+                "best_bid": bid,
+                "best_ask": ask,
                 "bid_qty": entry.get("bid_qty"),
                 "ask_qty": entry.get("ask_qty"),
                 "last_update_time": entry.get("timestamp"),
@@ -55,9 +124,11 @@ class ExecutionEngine:
         chains = list_option_chains(exchange=exchange_prefix, symbol=symbol_upper)
         if chains:
             entry = chains[0]
+            bid = entry.get("bid") or entry.get("ltp")
+            ask = entry.get("ask") or entry.get("ltp")
             return {
-                "best_bid": entry.get("bid"),
-                "best_ask": entry.get("ask"),
+                "best_bid": bid,
+                "best_ask": ask,
                 "bid_qty": entry.get("bid_qty"),
                 "ask_qty": entry.get("ask_qty"),
                 "last_update_time": entry.get("timestamp"),

@@ -1,0 +1,46 @@
+"mcpServers": [
+  {
+    "name": "filesystem",
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "C:\\Users\\Sufyan Ansari"
+    ]
+  }
+]
+{
+  "models": [
+ 
+    {
+      "title": "DeepSeek R1",
+      "provider": "ollama",
+      "model": "deepseek-r1:14b"
+      "systemMessage": "You are a senior system architect. Plan first. Code later."
+
+    },    
+{
+      "title": "DeepSeek Coder",
+      "provider": "ollama",
+      "model": "deepseek-coder:6.7b"
+      "systemMessage": "Write production-grade code. Minimal explanation."
+    },
+  {
+      "title": "CodeLlama 7B",
+      "provider": "ollama",
+      "model": "codellama:7b"
+      "systemMessage": "Edit and improve existing code."
+    },
+    {
+      "title": "Llama 3.1",
+      "provider": "ollama",
+      "model": "llama3.1:8b"
+      "systemMessage": "Explain simply. Write documentation."
+    }, 
+   {
+      "title": "Qwen Coder 7B",
+      "provider": "ollama",
+      "model": "qwen2.5-coder:7b"
+    }
+  ],
+  "defaultModel": "DeepSeek Coder"

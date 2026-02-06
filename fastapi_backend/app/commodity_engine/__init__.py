@@ -120,7 +120,11 @@ class CommodityEngine:
             await asyncio.sleep(1.0)
 
         commodity_ws_manager.build_token_index()
-        await commodity_ws_manager.start()
+        try:
+            from app.market_orchestrator import get_orchestrator
+            await get_orchestrator().start_mcx_stream()
+        except Exception:
+            await commodity_ws_manager.start()
 
         logger.info("[MCX] Commodity cache refresh complete")
 
@@ -135,7 +139,11 @@ class CommodityEngine:
             await asyncio.sleep(1.0)
 
         commodity_ws_manager.build_token_index()
-        await commodity_ws_manager.start()
+        try:
+            from app.market_orchestrator import get_orchestrator
+            await get_orchestrator().start_mcx_stream()
+        except Exception:
+            await commodity_ws_manager.start()
 
         logger.info("[MCX] Option chain refresh complete")
 

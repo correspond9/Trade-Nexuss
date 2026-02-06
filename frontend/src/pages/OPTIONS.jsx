@@ -8,6 +8,13 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
 
   // Convert selectedIndex to symbol for API calls
   const symbol = normalizeUnderlying(selectedIndex);
+  const resolveOptionSegment = (underlyingSymbol) => {
+    const upper = String(underlyingSymbol || '').toUpperCase();
+    if (upper === 'SENSEX' || upper === 'BANKEX') {
+      return 'BSE_FNO';
+    }
+    return 'NSE_FNO';
+  };
 
   // ✨ Use the authoritative hook to fetch realtime cached data
   const {
@@ -76,6 +83,8 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
           askCE: strikeData.CE?.ask || 0,
           bidPE: strikeData.PE?.bid || 0,
           askPE: strikeData.PE?.ask || 0,
+          depthCE: strikeData.CE?.depth || null,
+          depthPE: strikeData.PE?.depth || null,
           ceToken: strikeData.CE?.token || null,
           peToken: strikeData.PE?.token || null,
           ceGreeks: strikeData.CE?.greeks || {},
@@ -205,6 +214,13 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                       action: 'BUY',
                       ltp: strikeData.ltpCE,
                       lotSize: strikeData.lotSize,
+                      security_id: strikeData.ceToken,
+                      exchange_segment: resolveOptionSegment(symbol),
+                      bid: strikeData.bidCE,
+                      ask: strikeData.askCE,
+                      strike: strikeData.strike,
+                      optionType: 'CE',
+                      depth: strikeData.depthCE,
                       expiry,
                     }]);
                   }}
@@ -222,6 +238,13 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                       action: 'SELL',
                       ltp: strikeData.ltpCE,
                       lotSize: strikeData.lotSize,
+                      security_id: strikeData.ceToken,
+                      exchange_segment: resolveOptionSegment(symbol),
+                      bid: strikeData.bidCE,
+                      ask: strikeData.askCE,
+                      strike: strikeData.strike,
+                      optionType: 'CE',
+                      depth: strikeData.depthCE,
                       expiry,
                     }]);
                   }}
@@ -252,6 +275,13 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                       action: 'BUY',
                       ltp: strikeData.ltpPE,
                       lotSize: strikeData.lotSize,
+                      security_id: strikeData.peToken,
+                      exchange_segment: resolveOptionSegment(symbol),
+                      bid: strikeData.bidPE,
+                      ask: strikeData.askPE,
+                      strike: strikeData.strike,
+                      optionType: 'PE',
+                      depth: strikeData.depthPE,
                       expiry,
                     }]);
                   }}
@@ -269,6 +299,13 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                       action: 'SELL',
                       ltp: strikeData.ltpPE,
                       lotSize: strikeData.lotSize,
+                      security_id: strikeData.peToken,
+                      exchange_segment: resolveOptionSegment(symbol),
+                      bid: strikeData.bidPE,
+                      ask: strikeData.askPE,
+                      strike: strikeData.strike,
+                      optionType: 'PE',
+                      depth: strikeData.depthPE,
                       expiry,
                     }]);
                   }}

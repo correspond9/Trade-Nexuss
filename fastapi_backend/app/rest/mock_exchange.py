@@ -1,4 +1,5 @@
 from datetime import datetime
+import asyncio
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,16 @@ from app.storage import models
 from app.market.live_prices import get_prices
 from app.rms.kill_switch import blocked as kill_switch_blocked
 from app.execution_simulator import get_execution_engine
+from app.rms.span_margin_calculator import (
+    calculate_span_margin_for_positions,
+    fetch_user_positions as fetch_fno_positions,
+    position_from_order as span_position_from_order,
+)
+from app.rms.mcx_margin_calculator import (
+    calculate_mcx_margin_for_positions,
+    fetch_mcx_positions,
+    position_from_order as mcx_position_from_order,
+)
 
 router = APIRouter(tags=["mock-exchange"])
 EXEC_ENGINE = get_execution_engine()
@@ -80,11 +91,206 @@ def _get_or_create_margin(db: Session, user_id: int) -> models.MarginAccount:
 
 def _get_ltp(symbol: str, fallback_price: float) -> float:
     prices = get_prices()
-    key = (symbol or "").upper().split()[0]
-    ltp = prices.get(key)
+    key = (symbol or "").upper().strip()
+    parts = key.split()
+    if len(parts) >= 3 and parts[-1] in {"CE", "PE"}:
+        try:
+            strike_val = float(parts[-2])
+            expiry_hint = None
+            if len(parts) >= 4 and any(ch.isalpha() for ch in parts[-3]) and any(ch.isdigit() for ch in parts[-3]):
+                expiry_hint = parts[-3]
+                underlying = " ".join(parts[:-3]).strip()
+            else:
+                underlying = " ".join(parts[:-2]).strip()
+            if underlying:
+                from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+                chains = authoritative_option_chain_service.option_chain_cache.get(underlying, {})
+                for expiry, skeleton in chains.items():
+                    if expiry_hint and expiry != expiry_hint:
+                        continue
+                    leg = skeleton.strikes.get(strike_val)
+                    if not leg:
+                        continue
+                    data = leg.CE if parts[-1] == "CE" else leg.PE
+                    if data and data.ltp:
+                        return float(data.ltp)
+        except Exception:
+            pass
+
+    key_base = key.split()[0]
+    ltp = prices.get(key_base)
     if ltp and isinstance(ltp, (int, float)):
         return float(ltp)
     return float(fallback_price or 0.0)
+
+
+def _normalize_margin_symbol(symbol: str) -> str:
+    text = (symbol or "").strip().upper()
+    if text in {"NIFTY 50", "NIFTY50"}:
+        return "NIFTY"
+    if text in {"BANK NIFTY", "NIFTY BANK", "BANKNIFTY"}:
+        return "BANKNIFTY"
+    if text in {"BSE SENSEX", "S&P BSE SENSEX", "SENSEX 50"}:
+        return "SENSEX"
+    return text
+
+
+def _extract_option_underlying(symbol: str) -> str:
+    parts = (symbol or "").strip().split()
+    if len(parts) >= 3 and parts[-1].upper() in {"CE", "PE"}:
+        return _normalize_margin_symbol(" ".join(parts[:-2]))
+    return _normalize_margin_symbol(symbol)
+
+
+def _normalize_expiry_iso(expiry: Optional[str]) -> Optional[str]:
+    if not expiry:
+        return None
+    text = str(expiry).strip().upper()
+    for fmt in ("%Y-%m-%d", "%d%b%Y", "%d%B%Y", "%d%b%y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return str(expiry).strip() or None
+
+
+def _is_mcx_segment(exchange_segment: Optional[str]) -> bool:
+    return "MCX" in (exchange_segment or "").upper()
+
+
+def _is_fno_segment(exchange_segment: Optional[str]) -> bool:
+    text = (exchange_segment or "").upper()
+    if "MCX" in text:
+        return False
+    return "FNO" in text or "NFO" in text
+
+
+def _resolve_lot_size(underlying: Optional[str], expiry: Optional[str]) -> int:
+    if not underlying:
+        return 1
+    try:
+        from app.market.instrument_master.registry import REGISTRY
+
+        if not REGISTRY.loaded:
+            REGISTRY.load()
+
+        target_expiry = REGISTRY._normalize_expiry(expiry) if expiry else None
+        for row in REGISTRY.by_underlying.get(underlying.upper(), []):
+            row_expiry = REGISTRY._normalize_expiry(row.get("SM_EXPIRY_DATE", ""))
+            if target_expiry and row_expiry and row_expiry != target_expiry:
+                continue
+            lot = row.get("LOT_SIZE") or row.get("MARKET_LOT")
+            try:
+                lot_val = int(float(lot)) if lot is not None else None
+            except (TypeError, ValueError):
+                lot_val = None
+            if lot_val and lot_val > 0:
+                return lot_val
+    except Exception:
+        pass
+    return 1
+
+
+def _build_market_data_for_positions(positions: List[dict]) -> dict:
+    market_data = {}
+    for pos in positions:
+        symbol = (pos.get("symbol") or "").strip()
+        underlying = (pos.get("underlying") or "").strip()
+        expiry = pos.get("expiry")
+        lot_size = _resolve_lot_size(underlying or symbol, expiry)
+
+        if symbol:
+            if symbol not in market_data:
+                market_data[symbol] = {}
+            market_data[symbol].setdefault("ltp", _get_ltp(symbol, pos.get("price") or 0.0))
+            market_data[symbol].setdefault("lot_size", lot_size)
+
+        if underlying:
+            if underlying not in market_data:
+                market_data[underlying] = {}
+            market_data[underlying].setdefault("ltp", _get_ltp(underlying, pos.get("price") or 0.0))
+            market_data[underlying].setdefault("lot_size", lot_size)
+
+    return market_data
+
+
+def _local_margin_for_order(
+    user_id: int,
+    exchange_segment: Optional[str],
+    symbol: str,
+    transaction_type: str,
+    quantity: int,
+    price: float,
+) -> Optional[dict]:
+    if _is_mcx_segment(exchange_segment):
+        positions = fetch_mcx_positions(user_id)
+        positions.append(mcx_position_from_order(symbol, exchange_segment, transaction_type, quantity, price))
+        market_data = _build_market_data_for_positions(positions)
+        calc = calculate_mcx_margin_for_positions(positions, market_data)
+        return {
+            "margin": float(calc.get("total_margin") or 0.0),
+            "source": "LOCAL_MCX",
+            "raw": calc,
+        }
+
+    if _is_fno_segment(exchange_segment):
+        positions = fetch_fno_positions(user_id)
+        positions.append(span_position_from_order(symbol, exchange_segment, transaction_type, quantity, price))
+        market_data = _build_market_data_for_positions(positions)
+        calc = calculate_span_margin_for_positions(positions, market_data)
+        return {
+            "margin": float(calc.get("total_margin") or 0.0),
+            "source": "LOCAL_SPAN",
+            "raw": calc,
+        }
+
+    return None
+
+
+def _local_margin_for_scripts(user_id: int, scripts: List["MarginScript"]) -> Optional[dict]:
+    fno_scripts = [s for s in scripts if _is_fno_segment(s.exchange_segment)]
+    mcx_scripts = [s for s in scripts if _is_mcx_segment(s.exchange_segment)]
+    if not fno_scripts and not mcx_scripts:
+        return None
+
+    total_margin = 0.0
+    raw = {}
+
+    if fno_scripts:
+        positions = fetch_fno_positions(user_id)
+        for script in fno_scripts:
+            positions.append(span_position_from_order(
+                script.symbol or "",
+                script.exchange_segment,
+                script.transaction_type,
+                script.quantity,
+                script.price or 0.0,
+            ))
+        market_data = _build_market_data_for_positions(positions)
+        calc = calculate_span_margin_for_positions(positions, market_data)
+        total_margin += float(calc.get("total_margin") or 0.0)
+        raw["span"] = calc
+
+    if mcx_scripts:
+        positions = fetch_mcx_positions(user_id)
+        for script in mcx_scripts:
+            positions.append(mcx_position_from_order(
+                script.symbol or "",
+                script.exchange_segment,
+                script.transaction_type,
+                script.quantity,
+                script.price or 0.0,
+            ))
+        market_data = _build_market_data_for_positions(positions)
+        calc = calculate_mcx_margin_for_positions(positions, market_data)
+        total_margin += float(calc.get("total_margin") or 0.0)
+        raw["mcx"] = calc
+
+    return {
+        "margin": total_margin,
+        "source": "LOCAL_SPAN_MCX",
+        "raw": raw,
+    }
 
 
 def _brokerage_for(db: Session, user: models.UserAccount, turnover: float) -> float:
@@ -257,6 +463,10 @@ class BasketRequest(BaseModel):
     legs: List[BasketLegRequest]
 
 
+class BasketAppendRequest(BaseModel):
+    legs: List[BasketLegRequest]
+
+
 class UserRequest(BaseModel):
     username: str
     email: Optional[str] = None
@@ -309,9 +519,40 @@ class SquareOffRequest(BaseModel):
 class MarginRequest(BaseModel):
     user_id: Optional[int] = 1
     symbol: Optional[str] = None
+    exchange_segment: Optional[str] = None
+    transaction_type: Optional[str] = None
+    expiry: Optional[str] = None
+    strike: Optional[float] = None
+    option_type: Optional[str] = None
     quantity: int = 1
     price: float = 0.0
     product_type: str = "MIS"
+    security_id: Optional[str] = None
+    trigger_price: Optional[float] = None
+
+
+class MarginScript(BaseModel):
+    exchange_segment: str
+    transaction_type: str
+    quantity: int
+    product_type: str
+    security_id: str
+    price: float = 0.0
+    trigger_price: Optional[float] = None
+    symbol: Optional[str] = None
+    expiry: Optional[str] = None
+    strike: Optional[float] = None
+    option_type: Optional[str] = None
+
+
+class MultiMarginRequest(BaseModel):
+    scripts: List[MarginScript]
+    include_positions: bool = True
+    include_orders: bool = True
+
+
+class PortfolioMarginRequest(BaseModel):
+    user_id: Optional[int] = 1
 
 
 # ---------- Public Endpoints ----------
@@ -337,19 +578,53 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
     if not user:
         user = _get_or_create_admin(db)
 
+    def _reject_order(reason: str):
+        order = models.MockOrder(
+            user_id=user.id,
+            symbol=req.symbol,
+            security_id=req.security_id,
+            exchange_segment=req.exchange_segment,
+            transaction_type=req.transaction_type,
+            quantity=req.quantity,
+            order_type=req.order_type,
+            product_type=req.product_type,
+            price=req.price or 0.0,
+            trigger_price=req.trigger_price,
+            is_super=bool(req.is_super),
+            target_price=req.target_price,
+            stop_loss_price=req.stop_loss_price,
+            trailing_jump=req.trailing_jump,
+            status="REJECTED",
+            remarks=reason,
+        )
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        return {"data": _serialize(order)}
+
     if user.status != "ACTIVE" or kill_switch_blocked(user):
-        raise HTTPException(status_code=403, detail="User blocked")
+        return _reject_order("USER_BLOCKED")
 
     if not _segment_allowed(user, req.exchange_segment):
-        raise HTTPException(status_code=403, detail="Segment restricted")
+        return _reject_order("SEGMENT_RESTRICTED")
 
     snapshot = EXEC_ENGINE._snapshot_for_order(req.symbol, req.exchange_segment)
     decision_price = snapshot.get("best_ask") if req.transaction_type == "BUY" else snapshot.get("best_bid")
     exec_price = decision_price or (req.price or 0.0)
     required = _margin_required(exec_price, req.quantity, req.product_type)
+    local_margin = _local_margin_for_order(
+        user_id=user.id,
+        exchange_segment=req.exchange_segment,
+        symbol=req.symbol,
+        transaction_type=req.transaction_type,
+        quantity=req.quantity,
+        price=exec_price,
+    )
+    if local_margin and local_margin.get("margin") is not None:
+        required = float(local_margin["margin"])
     margin = _get_or_create_margin(db, user.id)
     if margin.available_margin < required:
-        raise HTTPException(status_code=400, detail="Insufficient margin")
+        return _reject_order("INSUFFICIENT_MARGIN")
 
     order = models.MockOrder(
         user_id=user.id,
@@ -474,6 +749,10 @@ def create_basket(req: BasketRequest, db: Session = Depends(get_db)):
     if not user:
         user = _get_or_create_admin(db)
 
+    existing_count = db.query(models.MockBasket).filter(models.MockBasket.user_id == user.id).count()
+    if existing_count >= 5:
+        raise HTTPException(status_code=400, detail="Basket limit reached (max 5)")
+
     basket = models.MockBasket(user_id=user.id, name=req.name, status="ACTIVE")
     db.add(basket)
     db.flush()
@@ -491,6 +770,32 @@ def create_basket(req: BasketRequest, db: Session = Depends(get_db)):
         ))
     db.commit()
     return {"data": {"basket_id": basket.id}}
+
+
+@router.post("/trading/basket-orders/{basket_id}/legs")
+def append_basket_legs(basket_id: int, req: BasketAppendRequest, db: Session = Depends(get_db)):
+    basket = db.query(models.MockBasket).filter(models.MockBasket.id == basket_id).first()
+    if not basket:
+        raise HTTPException(status_code=404, detail="Basket not found")
+    if not req.legs:
+        raise HTTPException(status_code=400, detail="No legs provided")
+
+    for leg in req.legs:
+        db.add(models.MockBasketLeg(
+            basket_id=basket.id,
+            symbol=leg.symbol,
+            security_id=leg.security_id,
+            exchange_segment=leg.exchange_segment,
+            transaction_type=leg.transaction_type,
+            quantity=leg.quantity,
+            order_type=leg.order_type,
+            product_type=leg.product_type,
+            price=leg.price or 0.0,
+        ))
+
+    basket.updated_at = datetime.utcnow()
+    db.commit()
+    return {"data": {"basket_id": basket.id, "legs_added": len(req.legs)}}
 
 
 @router.post("/trading/basket-orders/execute")
@@ -521,21 +826,319 @@ def execute_basket(req: BasketExecuteRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/api/calculate-margin")
-def calculate_margin(req: MarginRequest, db: Session = Depends(get_db)):
+async def calculate_margin(req: MarginRequest, db: Session = Depends(get_db)):
     user = db.query(models.UserAccount).filter(models.UserAccount.id == (req.user_id or 1)).first()
     if not user:
         user = _get_or_create_admin(db)
     margin = _get_or_create_margin(db, user.id)
-    required = _margin_required(req.price or 0.0, req.quantity, req.product_type)
+
+    price = req.price or 0.0
+    if price <= 0 and req.symbol:
+        price = _get_ltp(req.symbol, price)
+
+    security_id = req.security_id
+    exchange_segment = req.exchange_segment
+    if security_id:
+        try:
+            int(str(security_id))
+        except (TypeError, ValueError):
+            security_id = None
+
+    if not security_id and req.expiry and req.strike is not None and req.option_type:
+        try:
+            from app.services.dhan_security_id_mapper import dhan_security_mapper
+            if not dhan_security_mapper.security_id_cache:
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = None
+                if loop is None:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                if not loop.is_running():
+                    loop.run_until_complete(dhan_security_mapper.load_security_ids())
+
+            opt_type = str(req.option_type).upper()
+            underlying = _extract_option_underlying(req.symbol or "")
+            expiry_norm = _normalize_expiry_iso(req.expiry)
+            token_key = f"{opt_type}_{underlying}_{float(req.strike)}_{expiry_norm or req.expiry}"
+            mapped_id = dhan_security_mapper.get_security_id(token_key)
+            if not mapped_id and expiry_norm:
+                mapped_id = dhan_security_mapper.get_security_id(
+                    f"{opt_type}_{underlying}_{float(req.strike)}_{req.expiry}"
+                )
+            if mapped_id:
+                security_id = str(mapped_id)
+                option_data = dhan_security_mapper.get_option_data(token_key) or dhan_security_mapper.get_option_data(
+                    f"{opt_type}_{underlying}_{float(req.strike)}_{req.expiry}"
+                )
+                if option_data and not exchange_segment:
+                    exchange_segment = option_data.get("segment") or exchange_segment
+        except Exception:
+            pass
+
+    if not security_id and req.expiry and req.strike is not None and req.option_type:
+        try:
+            from app.market.instrument_master.registry import REGISTRY
+            if not REGISTRY.loaded:
+                REGISTRY.load()
+            underlying = _extract_option_underlying(req.symbol or "")
+            expiry_norm = _normalize_expiry_iso(req.expiry)
+            for row in REGISTRY.get_by_symbol(underlying):
+                row_expiry = _normalize_expiry_iso(row.get("SM_EXPIRY_DATE") or row.get("EXPIRY_DATE"))
+                if expiry_norm and row_expiry != expiry_norm:
+                    continue
+                row_option = (row.get("OPTION_TYPE") or "").upper()
+                if row_option != str(req.option_type).upper():
+                    continue
+                try:
+                    row_strike = float(row.get("STRIKE_PRICE"))
+                except (TypeError, ValueError):
+                    continue
+                if abs(row_strike - float(req.strike)) > 1e-6:
+                    continue
+                row_sec_id = row.get("SECURITY_ID")
+                if row_sec_id:
+                    security_id = str(row_sec_id).strip()
+                    if not exchange_segment:
+                        row_exch = (row.get("EXCH_ID") or "").strip().upper()
+                        if row_exch == "BSE":
+                            exchange_segment = "BSE_FNO"
+                        elif row_exch == "NSE":
+                            exchange_segment = "NSE_FNO"
+                    break
+        except Exception:
+            pass
+
+    if security_id and exchange_segment:
+        try:
+            from app.services.dhan_margin_service import dhan_margin_service
+            dhan_response = await dhan_margin_service.calculate_margin_single(
+                exchange_segment=exchange_segment,
+                transaction_type=req.transaction_type or "BUY",
+                quantity=req.quantity,
+                product_type=req.product_type,
+                security_id=security_id,
+                price=price,
+                trigger_price=req.trigger_price,
+            )
+            if dhan_response:
+                total_margin = dhan_response.get("totalMargin")
+                if total_margin is None:
+                    total_margin = dhan_response.get("total_margin")
+                available_balance = dhan_response.get("availableBalance") or dhan_response.get("available_balance")
+                if total_margin is not None:
+                    return {
+                        "margin": float(total_margin),
+                        "availableMargin": float(available_balance) if available_balance is not None else margin.available_margin,
+                        "source": "DHAN",
+                        "raw": dhan_response,
+                    }
+        except Exception:
+            pass
+
+    local_margin = _local_margin_for_order(
+        user_id=user.id,
+        exchange_segment=req.exchange_segment,
+        symbol=req.symbol or "",
+        transaction_type=req.transaction_type or "BUY",
+        quantity=req.quantity,
+        price=price,
+    )
+    if local_margin:
+        return {
+            "margin": float(local_margin.get("margin") or 0.0),
+            "availableMargin": margin.available_margin,
+            "source": local_margin.get("source") or "LOCAL",
+            "raw": local_margin.get("raw"),
+        }
+
+    required = _margin_required(price, req.quantity, req.product_type)
     return {
         "margin": required,
         "availableMargin": margin.available_margin,
+        "source": "MOCK",
     }
 
 
 @router.post("/margin/calculate")
-def calculate_margin_v2(req: MarginRequest, db: Session = Depends(get_db)):
-    return calculate_margin(req=req, db=db)
+async def calculate_margin_v2(req: MarginRequest, db: Session = Depends(get_db)):
+    return await calculate_margin(req=req, db=db)
+
+
+@router.post("/margin/calculate-multi")
+async def calculate_margin_multi(req: MultiMarginRequest, db: Session = Depends(get_db)):
+    user = db.query(models.UserAccount).filter(models.UserAccount.id == 1).first()
+    if not user:
+        user = _get_or_create_admin(db)
+    margin = _get_or_create_margin(db, user.id)
+
+    try:
+        from app.services.dhan_margin_service import dhan_margin_service
+        from app.services.dhan_security_id_mapper import dhan_security_mapper
+
+        if not dhan_security_mapper.security_id_cache:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = None
+            if loop is None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            if not loop.is_running():
+                loop.run_until_complete(dhan_security_mapper.load_security_ids())
+
+        scripts = []
+        for script in req.scripts:
+            security_id = script.security_id
+            exchange_segment = script.exchange_segment
+            try:
+                int(str(security_id))
+            except (TypeError, ValueError):
+                security_id = None
+
+            if not security_id and script.expiry and script.strike is not None and script.option_type:
+                opt_type = str(script.option_type).upper()
+                underlying = _extract_option_underlying(script.symbol or "")
+                expiry_norm = _normalize_expiry_iso(script.expiry)
+                token_key = f"{opt_type}_{underlying}_{float(script.strike)}_{expiry_norm or script.expiry}"
+                mapped_id = dhan_security_mapper.get_security_id(token_key)
+                if not mapped_id and expiry_norm:
+                    mapped_id = dhan_security_mapper.get_security_id(
+                        f"{opt_type}_{underlying}_{float(script.strike)}_{script.expiry}"
+                    )
+                if mapped_id:
+                    security_id = str(mapped_id)
+                    option_data = dhan_security_mapper.get_option_data(token_key) or dhan_security_mapper.get_option_data(
+                        f"{opt_type}_{underlying}_{float(script.strike)}_{script.expiry}"
+                    )
+                    if option_data and not exchange_segment:
+                        exchange_segment = option_data.get("segment") or exchange_segment
+
+            if not security_id and script.expiry and script.strike is not None and script.option_type:
+                try:
+                    from app.market.instrument_master.registry import REGISTRY
+                    if not REGISTRY.loaded:
+                        REGISTRY.load()
+                    underlying = _extract_option_underlying(script.symbol or "")
+                    expiry_norm = _normalize_expiry_iso(script.expiry)
+                    for row in REGISTRY.get_by_symbol(underlying):
+                        row_expiry = _normalize_expiry_iso(row.get("SM_EXPIRY_DATE") or row.get("EXPIRY_DATE"))
+                        if expiry_norm and row_expiry != expiry_norm:
+                            continue
+                        row_option = (row.get("OPTION_TYPE") or "").upper()
+                        if row_option != opt_type:
+                            continue
+                        try:
+                            row_strike = float(row.get("STRIKE_PRICE"))
+                        except (TypeError, ValueError):
+                            continue
+                        if abs(row_strike - float(script.strike)) > 1e-6:
+                            continue
+                        row_sec_id = row.get("SECURITY_ID")
+                        if row_sec_id:
+                            security_id = str(row_sec_id).strip()
+                            if not exchange_segment:
+                                row_exch = (row.get("EXCH_ID") or "").strip().upper()
+                                if row_exch == "BSE":
+                                    exchange_segment = "BSE_FNO"
+                                elif row_exch == "NSE":
+                                    exchange_segment = "NSE_FNO"
+                            break
+                except Exception:
+                    pass
+
+            if not security_id:
+                continue
+
+            scripts.append({
+                "exchangeSegment": exchange_segment,
+                "transactionType": script.transaction_type,
+                "quantity": script.quantity,
+                "productType": script.product_type,
+                "securityId": security_id,
+                "price": script.price,
+                "triggerPrice": script.trigger_price,
+            })
+        dhan_response = await dhan_margin_service.calculate_margin_multi(
+            scripts=scripts,
+            include_positions=req.include_positions,
+            include_orders=req.include_orders,
+        )
+        if dhan_response:
+            total_margin = dhan_response.get("total_margin")
+            if total_margin is None:
+                total_margin = dhan_response.get("totalMargin")
+            return {
+                "margin": float(total_margin) if total_margin is not None else None,
+                "availableMargin": margin.available_margin,
+                "source": "DHAN",
+                "raw": dhan_response,
+            }
+    except Exception:
+        pass
+
+    local_margin = _local_margin_for_scripts(user.id, req.scripts)
+    if local_margin:
+        return {
+            "margin": float(local_margin.get("margin") or 0.0),
+            "availableMargin": margin.available_margin,
+            "source": local_margin.get("source") or "LOCAL",
+            "raw": local_margin.get("raw"),
+        }
+
+    required = 0.0
+    for script in req.scripts:
+        required += _margin_required(script.price or 0.0, script.quantity, script.product_type)
+
+    return {
+        "margin": required,
+        "availableMargin": margin.available_margin,
+        "source": "MOCK",
+    }
+
+
+@router.post("/margin/portfolio")
+def portfolio_margin(req: PortfolioMarginRequest, db: Session = Depends(get_db)):
+    user = db.query(models.UserAccount).filter(models.UserAccount.id == (req.user_id or 1)).first()
+    if not user:
+        user = _get_or_create_admin(db)
+    margin = _get_or_create_margin(db, user.id)
+
+    fno_positions = fetch_fno_positions(user.id)
+    mcx_positions = fetch_mcx_positions(user.id)
+
+    fno_market_data = _build_market_data_for_positions(fno_positions)
+    mcx_market_data = _build_market_data_for_positions(mcx_positions)
+
+    span_calc = calculate_span_margin_for_positions(fno_positions, fno_market_data) if fno_positions else {
+        "total_margin": 0.0,
+        "futures_margin": 0.0,
+        "option_buy_margin": 0.0,
+        "short_option_margin": 0.0,
+        "span_risk": 0.0,
+        "exposure_margin": 0.0,
+        "hedge_benefit": 0.0,
+    }
+
+    mcx_calc = calculate_mcx_margin_for_positions(mcx_positions, mcx_market_data) if mcx_positions else {
+        "total_margin": 0.0,
+        "futures_margin": 0.0,
+        "long_option_margin": 0.0,
+        "short_option_margin": 0.0,
+        "span_risk": 0.0,
+        "exposure_margin": 0.0,
+    }
+
+    total_margin = float(span_calc.get("total_margin") or 0.0) + float(mcx_calc.get("total_margin") or 0.0)
+
+    return {
+        "margin": total_margin,
+        "availableMargin": margin.available_margin,
+        "source": "LOCAL_PORTFOLIO",
+        "span": span_calc,
+        "mcx": mcx_calc,
+    }
 
 
 @router.post("/wallet/payin")

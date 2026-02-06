@@ -9,17 +9,23 @@ const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');
 const SystemMonitoring = () => {
   const [systemData, setSystemData] = useState({});
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [notifications, setNotifications] = useState([]);
 
   useEffect(() => {
     const fetchSystemStatus = async () => {
       try {
-        const response = await fetch(`${ROOT_BASE}/health`);
-        const data = await response.json();
+        const [healthResponse, streamResponse] = await Promise.all([
+          fetch(`${ROOT_BASE}/health`),
+          fetch(`${API_BASE}/market/stream-status`)
+        ]);
+        const data = await healthResponse.json();
+        const streamData = await streamResponse.json();
 
-        const wsStatus = data?.websocket_status || {};
-        const mcxWsStatus = data?.mcx_websocket_status || {};
+        const wsStatus = streamData?.equity_ws || data?.websocket_status || {};
+        const mcxWsStatus = streamData?.mcx_ws || data?.mcx_websocket_status || {};
         const wsConnected = (wsStatus.connected_connections ?? 0) > 0;
         const mcxWsConnected = (mcxWsStatus.connected_connections ?? 0) > 0;
+        const liveFeed = streamData?.live_feed || {};
 
         const normalized = {
           services: {
@@ -28,12 +34,12 @@ const SystemMonitoring = () => {
             dhan_api: { status: 'unknown', message: 'Not checked' },
             websocket: {
               status: wsConnected ? 'healthy' : 'offline',
-              message: wsConnected ? 'Connections active' : 'No active connections',
+              message: wsConnected ? 'Connections active' : (liveFeed.cooldown_active ? 'Cooldown active' : 'No active connections'),
               connections: wsStatus.connected_connections || 0
             },
             mcx_websocket: {
               status: mcxWsConnected ? 'healthy' : 'offline',
-              message: mcxWsConnected ? 'Connections active' : 'No active connections',
+              message: mcxWsConnected ? 'Connections active' : (mcxWsStatus.cooldown_active ? 'Cooldown active' : 'No active connections'),
               connections: mcxWsStatus.connected_connections || 0
             },
           },
@@ -50,6 +56,26 @@ const SystemMonitoring = () => {
     fetchSystemStatus();
     const interval = setInterval(fetchSystemStatus, 30000);
     
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    let interval = null;
+    const fetchNotifications = async () => {
+      try {
+        const authToken = localStorage.getItem('authToken');
+        const response = await fetch(`${ROOT_BASE}/admin/notifications?limit=10`, {
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+        });
+        const data = await response.json();
+        setNotifications(data?.notifications || []);
+      } catch (error) {
+        console.error('❌ Error fetching admin notifications:', error);
+      }
+    };
+
+    fetchNotifications();
+    interval = setInterval(fetchNotifications, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -247,6 +273,43 @@ const SystemMonitoring = () => {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Admin Notifications */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-md font-semibold text-gray-800">Admin Alerts</h3>
+          <div className="text-xs text-gray-500">
+            {notifications.length} recent
+          </div>
+        </div>
+        {notifications.length === 0 ? (
+          <div className="text-sm text-gray-500">No alerts yet.</div>
+        ) : (
+          <div className="space-y-3">
+            {notifications.map((item) => (
+              <div key={item.id} className="border border-gray-200 rounded-md px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium text-gray-800">
+                    {item.message}
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                    item.level === 'ERROR'
+                      ? 'bg-red-100 text-red-700'
+                      : item.level === 'INFO'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-yellow-100 text-yellow-700'
+                  }`}>
+                    {item.level || 'WARN'}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

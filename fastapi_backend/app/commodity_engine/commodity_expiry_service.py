@@ -11,6 +11,7 @@ import aiohttp
 
 from app.commodity_engine.commodity_utils import fetch_dhan_credentials
 from app.market.instrument_master.registry import REGISTRY
+from app.services.dhan_rate_limiter import DhanRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class CommodityExpiryService:
         self._last_call = None
         self._min_interval = 1.0
         self._cache_ttl_seconds = 300
+        self.rate_limiter = DhanRateLimiter()
 
     def _parse_expiry(self, expiry: str) -> Optional[date]:
         if not expiry:
@@ -86,6 +88,18 @@ class CommodityExpiryService:
     def get_underlying_meta(self, symbol: str) -> Optional[Dict[str, str]]:
         return self._resolve_underlying_meta(symbol)
 
+    def _fallback_expiries_from_registry(self, symbol: str) -> List[str]:
+        expiries = set()
+        for row in REGISTRY.get_by_symbol(symbol.upper()):
+            exchange = (row.get("EXCH_ID") or "").strip().upper()
+            if exchange != "MCX":
+                continue
+            raw_expiry = row.get("SM_EXPIRY_DATE") or row.get("EXPIRY_DATE")
+            parsed = self._parse_expiry(raw_expiry) if raw_expiry else None
+            if parsed:
+                expiries.add(parsed.isoformat())
+        return sorted(expiries)
+
     async def _rate_limit(self) -> None:
         async with self._rate_lock:
             if not self._last_call:
@@ -108,14 +122,23 @@ class CommodityExpiryService:
                 pass
 
         await self._rate_limit()
+        await self.rate_limiter.wait("expiry")
+        if self.rate_limiter.is_blocked("expiry"):
+            fallback = self._fallback_expiries_from_registry(symbol)
+            if fallback:
+                self.registry.set_expiries(symbol, fallback)
+            return fallback
         creds = await fetch_dhan_credentials()
         if not creds:
             return []
 
         meta = self._resolve_underlying_meta(symbol)
         if not meta:
-            logger.error(f"❌ MCX meta not found for {symbol}")
-            return []
+            logger.warning(f"⚠️ MCX meta not found for {symbol}; using registry fallback")
+            fallback = self._fallback_expiries_from_registry(symbol)
+            if fallback:
+                self.registry.set_expiries(symbol, fallback)
+            return fallback
 
         headers = {
             "access-token": creds["access_token"],
@@ -141,16 +164,30 @@ class CommodityExpiryService:
                             return []
 
                         error_text = await response.text()
+                        if response.status == 502:
+                            break
                         logger.warning(
                             f"⚠️ MCX expiry API error for {symbol}: {response.status} - {error_text}"
                         )
-                        if response.status in (429, 502):
+                        if response.status in (401, 403):
+                            self.rate_limiter.block("expiry", 900)
+                        if response.status == 429:
+                            self.rate_limiter.block("expiry", 120)
+                        if response.status == 429:
                             await asyncio.sleep(3 + attempt * 2)
                             continue
+                        fallback = self._fallback_expiries_from_registry(symbol)
+                        if fallback:
+                            self.registry.set_expiries(symbol, fallback)
+                            return fallback
                         return []
             except Exception as exc:
-                logger.error(f"❌ MCX expiry fetch failed for {symbol}: {exc}")
+                logger.warning(f"⚠️ MCX expiry fetch failed for {symbol}: {exc}")
                 await asyncio.sleep(1 + attempt)
+        fallback = self._fallback_expiries_from_registry(symbol)
+        if fallback:
+            self.registry.set_expiries(symbol, fallback)
+            return fallback
         return []
 
 

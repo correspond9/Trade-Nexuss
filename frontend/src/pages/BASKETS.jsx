@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { apiService } from '../services/apiService';
 
 // ---------- Baskets Tab ----------
@@ -8,37 +8,43 @@ const BasketsTab = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError('');
+      
+      // Fetch baskets and user data in parallel
+      const [basketsResponse, userResponse] = await Promise.all([
+        apiService.get('/trading/basket-orders'),
+        apiService.get('/admin/users') // Use FastAPI admin users endpoint
+      ]);
+      
+      if (basketsResponse && basketsResponse.data) {
+        setBaskets(basketsResponse.data);
+      }
+      
+      if (userResponse && userResponse.data && userResponse.data.length > 0) {
+        setUser(userResponse.data[0]); // Use first user for now
+      }
+      
+    } catch (err) {
+      console.error('Error fetching baskets data:', err);
+      setError('Failed to load baskets');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Fetch baskets and user data from API
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError('');
-        
-        // Fetch baskets and user data in parallel
-        const [basketsResponse, userResponse] = await Promise.all([
-          apiService.get('/trading/basket-orders'),
-          apiService.get('/admin/users') // Use FastAPI admin users endpoint
-        ]);
-        
-        if (basketsResponse && basketsResponse.data) {
-          setBaskets(basketsResponse.data);
-        }
-        
-        if (userResponse && userResponse.data && userResponse.data.length > 0) {
-          setUser(userResponse.data[0]); // Use first user for now
-        }
-        
-      } catch (err) {
-        console.error('Error fetching baskets data:', err);
-        setError('Failed to load baskets');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
-  }, []);
+  }, [fetchData]);
+
+  useEffect(() => {
+    const handleBasketsUpdated = () => fetchData();
+    window.addEventListener('baskets:updated', handleBasketsUpdated);
+    return () => window.removeEventListener('baskets:updated', handleBasketsUpdated);
+  }, [fetchData]);
 
   // Manual refresh function
   const handleRefresh = () => {

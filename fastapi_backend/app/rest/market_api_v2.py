@@ -193,6 +193,42 @@ async def get_subscription_status():
         "websocket": ws_mgr.get_status()
     }
 
+
+@router.get("/market/stream-status")
+async def get_stream_status():
+    """Return consolidated market stream status for admin monitoring."""
+    from app.market_orchestrator import get_orchestrator
+    from app.commodity_engine.commodity_ws_manager import commodity_ws_manager
+    from app.dhan.live_feed import get_live_feed_status
+    from app.market.ws_manager import get_ws_manager
+
+    orchestrator_status = get_orchestrator().get_status()
+    equity_ws_status = get_ws_manager().get_status()
+    mcx_ws_status = commodity_ws_manager.get_status()
+    live_feed_status = get_live_feed_status()
+
+    return {
+        "status": "ok",
+        "orchestrator": orchestrator_status,
+        "equity_ws": equity_ws_status,
+        "mcx_ws": mcx_ws_status,
+        "live_feed": live_feed_status,
+    }
+
+
+@router.post("/market/stream-reconnect")
+async def reconnect_streams():
+    """Clear cooldowns and trigger a single stream restart attempt."""
+    from app.market_orchestrator import get_orchestrator
+    from app.dhan import live_feed
+    from app.commodity_engine.commodity_ws_manager import commodity_ws_manager
+
+    live_feed.reset_cooldown()
+    commodity_ws_manager.reset_block()
+    get_orchestrator().start_streams_sync()
+
+    return {"status": "ok", "message": "reconnect_triggered"}
+
 @router.get("/subscriptions/active")
 async def list_active_subscriptions(tier: Optional[str] = None):
     """List active subscriptions, optionally filtered by tier"""
@@ -287,6 +323,51 @@ async def get_underlying_ltp(symbol: str):
         "status": "success",
         "symbol": symbol_upper,
         "ltp": ltp
+    }
+
+
+@router.get("/market/option-depth")
+async def get_option_depth(
+    underlying: str = Query(...),
+    expiry: str = Query(...),
+    strike: float = Query(...),
+    option_type: str = Query(..., min_length=2, max_length=2),
+):
+    """Return top-5 bid/ask depth for a specific option leg if available."""
+    from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+
+    option_type_upper = option_type.upper()
+    if option_type_upper not in {"CE", "PE"}:
+        raise HTTPException(status_code=400, detail="Invalid option_type")
+
+    chain = authoritative_option_chain_service.get_option_chain_from_cache(underlying.upper(), expiry)
+    if not chain:
+        raise HTTPException(status_code=404, detail="Option chain not found")
+
+    strikes = chain.get("strikes") or {}
+    strike_key = str(float(strike))
+    strike_data = strikes.get(strike_key)
+    if not strike_data:
+        raise HTTPException(status_code=404, detail="Strike not found")
+
+    leg = strike_data.get(option_type_upper) or {}
+    depth = leg.get("depth") or {}
+    bids = depth.get("bids") or []
+    asks = depth.get("asks") or []
+
+    return {
+        "status": "success",
+        "data": {
+            "underlying": underlying.upper(),
+            "expiry": expiry,
+            "strike": float(strike),
+            "option_type": option_type_upper,
+            "bids": bids[:5],
+            "asks": asks[:5],
+            "bid": leg.get("bid"),
+            "ask": leg.get("ask"),
+            "ltp": leg.get("ltp"),
+        }
     }
 
 # ============================================================================

@@ -6,7 +6,7 @@ Implements the complete option chain construction flow as per specifications
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 import aiohttp
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 from app.market.atm_engine import ATM_ENGINE
 from app.ems.exchange_clock import is_market_open
+from app.services.dhan_rate_limiter import DhanRateLimiter
 
 class ExchangeSegment(Enum):
     NSE = "NSE"
@@ -36,6 +37,7 @@ class OptionData:
     volume: Optional[int] = None
     iv: Optional[float] = None
     greeks: Optional[Dict[str, float]] = None
+    depth: Optional[Dict[str, List[Dict[str, float]]]] = None
 
 @dataclass
 class StrikeData:
@@ -130,16 +132,16 @@ class AuthoritativeOptionChainService:
         self.security_mapper = dhan_security_mapper
         self.websocket_subscriptions: Dict[int, Set[str]] = {}
         self.websocket_token_count: Dict[int, int] = {}  # Track tokens per WS
+        self.synthetic_alerts_sent: Set[str] = set()
+        self.last_synth_at: Dict[str, datetime] = {}
         
         # Dhan API configuration
         self.dhan_base_url = "https://api.dhan.co"
         self.websocket_url = "wss://ws.dhan.co/v2/market"
         
         # Rate limiting for REST calls
-        self.rest_call_timestamps = {
-            "quote": [],      # Track quote API calls (1 req/sec)
-            "data": []        # Track data API calls (5 req/sec)
-        }
+        self.rate_limiter = DhanRateLimiter()
+        self.rest_blocked_until: Dict[str, float] = {}
         
         # REST cache with TTL
         self.rest_cache = {
@@ -459,26 +461,23 @@ class AuthoritativeOptionChainService:
         Enforce REST API rate limiting
         api_type: "quote" (1 req/sec) or "data" (5 req/sec)
         """
-        now = datetime.now().timestamp()
-        
-        # Clean old timestamps (older than 1 second)
-        self.rest_call_timestamps[api_type] = [
-            ts for ts in self.rest_call_timestamps[api_type]
-            if now - ts < 1.0
-        ]
-        
-        # Check rate limit
-        max_rps = self.MAX_REST_QUOTE_RPS if api_type == "quote" else self.MAX_REST_DATA_RPS
-        
-        if len(self.rest_call_timestamps[api_type]) >= max_rps:
-            # Wait until oldest call drops out of window
-            sleep_time = 1.0 - (now - self.rest_call_timestamps[api_type][0])
-            if sleep_time > 0:
-                logger.debug(f"⏳ Rate limiting {api_type} API: sleeping {sleep_time:.2f}s")
-                await asyncio.sleep(sleep_time)
-        
-        # Record this call
-        self.rest_call_timestamps[api_type].append(datetime.now().timestamp())
+        if self.rate_limiter.is_blocked(api_type):
+            return
+        await self.rate_limiter.wait(api_type)
+
+    def _block_rest_calls(self, api_type: str, seconds: int, reason: str) -> None:
+        self.rate_limiter.block(api_type, seconds)
+        self.rest_blocked_until[api_type] = datetime.utcnow().timestamp() + seconds
+        try:
+            from app.storage.db import SessionLocal
+            from app.notifications.notifier import notify
+            db = SessionLocal()
+            try:
+                notify(db, f"Dhan REST {api_type} blocked for {seconds}s due to {reason}", "WARN")
+            finally:
+                db.close()
+        except Exception:
+            pass
     
     def _check_rest_cache(self, cache_key: str, cache_type: str) -> Optional[Any]:
         """Check if data exists in REST cache and is still valid"""
@@ -586,8 +585,8 @@ class AuthoritativeOptionChainService:
             # Fallback to minimal hardcoded data
             self.instrument_master_cache = {
                 "NIFTY": {"segment": "IDX_I", "security_id": 13, "strike_interval": 50.0, "lot_size": 50},
-                "BANKNIFTY": {"segment": "IDX_I", "security_id": 23, "strike_interval": 100.0, "lot_size": 25},
-                "SENSEX": {"segment": "IDX_I", "security_id": 22, "strike_interval": 100.0, "lot_size": 10}
+                "BANKNIFTY": {"segment": "IDX_I", "security_id": 25, "strike_interval": 100.0, "lot_size": 25},
+                "SENSEX": {"segment": "IDX_I", "security_id": 51, "strike_interval": 100.0, "lot_size": 10}
             }
             logger.warning(f"⚠️ Using fallback instrument data: {len(self.instrument_master_cache)} instruments")
     
@@ -618,7 +617,9 @@ class AuthoritativeOptionChainService:
     async def _fetch_market_data_from_api(self, underlying: str) -> Optional[Dict[str, Any]]:
         """Fetch live market data from DhanHQ REST API"""
         try:
-            await self._enforce_rest_rate_limit("data")
+            if self.rate_limiter.is_blocked("quote"):
+                return None
+            await self._enforce_rest_rate_limit("quote")
             
             creds = await self._fetch_dhanhq_credentials()
             if not creds:
@@ -663,6 +664,12 @@ class AuthoritativeOptionChainService:
                             logger.error(f"❌ No LTP data found for {underlying}")
                             return None
 
+                        try:
+                            from app.market.live_prices import update_price
+                            update_price(underlying, float(ltp))
+                        except Exception:
+                            pass
+
                         # Fetch expiries from DhanHQ API
                         expiry_url = f"{self.dhan_base_url}/v2/optionchain/expirylist"
                         payload = {
@@ -670,6 +677,8 @@ class AuthoritativeOptionChainService:
                             "UnderlyingSeg": instrument_meta["segment"]
                         }
 
+                        if self.rate_limiter.is_blocked("data"):
+                            return None
                         await self._enforce_rest_rate_limit("data")
                         async with session.post(expiry_url, json=payload, headers=headers, timeout=10) as expiry_response:
                             if expiry_response.status == 200:
@@ -685,10 +694,18 @@ class AuthoritativeOptionChainService:
                             else:
                                 error_text = await expiry_response.text()
                                 logger.error(f"❌ DhanHQ expiry API error for {underlying}: {expiry_response.status} - {error_text}")
+                                if expiry_response.status in (401, 403):
+                                    self._block_rest_calls("data", 900, "AUTH_FAILURE")
+                                if expiry_response.status == 429:
+                                    self._block_rest_calls("data", 120, "RATE_LIMIT")
                                 return None
                     else:
                         error_text = await response.text()
                         logger.error(f"❌ DhanHQ quote API error for {underlying}: {response.status} - {error_text}")
+                        if response.status in (401, 403):
+                            self._block_rest_calls("quote", 900, "AUTH_FAILURE")
+                        if response.status == 429:
+                            self._block_rest_calls("quote", 120, "RATE_LIMIT")
                         return None
                         
         except asyncio.TimeoutError:
@@ -701,6 +718,8 @@ class AuthoritativeOptionChainService:
     async def _fetch_option_chain_from_api(self, underlying: str, expiry: str) -> Optional[Dict[str, Any]]:
         """Fetch option chain data from DhanHQ REST API"""
         try:
+            if self.rate_limiter.is_blocked("data"):
+                return None
             await self._enforce_rest_rate_limit("data")
             
             creds = await self._fetch_dhanhq_credentials()
@@ -743,6 +762,10 @@ class AuthoritativeOptionChainService:
                     else:
                         error_text = await response.text()
                         logger.error(f"❌ DhanHQ option chain API error for {underlying} {expiry}: {response.status} - {error_text}")
+                        if response.status in (401, 403):
+                            self._block_rest_calls("data", 900, "AUTH_FAILURE")
+                        if response.status == 429:
+                            self._block_rest_calls("data", 120, "RATE_LIMIT")
                         return None
                         
         except asyncio.TimeoutError:
@@ -1037,6 +1060,7 @@ class AuthoritativeOptionChainService:
         ltp: float,
         bid: Optional[float] = None,
         ask: Optional[float] = None,
+        depth: Optional[Dict[str, List[Dict[str, float]]]] = None,
     ) -> int:
         """
         Update a single option strike (CE/PE) from WebSocket tick.
@@ -1068,8 +1092,18 @@ class AuthoritativeOptionChainService:
             target.ltp = ltp
             target.bid = bid if bid is not None else ltp * 0.99
             target.ask = ask if ask is not None else ltp * 1.01
+            if depth:
+                target.depth = depth
 
             skeleton.last_updated = datetime.now()
+            if ltp and ltp > 0:
+                synth_key = f"{symbol}:{expiry}:{opt_type}"
+                now = datetime.now()
+                last_synth = self.last_synth_at.get(synth_key)
+                if last_synth is None or (now - last_synth).total_seconds() >= 5:
+                    synth_count = self._synthesize_missing_prices(skeleton.strikes, opt_type)
+                    if synth_count > 0:
+                        self.last_synth_at[synth_key] = now
             return 1
 
         except Exception as e:
@@ -1212,6 +1246,110 @@ class AuthoritativeOptionChainService:
             strikes.append(atm)
         return sorted(set(strikes))
 
+    def _resolve_lot_size(self, underlying: str, option_chain_data: Dict[str, Any]) -> int:
+        candidates: List[int] = []
+
+        for key in (
+            "lot_size",
+            "lotSize",
+            "lot_size_value",
+            "marketLot",
+            "market_lot",
+            "market_lot_size",
+        ):
+            value = option_chain_data.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                candidates.append(int(value))
+
+        strikes = option_chain_data.get("strikes") or []
+        if strikes:
+            sample = strikes[0] if isinstance(strikes, list) else None
+            if isinstance(sample, dict):
+                for key in ("lot_size", "lotSize", "marketLot", "market_lot"):
+                    value = sample.get(key)
+                    if isinstance(value, (int, float)) and value > 0:
+                        candidates.append(int(value))
+                for side_key in ("ce", "CE", "pe", "PE"):
+                    side = sample.get(side_key)
+                    if isinstance(side, dict):
+                        for key in ("lot_size", "lotSize", "marketLot", "market_lot"):
+                            value = side.get(key)
+                            if isinstance(value, (int, float)) and value > 0:
+                                candidates.append(int(value))
+
+        if candidates:
+            return max(1, int(candidates[0]))
+
+        meta = self.instrument_master_cache.get(underlying)
+        if meta:
+            try:
+                return max(1, int(meta.get("lot_size") or 0))
+            except (TypeError, ValueError):
+                pass
+
+        return int(self.index_options.get(underlying, {}).get("lot_size") or 1)
+
+    def _synthesize_missing_prices(self, strikes: Dict[float, StrikeData], option_type: str) -> int:
+        missing = []
+        existing = []
+        for strike, strike_data in strikes.items():
+            leg = strike_data.CE if option_type == "CE" else strike_data.PE
+            if leg and leg.ltp and leg.ltp > 0:
+                existing.append((strike, leg.ltp))
+            else:
+                missing.append(strike)
+
+        if not existing:
+            return 0
+
+        existing.sort(key=lambda x: x[0])
+        count = 0
+        for strike in sorted(missing):
+            lower = next(((s, p) for s, p in reversed(existing) if s < strike), None)
+            upper = next(((s, p) for s, p in existing if s > strike), None)
+
+            if lower and upper:
+                (s1, p1), (s2, p2) = lower, upper
+                if s2 != s1:
+                    price = p1 + (p2 - p1) * ((strike - s1) / (s2 - s1))
+                else:
+                    price = p1
+            elif lower:
+                price = lower[1]
+            elif upper:
+                price = upper[1]
+            else:
+                continue
+
+            leg = strikes[strike].CE if option_type == "CE" else strikes[strike].PE
+            if leg:
+                leg.ltp = float(max(price, 0.0))
+                if leg.bid in (None, 0):
+                    leg.bid = leg.ltp
+                if leg.ask in (None, 0):
+                    leg.ask = leg.ltp
+                count += 1
+
+        return count
+
+    def _notify_synthetic_prices(self, underlying: str, expiry: str, count: int) -> None:
+        if count <= 0:
+            return
+        key = f"{underlying}:{expiry}"
+        if key in self.synthetic_alerts_sent:
+            return
+        self.synthetic_alerts_sent.add(key)
+        try:
+            from app.storage.db import SessionLocal
+            from app.notifications.notifier import notify
+            db = SessionLocal()
+            try:
+                notify(db, f"Synthesized {count} option prices for {underlying} {expiry} due to missing LTPs", "WARN")
+            finally:
+                db.close()
+        except Exception:
+            pass
+
     def _derive_atm_from_chain(self, strikes: List[Dict[str, Any]], fallback_price: float, strike_interval: float) -> float:
         """
         UNIVERSAL ATM RULE (non-straddle tabs):
@@ -1331,6 +1469,8 @@ class AuthoritativeOptionChainService:
                                 logger.warning(f"    ⚠️ No option chain data for {underlying} {expiry} - using estimated strikes")
                                 option_chain_data = {"strikes": []}
                             use_mapper_only = not option_chain_data.get("strikes")
+
+                            lot_size = self._resolve_lot_size(underlying, option_chain_data)
                             
                             # ATM per-expiry (prefer chain data; fallback to underlying LTP)
                             strike_interval = self.index_options[underlying]["strike_interval"]
@@ -1488,14 +1628,14 @@ class AuthoritativeOptionChainService:
                                         pe_ltp = 0.0
 
                                     # No bid/ask fallback; keep zero unless provided
-                                    if ce_bid <= 0:
-                                        ce_bid = 0.0
-                                    if ce_ask <= 0:
-                                        ce_ask = 0.0
-                                    if pe_bid <= 0:
-                                        pe_bid = 0.0
-                                    if pe_ask <= 0:
-                                        pe_ask = 0.0
+                                    if ce_bid <= 0 and ce_ltp > 0:
+                                        ce_bid = ce_ltp
+                                    if ce_ask <= 0 and ce_ltp > 0:
+                                        ce_ask = ce_ltp
+                                    if pe_bid <= 0 and pe_ltp > 0:
+                                        pe_bid = pe_ltp
+                                    if pe_ask <= 0 and pe_ltp > 0:
+                                        pe_ask = pe_ltp
 
                                 ce_data = OptionData(
                                     token=ce_token,
@@ -1534,12 +1674,16 @@ class AuthoritativeOptionChainService:
                                     CE=ce_data,
                                     PE=pe_data
                                 )
+
+                            ce_synth = self._synthesize_missing_prices(strikes_dict, "CE")
+                            pe_synth = self._synthesize_missing_prices(strikes_dict, "PE")
+                            self._notify_synthetic_prices(underlying, expiry, ce_synth + pe_synth)
                             
                             # Create skeleton
                             skeleton = OptionChainSkeleton(
                                 underlying=underlying,
                                 expiry=expiry,
-                                lot_size=self.index_options[underlying]["lot_size"],
+                                lot_size=lot_size,
                                 strike_interval=self.index_options[underlying]["strike_interval"],
                                 atm_strike=atm_strike,
                                 strikes=strikes_dict,
@@ -1641,6 +1785,10 @@ class AuthoritativeOptionChainService:
                             CE=ce_data,
                             PE=pe_data
                         )
+
+                    ce_synth = self._synthesize_missing_prices(strikes_dict, "CE")
+                    pe_synth = self._synthesize_missing_prices(strikes_dict, "PE")
+                    self._notify_synthetic_prices(underlying, expiry, ce_synth + pe_synth)
                     
                     if not strikes_dict:
                         logger.warning(f"  ⚠️ No valid strikes for {underlying} {expiry}")

@@ -16,7 +16,9 @@ import time
 import asyncio
 import importlib
 import inspect
-from datetime import datetime, timedelta
+import socket
+import os
+from datetime import datetime, timedelta, date
 from typing import Dict, Optional
 from dhanhq import dhanhq as DhanHQClient
 
@@ -43,12 +45,15 @@ from app.storage.models import DhanCredential, Watchlist
 _started_lock = threading.Lock()
 _started = False
 _market_feed = None
-_subscribed_securities: Dict[str, int] = {}  # security_id -> exchange
+_feed_lock_socket = None
+_subscribed_securities: Dict[str, Dict[str, int]] = {}  # security_id -> {exchange, mode}
 _subscription_lock = threading.RLock()
 _security_id_symbol_map: Dict[str, str] = {}
 _security_id_subscription_map: Dict[str, Dict[str, object]] = {}
 _MCX_WATCH = mcx_watch_symbols()
 _EXPIRY_FORMATS = ("%d%b%Y", "%d%B%Y", "%d%b%y", "%Y-%m-%d")
+FEED_MODE_TICKER = 15
+FEED_MODE_QUOTE = 17
 _REST_CLIENT_LOCK = threading.Lock()
 _REST_CLIENT: Optional[DhanHQClient] = None
 _LAST_CLOSE_CACHE: Dict[str, Dict[str, object]] = {}
@@ -68,6 +73,19 @@ def _exchange_name_from_code(exchange_code: Optional[int], segment: Optional[str
     if exchange_code == EXCHANGE_CODE_BSE:
         return "BSE"
     return "NSE"
+
+
+def _resolve_feed_mode(meta: Optional[Dict[str, object]]) -> int:
+    if not meta:
+        return FEED_MODE_TICKER
+    mode = meta.get("mode")
+    if isinstance(mode, int):
+        return mode
+    if meta.get("option_type") in ("CE", "PE"):
+        return FEED_MODE_QUOTE
+    if meta.get("expiry") and meta.get("strike") is not None:
+        return FEED_MODE_QUOTE
+    return FEED_MODE_TICKER
 def _ensure_rest_client(creds) -> Optional[DhanHQClient]:
     """Create/reuse a DhanHQ REST client for quote/close lookups."""
     global _REST_CLIENT
@@ -153,8 +171,57 @@ _backoff_delay = 5  # Start with 5 seconds
 _max_backoff_delay = 120  # Cap at 2 minutes
 _consecutive_failures = 0
 _max_consecutive_failures = 10
-_cooldown_period = 3600  # 1 hour cooldown after max failures (protects against IP ban)
+_cooldown_period = int(os.getenv("LIVE_FEED_COOLDOWN_SECONDS", "660"))  # default 11 minutes
 _last_cooldown_start = None
+
+
+def _trigger_cooldown(reason: str) -> None:
+    global _last_cooldown_start, _consecutive_failures, _backoff_delay
+    _last_cooldown_start = datetime.now()
+    _consecutive_failures = _max_consecutive_failures
+    _backoff_delay = _max_backoff_delay
+    print(f"[COOLDOWN] Triggered due to {reason}. Cooling down for {_cooldown_period}s")
+
+
+def reset_cooldown() -> None:
+    global _last_cooldown_start, _consecutive_failures, _backoff_delay
+    _last_cooldown_start = None
+    _consecutive_failures = 0
+    _backoff_delay = 5
+
+
+def get_live_feed_status() -> Dict[str, object]:
+    return {
+        "started": _started,
+        "connection_attempts": _connection_attempts,
+        "consecutive_failures": _consecutive_failures,
+        "last_connection_attempt": _last_connection_attempt.isoformat() if _last_connection_attempt else None,
+        "cooldown_until": (
+            (_last_cooldown_start + timedelta(seconds=_cooldown_period)).isoformat()
+            if _last_cooldown_start
+            else None
+        ),
+        "cooldown_active": bool(
+            _last_cooldown_start and (datetime.now() - _last_cooldown_start).total_seconds() < _cooldown_period
+        ),
+    }
+
+
+def _acquire_feed_lock() -> bool:
+    global _feed_lock_socket
+    if _feed_lock_socket:
+        return True
+    port = int(os.getenv("LIVE_FEED_LOCK_PORT", "8765"))
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", port))
+        sock.listen(1)
+        _feed_lock_socket = sock
+        return True
+    except OSError:
+        print("[LOCK] Live feed lock already held; skipping duplicate feed start")
+        return False
 
 def _should_attempt_connection():
     """Check if we're allowed to attempt a connection (rate limiting)"""
@@ -322,10 +389,14 @@ def _get_last_close_price(security_id: str, exchange_code: Optional[int]) -> Opt
         return None
 
 
-def _normalize_expiry_value(expiry: Optional[str]) -> Optional[datetime]:
+def _normalize_expiry_value(expiry: Optional[object]) -> Optional[datetime]:
     if not expiry:
         return None
-    text = expiry.strip().upper()
+    if isinstance(expiry, datetime):
+        return expiry
+    if isinstance(expiry, date):
+        return datetime.combine(expiry, datetime.min.time())
+    text = str(expiry).strip().upper()
     for fmt in _EXPIRY_FORMATS:
         try:
             return datetime.strptime(text, fmt)
@@ -334,12 +405,27 @@ def _normalize_expiry_value(expiry: Optional[str]) -> Optional[datetime]:
     return None
 
 
+def _expiry_to_iso(expiry: Optional[object]) -> Optional[str]:
+    if not expiry:
+        return None
+    if isinstance(expiry, datetime):
+        return expiry.date().isoformat()
+    if isinstance(expiry, date):
+        return expiry.isoformat()
+    parsed = _normalize_expiry_value(expiry)
+    if parsed:
+        return parsed.date().isoformat()
+    text = str(expiry).strip()
+    return text or None
+
+
 def _build_default_index_targets() -> Dict[str, Dict[str, object]]:
     targets: Dict[str, Dict[str, object]] = {}
     for sec_id, meta in iter_default_index_targets().items():
         targets[str(sec_id)] = {
             "exchange": meta.get("exchange"),
             "symbol": meta.get("symbol"),
+            "mode": FEED_MODE_TICKER,
         }
     return targets
 
@@ -372,6 +458,7 @@ def _resolve_mcx_feed_targets() -> Dict[str, Dict[str, object]]:
             targets[sec_id] = {
                 "exchange": exchange or _MCX_WATCH[symbol]["exchange"],
                 "symbol": symbol,
+                "mode": FEED_MODE_TICKER,
             }
         else:
             fallback = get_mcx_fallback(symbol)
@@ -380,6 +467,7 @@ def _resolve_mcx_feed_targets() -> Dict[str, Dict[str, object]]:
                 targets[str(fallback["security_id"])] = {
                     "exchange": fallback.get("exchange"),
                     "symbol": symbol,
+                    "mode": FEED_MODE_TICKER,
                 }
 
     return targets
@@ -456,6 +544,9 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
 
             # Prefer real numeric security IDs for options from Dhan CSV mapper
             opt_type = (sub_info.get("option_type") or "").upper()
+            if exchange == EXCHANGE_CODE_MCX:
+                continue
+
             if opt_type in ("CE", "PE"):
                 token_key = None
                 if isinstance(sec_id, str) and sec_id.startswith(("CE_", "PE_")):
@@ -463,7 +554,7 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
                 elif isinstance(token, str) and token.startswith(("CE_", "PE_")):
                     token_key = token
                 else:
-                    expiry_key = sub_info.get("expiry")
+                    expiry_key = _expiry_to_iso(sub_info.get("expiry"))
                     strike_key = sub_info.get("strike")
                     if symbol and expiry_key and strike_key is not None:
                         token_key = f"{opt_type}_{symbol}_{float(strike_key)}_{expiry_key}"
@@ -503,10 +594,11 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
             security_targets[sec_id_str] = {
                 "exchange": exchange,
                 "symbol": symbol,
+                "mode": FEED_MODE_QUOTE if opt_type in ("CE", "PE") else FEED_MODE_TICKER,
             }
             
             # Build subscription map for option chains
-            expiry = sub_info.get("expiry")
+            expiry = _expiry_to_iso(sub_info.get("expiry"))
             strike = sub_info.get("strike")
             option_type = sub_info.get("option_type")
             
@@ -558,7 +650,7 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
             elif isinstance(token, str) and token.startswith(("CE_", "PE_")):
                 token_key = token
             else:
-                expiry_key = sub_info.get("expiry")
+                expiry_key = _expiry_to_iso(sub_info.get("expiry"))
                 strike_key = sub_info.get("strike")
                 if symbol and expiry_key and strike_key is not None:
                     token_key = f"{option_type}_{symbol}_{float(strike_key)}_{expiry_key}"
@@ -590,10 +682,11 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
             security_targets[sec_id_str] = {
                 "exchange": exchange,
                 "symbol": symbol,
+                "mode": FEED_MODE_QUOTE,
             }
             subscription_map[sec_id_str] = {
                 "symbol": symbol,
-                "expiry": sub_info.get("expiry"),
+                "expiry": _expiry_to_iso(sub_info.get("expiry")),
                 "strike": sub_info.get("strike"),
                 "option_type": option_type,
             }
@@ -610,8 +703,8 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
     if not security_targets:
         # Absolute fallback to ensure feed never starves
         security_targets = {
-            "13": {"exchange": 0, "symbol": "NIFTY"},
-            "51": {"exchange": 0, "symbol": "SENSEX"},
+            "13": {"exchange": 0, "symbol": "NIFTY", "mode": FEED_MODE_TICKER},
+            "51": {"exchange": 0, "symbol": "SENSEX", "mode": FEED_MODE_TICKER},
         }
 
     _refresh_symbol_map(security_targets)
@@ -641,6 +734,80 @@ def on_message_callback(feed, message):
         if isinstance(data, dict):
             return _extract_ltp(data)
         return None
+
+    def _extract_bid_ask(payload: Dict[str, object]) -> tuple[Optional[float], Optional[float]]:
+        if not isinstance(payload, dict):
+            return (None, None)
+
+        def _extract(keys: tuple[str, ...]) -> Optional[float]:
+            for key in keys:
+                if key in payload and payload[key] is not None:
+                    value = payload.get(key)
+                    if isinstance(value, str):
+                        try:
+                            value = float(value)
+                        except ValueError:
+                            continue
+                    if isinstance(value, (int, float)):
+                        return float(value)
+            return None
+
+        bid = _extract(("BID", "bid", "best_bid", "best_bid_price", "bid_price", "bidPrice", "bp1"))
+        ask = _extract(("ASK", "ask", "best_ask", "best_ask_price", "ask_price", "askPrice", "ap1"))
+
+        if bid is None or ask is None:
+            data = payload.get("data")
+            if isinstance(data, dict):
+                bid = bid if bid is not None else _extract_bid_ask(data)[0]
+                ask = ask if ask is not None else _extract_bid_ask(data)[1]
+        return (bid, ask)
+
+    def _extract_depth(payload: Dict[str, object]) -> Optional[Dict[str, list]]:
+        if not isinstance(payload, dict):
+            return None
+
+        depth = payload.get("depth") or payload.get("market_depth") or payload.get("depth_data")
+        if isinstance(depth, dict):
+            bids = depth.get("bids") or depth.get("bid") or depth.get("buy") or []
+            asks = depth.get("asks") or depth.get("ask") or depth.get("sell") or []
+        else:
+            bids = payload.get("bids") or payload.get("bid") or payload.get("buy") or []
+            asks = payload.get("asks") or payload.get("ask") or payload.get("sell") or []
+
+        def _normalize_levels(levels: object) -> list:
+            if not isinstance(levels, list):
+                return []
+            normalized = []
+            for level in levels[:5]:
+                if isinstance(level, dict):
+                    price = level.get("price") or level.get("rate") or level.get("p")
+                    qty = level.get("qty") or level.get("quantity") or level.get("q")
+                elif isinstance(level, (list, tuple)) and len(level) >= 2:
+                    price, qty = level[0], level[1]
+                else:
+                    continue
+
+                try:
+                    price_val = float(price)
+                except (TypeError, ValueError):
+                    continue
+                try:
+                    qty_val = float(qty) if qty is not None else 0.0
+                except (TypeError, ValueError):
+                    qty_val = 0.0
+
+                normalized.append({"price": price_val, "qty": qty_val})
+            return normalized
+
+        norm_bids = _normalize_levels(bids)
+        norm_asks = _normalize_levels(asks)
+        if not norm_bids and not norm_asks:
+            data = payload.get("data")
+            if isinstance(data, dict):
+                return _extract_depth(data)
+        if not norm_bids and not norm_asks:
+            return None
+        return {"bids": norm_bids, "asks": norm_asks}
     
     try:
         # Extract security_id from message
@@ -662,6 +829,8 @@ def on_message_callback(feed, message):
             if ltp is None or ltp == 0:
                 return
 
+            bid, ask = _extract_bid_ask(message)
+            depth = _extract_depth(message)
             try:
                 from app.services.authoritative_option_chain_service import authoritative_option_chain_service
                 authoritative_option_chain_service.update_option_tick_from_websocket(
@@ -670,6 +839,9 @@ def on_message_callback(feed, message):
                     strike=option_meta.get("strike"),
                     option_type=option_meta.get("option_type"),
                     ltp=ltp,
+                    bid=bid,
+                    ask=ask,
+                    depth=depth,
                 )
             except Exception as cache_e:
                 print(f"[WARN] Failed to update option cache for {sec_id_str}: {cache_e}")
@@ -686,6 +858,9 @@ def on_message_callback(feed, message):
                     "strike": option_meta.get("strike"),
                     "option_type": option_meta.get("option_type"),
                     "ltp": ltp,
+                    "bid": bid,
+                    "ask": ask,
+                    "depth": depth,
                     "timestamp": datetime.utcnow().isoformat(),
                 })
             except Exception:
@@ -696,7 +871,7 @@ def on_message_callback(feed, message):
         ltp = _extract_ltp(message)
 
         if ltp is None or ltp == 0:
-            exchange_code = _subscribed_securities.get(sec_id_str)
+            exchange_code = _subscribed_securities.get(sec_id_str, {}).get("exchange")
             last_close = _get_last_close_price(sec_id_str, exchange_code)
             if last_close is not None:
                 update_price(symbol, last_close)
@@ -708,13 +883,15 @@ def on_message_callback(feed, message):
 
         try:
             orchestrator = get_orchestrator()
-            is_index = symbol in ("NIFTY", "BANKNIFTY", "SENSEX")
-            exchange_name = "NSE"
-            if is_index:
-                exchange_name = "NSE"
+            is_index = symbol in ("NIFTY", "BANKNIFTY", "SENSEX", "BANKEX")
+            exchange_code = _subscribed_securities.get(sec_id_str, {}).get("exchange")
+            exchange_name = _exchange_name_from_code(exchange_code)
+            if is_index and symbol in ("SENSEX", "BANKEX"):
+                exchange_name = "BSE"
+            segment_name = _exchange_segment_from_code(exchange_code) or exchange_name
             orchestrator.on_tick({
                 "exchange": exchange_name,
-                "segment": exchange_name,
+                "segment": segment_name,
                 "symbol": symbol,
                 "ltp": ltp,
                 "is_index": is_index,
@@ -766,8 +943,9 @@ def sync_subscriptions_with_watchlist():
                     if exchange is None:
                         continue
                     try:
-                        _market_feed.subscribe_symbols([(exchange, sec_id, 15)])
-                        _subscribed_securities[sec_id] = exchange
+                        mode = _resolve_feed_mode(meta)
+                        _market_feed.subscribe_symbols([(exchange, sec_id, mode)])
+                        _subscribed_securities[sec_id] = {"exchange": exchange, "mode": mode}
                         try:
                             orchestrator = get_orchestrator()
                             exchange_name = _exchange_name_from_code(exchange, meta.get("segment") if meta else None)
@@ -790,11 +968,13 @@ def sync_subscriptions_with_watchlist():
             to_unsubscribe = current_ids - desired_ids
             if to_unsubscribe and _market_feed:
                 for sec_id in to_unsubscribe:
-                    exchange = _subscribed_securities.get(sec_id)
+                    sub_meta = _subscribed_securities.get(sec_id) or {}
+                    exchange = sub_meta.get("exchange")
+                    mode = sub_meta.get("mode") or FEED_MODE_TICKER
                     if exchange is None:
                         continue
                     try:
-                        _market_feed.unsubscribe_symbols([(exchange, sec_id, 15)])
+                        _market_feed.unsubscribe_symbols([(exchange, sec_id, mode)])
                         _subscribed_securities.pop(sec_id, None)
                         try:
                             orchestrator = get_orchestrator()
@@ -820,6 +1000,8 @@ def start_live_feed():
     
     with _started_lock:
         if _started:
+            return
+        if not _acquire_feed_lock():
             return
         _started = True
     
@@ -862,7 +1044,8 @@ def start_live_feed():
                     exchange = meta.get("exchange")
                     if exchange is None:
                         continue
-                    instruments.append((exchange, sec_id, 15))  # 15 = Ticker mode
+                    mode = _resolve_feed_mode(meta)
+                    instruments.append((exchange, sec_id, mode))
                 
                 # Create DhanFeed (compatible with multiple dhanhq versions)
                 _market_feed = _create_dhan_feed(creds.client_id, token, instruments)
@@ -872,7 +1055,10 @@ def start_live_feed():
                 print(f"[INFO] Rate limiting active: max {_max_consecutive_failures} failures before cooldown")
                 
                 # Track subscriptions and register with WebSocket Manager
-                _subscribed_securities.update({sec: exchange for exchange, sec, _ in instruments})
+                _subscribed_securities.update({
+                    str(sec): {"exchange": exchange, "mode": mode}
+                    for exchange, sec, mode in instruments
+                })
 
                 # Register subscriptions with orchestrator
                 orchestrator = get_orchestrator()
@@ -928,10 +1114,14 @@ def start_live_feed():
             except ConnectionError as e:
                 print(f"[ERROR] DhanHQ connection error: {e}")
                 print("[WARN] Connection rejected - likely due to rate limiting or credentials issue")
+                if "429" in str(e):
+                    _trigger_cooldown("HTTP_429")
                 _record_connection_attempt(success=False)
                 time.sleep(5)
             except Exception as e:
                 print(f"[ERROR] Dhan feed crashed: {e}")
+                if "429" in str(e):
+                    _trigger_cooldown("HTTP_429")
                 _record_connection_attempt(success=False)
                 time.sleep(5)
     

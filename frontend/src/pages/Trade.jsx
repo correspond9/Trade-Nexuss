@@ -5,6 +5,7 @@ import BasketsTab from './BASKETS';
 import WatchlistComponent from './WATCHLIST';
 import StraddleMatrix from './STRADDLE';
 import OptionMatrixComponent from './OPTIONS';
+import PositionsTab from './POSITIONS';
 import OrderModal from '../components/OrderModal';
 // import marketDataCache from '../services/marketDataCache'; // Temporarily disabled
 
@@ -138,12 +139,14 @@ const Trade = () => {
     // Handle single order or multiple legs (for straddle)
     if (Array.isArray(legs) && legs.length > 0) {
       const firstLeg = legs[0];
+      const expiryIso = isoExpiry || expiry;
       setModalOrderData({
         symbol: firstLeg.symbol,
         action: firstLeg.action,
         ltp: firstLeg.ltp,
         lotSize: firstLeg.lotSize,
-        expiry: expiry,
+        expiry: expiryIso,
+        expiry_display: expiry,
         legs: legs.length > 1 ? legs : null // For straddle orders
       });
       setModalOrderType(firstLeg.action || 'BUY');

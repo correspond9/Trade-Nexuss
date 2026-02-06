@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from threading import RLock
 from typing import Dict, Optional, Tuple
+import asyncio
 
 from app.market_orchestrator.exchange_router import ExchangeRouter
 from app.market_orchestrator.market_cache_manager import MarketCacheManager
@@ -39,6 +40,8 @@ class MarketDataOrchestrator:
         self.rest_throttle = RestThrottle()
         self.last_tick_time: Optional[float] = None
         self._lock = RLock()
+        self._streams_lock = RLock()
+        self._streams_started = False
 
     def subscribe(self, token: str, exchange: str, segment: str, symbol: str, expiry: Optional[str] = None, priority: Optional[str] = None, meta: Optional[Dict[str, object]] = None) -> Tuple[bool, str, Optional[int]]:
         if self.registry.exists(token):
@@ -94,3 +97,31 @@ class MarketDataOrchestrator:
             "last_tick_time": self.last_tick_time,
             "cache_status": self.cache_manager.cache_status(),
         }
+
+    def start_equity_stream(self) -> None:
+        from app.dhan.live_feed import start_live_feed
+        start_live_feed()
+
+    async def start_mcx_stream(self) -> None:
+        from app.commodity_engine.commodity_ws_manager import commodity_ws_manager
+        await commodity_ws_manager.start()
+
+    async def start_streams(self) -> None:
+        with self._streams_lock:
+            if self._streams_started:
+                return
+            self._streams_started = True
+
+        self.start_equity_stream()
+        await self.start_mcx_stream()
+
+    def start_streams_sync(self) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            loop.create_task(self.start_streams())
+        else:
+            asyncio.run(self.start_streams())

@@ -1,4 +1,16 @@
-# Python
+
+# VS Code files
+.vscode/
+*.vscode
+*.code-workspace
+# VS Code files
+.vscode/
+*.vscode
+*.code-workspace
+# VS Code files
+.vscode/
+*.vscode
+*.code-workspace# Python
 __pycache__/
 *.py[cod]
 *$py.class

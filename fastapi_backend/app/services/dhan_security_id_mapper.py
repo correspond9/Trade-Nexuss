@@ -54,6 +54,7 @@ class DhanSecurityIdMapper:
                 expiry = (row.get('EXPIRY_DATE') or row.get('SM_EXPIRY_DATE') or '').strip()
                 strike = (row.get('STRIKE_PRICE') or '').strip()
                 option_type = (row.get('OPTION_TYPE') or '').strip()
+                segment = (row.get('SEGMENT') or '').strip()
                 
                 # Only process index options
                 if 'OPTIDX' not in instrument_type:
@@ -81,6 +82,15 @@ class DhanSecurityIdMapper:
                 # Store mapping
                 self.security_id_cache[token_key] = security_id_int
                 
+                # Normalize segment to exchange-specific FNO for options
+                instrument_upper = instrument_type.upper()
+                exchange_upper = exchange.upper()
+                if "OPT" in instrument_upper:
+                    if "BSE" in exchange_upper:
+                        segment = "BSE_FNO"
+                    elif "NSE" in exchange_upper:
+                        segment = "NSE_FNO"
+
                 # Store full data for reference
                 self.csv_data[token_key] = {
                     'exchange': exchange,
@@ -89,7 +99,7 @@ class DhanSecurityIdMapper:
                     'expiry': expiry_formatted,
                     'strike': strike_float,
                     'option_type': option_type,
-                    'segment': row.get('SEGMENT', '').strip()
+                    'segment': segment
                 }
             
             self.last_updated = datetime.now()

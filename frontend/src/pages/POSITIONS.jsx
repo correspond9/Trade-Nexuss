@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { apiService } from '../services/apiService';
 
 const PositionsTab = () => {
@@ -8,31 +8,59 @@ const PositionsTab = () => {
   const [error, setError] = useState('');
   const [activeUser] = useState({ id: "admin-1", firstName: "Super", walletBalance: 1000000 });
 
+  const fetchPositions = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError('');
+
+      // NO MOCK DATA - REAL API ONLY
+      const positionsResponse = await apiService.get('/portfolio/positions');
+      if (positionsResponse && positionsResponse.data) {
+        const mapped = positionsResponse.data.map((p) => {
+          const qty = Number(p.quantity ?? p.qty ?? 0);
+          const avgEntry = Number(p.avg_price ?? p.avgEntry ?? 0);
+          const mtm = Number(p.mtm ?? 0);
+          const currentLtp = qty !== 0 ? avgEntry + mtm / qty : avgEntry;
+          return {
+            id: p.id,
+            productType: p.product_type ?? p.productType ?? 'MIS',
+            symbol: p.symbol,
+            qty,
+            avgEntry: avgEntry.toFixed ? avgEntry.toFixed(2) : avgEntry,
+            currentLtp: currentLtp.toFixed ? currentLtp.toFixed(2) : currentLtp,
+            mtm,
+            realizedPnl: p.realizedPnl ?? p.realized_pnl ?? 0,
+            status: p.status ?? 'OPEN'
+          };
+        });
+        setPositions(mapped);
+      }
+    } catch (err) {
+      console.error('Error fetching positions:', err);
+      // In development, don't set error to prevent UI issues
+      if (!import.meta.env.DEV) {
+        setError('Failed to load positions');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Fetch live positions from API
   useEffect(() => {
-    const fetchPositions = async () => {
-      try {
-        setLoading(true);
-        setError('');
-        
-        // NO MOCK DATA - REAL API ONLY
-        const positionsResponse = await apiService.get('/portfolio/positions');
-        if (positionsResponse && positionsResponse.data) {
-          setPositions(positionsResponse.data);
-        }
-      } catch (err) {
-        console.error('Error fetching positions:', err);
-        // In development, don't set error to prevent UI issues
-        if (!import.meta.env.DEV) {
-          setError('Failed to load positions');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchPositions();
-  }, []);
+  }, [fetchPositions]);
+
+  useEffect(() => {
+    const handlePositionsUpdated = () => fetchPositions();
+    window.addEventListener('positions:updated', handlePositionsUpdated);
+    return () => window.removeEventListener('positions:updated', handlePositionsUpdated);
+  }, [fetchPositions]);
+
+  useEffect(() => {
+    const id = setInterval(fetchPositions, 5000);
+    return () => clearInterval(id);
+  }, [fetchPositions]);
 
   // Manual refresh function
   const handleRefresh = () => {

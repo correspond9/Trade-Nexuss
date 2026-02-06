@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.market.instrument_master.loader import MASTER
-from app.dhan.live_feed import start_live_feed
+from app.market_orchestrator import get_orchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -362,10 +362,11 @@ async def on_start():
     print("[STARTUP] Loading Tier B pre-loaded chains...")
     await load_tier_b_chains()
     
-    # Start official Dhan WebSocket feed after Tier B is registered
-    print("[STARTUP] Starting Dhan WebSocket feed...")
-    start_live_feed()
-    print("[STARTUP] ✓ Dhan WebSocket feed started")
+    # Start market data streams after Tier B is registered
+    print("[STARTUP] Starting market data streams...")
+    from app.market_orchestrator import get_orchestrator
+    await get_orchestrator().start_streams()
+    print("[STARTUP] ✓ Market data streams started")
 
     print("[STARTUP] ✓ Backend ready!")
     print("="*70 + "\n")
