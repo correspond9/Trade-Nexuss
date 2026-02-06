@@ -14,6 +14,22 @@ const Users = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddFundsModal, setShowAddFundsModal] = useState(false);
+  const [editForm, setEditForm] = useState(null);
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [addForm, setAddForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    role: 'USER',
+    status: 'ACTIVE',
+    walletBalance: '0',
+    allowedSegments: 'NSE,NFO,BSE,MCX'
+  });
+  const [actionError, setActionError] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(user?.role);
+  const showEditColumn = isAdmin;
+  const showRemoveColumn = isAdmin;
 
   useEffect(() => {
     loadUsers();
@@ -28,16 +44,21 @@ const Users = () => {
         const nameParts = (u.username || '').split(' ');
         const firstName = nameParts.shift() || '';
         const lastName = nameParts.join(' ');
+        const walletBalanceRaw = Number(u.wallet_balance || 0);
         return {
           id: u.id,
+          username: u.username || '',
           firstName,
           lastName,
           userType: u.role || 'USER',
+          role: u.role || 'USER',
           email: u.email || '-',
           createdOn: u.created_at ? new Date(u.created_at).toLocaleDateString('en-IN') : '-',
-          mobile: '-',
-          walletBalance: `₹${Number(u.wallet_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-          status: u.status || 'PENDING'
+          mobile: '',
+          walletBalance: `₹${walletBalanceRaw.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          walletBalanceRaw,
+          status: u.status || 'PENDING',
+          allowedSegments: u.allowed_segments || 'NSE,NFO,BSE,MCX'
         };
       });
       setUsers(mapped);
@@ -49,13 +70,108 @@ const Users = () => {
   };
 
   const handleEdit = (user) => {
+    if (!isAdmin) return;
     setSelectedUser(user);
+    setEditForm({
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      email: user.email || '',
+      role: user.role || 'USER',
+      status: user.status || 'PENDING',
+      walletBalance: String(user.walletBalanceRaw ?? 0),
+      allowedSegments: user.allowedSegments || 'NSE,NFO,BSE,MCX'
+    });
     setShowEditModal(true);
   };
 
   const handleAddFunds = (user) => {
     setSelectedUser(user);
     setShowAddFundsModal(true);
+  };
+
+  const handleEditChange = (field, value) => {
+    setEditForm((prev) => ({ ...(prev || {}), [field]: value }));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedUser || !editForm) return;
+    setActionError(null);
+    setActionLoading(true);
+    try {
+      const username = `${editForm.firstName || ''} ${editForm.lastName || ''}`.trim() || selectedUser.username;
+      const payload = {
+        username,
+        email: editForm.email || null,
+        role: editForm.role || 'USER',
+        status: editForm.status || 'PENDING',
+        allowed_segments: editForm.allowedSegments || 'NSE,NFO,BSE,MCX',
+        wallet_balance: Number(editForm.walletBalance || 0)
+      };
+      await apiService.put(`/admin/users/${selectedUser.id}`, payload);
+      await loadUsers();
+      setShowEditModal(false);
+      setSelectedUser(null);
+      setEditForm(null);
+    } catch (error) {
+      setActionError(error?.message || 'Failed to update user');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAddUserChange = (field, value) => {
+    setAddForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleCreateUser = async () => {
+    setActionError(null);
+    setActionLoading(true);
+    try {
+      const username = `${addForm.firstName || ''} ${addForm.lastName || ''}`.trim();
+      if (!username) {
+        throw new Error('Username is required');
+      }
+      const payload = {
+        username,
+        email: addForm.email || null,
+        role: addForm.role || 'USER',
+        status: addForm.status || 'ACTIVE',
+        allowed_segments: addForm.allowedSegments || 'NSE,NFO,BSE,MCX',
+        wallet_balance: Number(addForm.walletBalance || 0)
+      };
+      await apiService.post('/admin/users', payload);
+      await loadUsers();
+      setShowAddUserModal(false);
+      setAddForm({
+        firstName: '',
+        lastName: '',
+        email: '',
+        role: 'USER',
+        status: 'ACTIVE',
+        walletBalance: '0',
+        allowedSegments: 'NSE,NFO,BSE,MCX'
+      });
+    } catch (error) {
+      setActionError(error?.message || 'Failed to create user');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteUser = async (targetUser) => {
+    if (!targetUser) return;
+    const confirmed = window.confirm(`Block user ${targetUser.username || targetUser.id}?`);
+    if (!confirmed) return;
+    setActionError(null);
+    setActionLoading(true);
+    try {
+      await apiService.delete(`/admin/users/${targetUser.id}`);
+      await loadUsers();
+    } catch (error) {
+      setActionError(error?.message || 'Failed to remove user');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const getStatusBadge = (status) => {
@@ -152,6 +268,18 @@ const Users = () => {
                 />
               </div>
             </div>
+            {isAdmin && (
+              <div className="flex items-center justify-between mt-4">
+                <div className="text-xs text-red-600">{actionError}</div>
+                <button
+                  onClick={() => setShowAddUserModal(true)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs disabled:opacity-50"
+                  disabled={actionLoading}
+                >
+                  Add User
+                </button>
+              </div>
+            )}
           </div>
 
           {/* DataTable */}
@@ -168,8 +296,13 @@ const Users = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mobile</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Wallet Balance</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  {showEditColumn && (
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
+                  )}
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
+                  {showRemoveColumn && (
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
+                  )}
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -183,9 +316,10 @@ const Users = () => {
                   <td className="px-6 py-2"><input type="text" className="w-full border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Search" /></td>
                   <td className="px-6 py-2"><input type="text" className="w-full border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Search" /></td>
                   <td className="px-6 py-2"><input type="text" className="w-full border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Search" /></td>
+                  {showEditColumn && <td className="px-6 py-2"></td>}
                   <td className="px-6 py-2"></td>
                   <td className="px-6 py-2"></td>
-                  <td className="px-6 py-2"></td>
+                  {showRemoveColumn && <td className="px-6 py-2"></td>}
                 </tr>
                 
                 {/* Data rows */}
@@ -200,18 +334,31 @@ const Users = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.mobile}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.walletBalance}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">{getStatusBadge(user.status)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button onClick={() => handleEdit(user)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs">Edit</button>
-                    </td>
+                    {showEditColumn && (
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <button onClick={() => handleEdit(user)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs">Edit</button>
+                      </td>
+                    )}
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <button onClick={() => handleAddFunds(user)} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-xs">Add Funds</button>
                     </td>
+                    {showRemoveColumn && (
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <button
+                          onClick={() => handleDeleteUser(user)}
+                          className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs disabled:opacity-50"
+                          disabled={actionLoading}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 
                 {paginatedUsers.length === 0 && (
                   <tr>
-                    <td colSpan="11" className="px-6 py-4 text-center text-sm text-gray-500">No matching records found</td>
+                    <td colSpan={showEditColumn || showRemoveColumn ? 12 : 10} className="px-6 py-4 text-center text-sm text-gray-500">No matching records found</td>
                   </tr>
                 )}
               </tbody>
@@ -242,15 +389,184 @@ const Users = () => {
           <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Edit User</h3>
             <div className="space-y-4">
-              <div><label className="block text-sm font-medium text-gray-700">First Name</label><input type="text" value={selectedUser.firstName} className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" readOnly /></div>
-              <div><label className="block text-sm font-medium text-gray-700">Last Name</label><input type="text" value={selectedUser.lastName} className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" readOnly /></div>
-              <div><label className="block text-sm font-medium text-gray-700">Email</label><input type="email" value={selectedUser.email} className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" readOnly /></div>
-              <div><label className="block text-sm font-medium text-gray-700">Mobile</label><input type="tel" value={selectedUser.mobile} className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" readOnly /></div>
-              <div><label className="block text-sm font-medium text-gray-700">Status</label><select value={selectedUser.status} className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"><option value="ACTIVE">ACTIVE</option><option value="PENDING">PENDING</option><option value="INACTIVE">INACTIVE</option></select></div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">First Name</label>
+                <input
+                  type="text"
+                  value={editForm?.firstName ?? ''}
+                  onChange={(e) => handleEditChange('firstName', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Last Name</label>
+                <input
+                  type="text"
+                  value={editForm?.lastName ?? ''}
+                  onChange={(e) => handleEditChange('lastName', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Email</label>
+                <input
+                  type="email"
+                  value={editForm?.email ?? ''}
+                  onChange={(e) => handleEditChange('email', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Role</label>
+                <select
+                  value={editForm?.role ?? 'USER'}
+                  onChange={(e) => handleEditChange('role', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="USER">USER</option>
+                  <option value="ADMIN">ADMIN</option>
+                  <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Wallet Balance</label>
+                <input
+                  type="number"
+                  value={editForm?.walletBalance ?? '0'}
+                  onChange={(e) => handleEditChange('walletBalance', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Status</label>
+                <select
+                  value={editForm?.status ?? 'PENDING'}
+                  onChange={(e) => handleEditChange('status', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="PENDING">PENDING</option>
+                  <option value="INACTIVE">INACTIVE</option>
+                  <option value="BLOCKED">BLOCKED</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Allowed Segments</label>
+                <input
+                  type="text"
+                  value={editForm?.allowedSegments ?? ''}
+                  onChange={(e) => handleEditChange('allowedSegments', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
             </div>
             <div className="flex justify-end space-x-3 mt-6">
-              <button onClick={() => setShowEditModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">Cancel</button>
-              <button onClick={() => setShowEditModal(false)} className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">Save Changes</button>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setSelectedUser(null);
+                  setEditForm(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button onClick={handleSaveEdit} className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50" disabled={actionLoading}>Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddUserModal && isAdmin && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Add User</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">First Name</label>
+                <input
+                  type="text"
+                  value={addForm.firstName}
+                  onChange={(e) => handleAddUserChange('firstName', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Last Name</label>
+                <input
+                  type="text"
+                  value={addForm.lastName}
+                  onChange={(e) => handleAddUserChange('lastName', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Email</label>
+                <input
+                  type="email"
+                  value={addForm.email}
+                  onChange={(e) => handleAddUserChange('email', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Role</label>
+                <select
+                  value={addForm.role}
+                  onChange={(e) => handleAddUserChange('role', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="USER">USER</option>
+                  <option value="ADMIN">ADMIN</option>
+                  <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Status</label>
+                <select
+                  value={addForm.status}
+                  onChange={(e) => handleAddUserChange('status', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="PENDING">PENDING</option>
+                  <option value="INACTIVE">INACTIVE</option>
+                  <option value="BLOCKED">BLOCKED</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Wallet Balance</label>
+                <input
+                  type="number"
+                  value={addForm.walletBalance}
+                  onChange={(e) => handleAddUserChange('walletBalance', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Allowed Segments</label>
+                <input
+                  type="text"
+                  value={addForm.allowedSegments}
+                  onChange={(e) => handleAddUserChange('allowedSegments', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => setShowAddUserModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateUser}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                disabled={actionLoading}
+              >
+                Create User
+              </button>
             </div>
           </div>
         </div>

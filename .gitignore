@@ -56,10 +56,10 @@ env/
 logs/
 backend.log
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
+# Database (commented out to allow broker.db)
+# *.db
+# *.sqlite
+# *.sqlite3
 
 # Node.js (for frontend)
 node_modules/
