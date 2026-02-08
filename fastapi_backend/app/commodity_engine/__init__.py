@@ -128,6 +128,137 @@ class CommodityEngine:
 
         logger.info("[MCX] Commodity cache refresh complete")
 
+    async def populate_closing_snapshot_from_rest(self) -> bool:
+        """
+        Build closing snapshot for MCX (options + nearest futures) using REST quotes.
+        Fills option leg LTPs for current/next expiries and futures LTPs.
+        """
+        try:
+            # Ensure option chains exist for MCX underlyings
+            for symbol in MCX_UNDERLYINGS:
+                ltp = await self._get_underlying_ltp(symbol)
+                if ltp is None:
+                    continue
+                await commodity_option_chain_service.build_for_underlying(symbol, ltp)
+                await asyncio.sleep(0.5)
+
+            # Populate option leg LTPs via batch REST quotes
+            creds = await fetch_dhan_credentials()
+            if not creds:
+                return False
+            headers = {
+                "access-token": creds["access_token"],
+                "client-id": creds["client_id"],
+                "Content-Type": "application/json",
+            }
+            url = "https://api.dhan.co/v2/marketfeed/quote"
+
+            # Group tokens by segment from instrument registry
+            from app.market.instrument_master.registry import REGISTRY
+            if not REGISTRY.loaded:
+                REGISTRY.load()
+            segment_groups: Dict[str, List[int]] = {}
+            token_meta: Dict[int, Dict[str, object]] = {}
+
+            for token_str, meta in list(commodity_option_chain_service.token_map.items()):
+                try:
+                    token_id = int(float(token_str))
+                except Exception:
+                    continue
+                # Find record with matching SECURITY_ID to get SEGMENT
+                seg = None
+                for row in REGISTRY.instruments:
+                    if (row.get("EXCH_ID") or "").strip().upper() != "MCX":
+                        continue
+                    sec = (row.get("SECURITY_ID") or "").strip()
+                    if not sec:
+                        continue
+                    try:
+                        if int(float(sec)) == token_id:
+                            seg = (row.get("SEGMENT") or "").strip()
+                            break
+                    except Exception:
+                        continue
+                if not seg:
+                    seg = "OPT_COM"
+                segment_groups.setdefault(seg, []).append(token_id)
+                token_meta[token_id] = meta
+
+            # Fetch quotes per segment and update legs
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                for seg, ids in segment_groups.items():
+                    # Chunk to avoid large payloads
+                    chunk_size = 50
+                    for i in range(0, len(ids), chunk_size):
+                        chunk = ids[i : i + chunk_size]
+                        payload = {seg: chunk}
+                        try:
+                            await self._rate_limit_rest()
+                            async with session.post(url, json=payload, headers=headers, timeout=10) as response:
+                                if response.status != 200:
+                                    if response.status == 429:
+                                        self._rest_block_until = asyncio.get_event_loop().time() + self._rest_cooldown_seconds
+                                    continue
+                                data = await response.json()
+                                segment_data = data.get("data", {}).get(seg, {})
+                                for key, val in segment_data.items():
+                                    try:
+                                        token_id = int(key)
+                                    except Exception:
+                                        continue
+                                    rec = val
+                                    if isinstance(rec, list) and rec:
+                                        rec = rec[0]
+                                    ltp = rec.get("ltp") or rec.get("LTP")
+                                    if ltp is None:
+                                        continue
+                                    meta = token_meta.get(token_id)
+                                    if not meta:
+                                        continue
+                                    commodity_option_chain_service.update_option_tick(
+                                        symbol=str(meta.get("symbol")),
+                                        expiry=str(meta.get("expiry")),
+                                        strike=float(meta.get("strike")),
+                                        option_type=str(meta.get("option_type")),
+                                        ltp=float(ltp),
+                                    )
+                        except Exception:
+                            continue
+
+            # Update nearest futures LTPs
+            for symbol in MCX_FUTURES_SYMBOLS:
+                meta = REGISTRY.get_nearest_mcx_future(symbol)
+                if not meta:
+                    continue
+                seg = "MCX_COMM"
+                sec_id = int(meta["security_id"])
+                payload = {seg: [sec_id]}
+                async with aiohttp.ClientSession() as session:
+                    try:
+                        await self._rate_limit_rest()
+                        async with session.post(url, json=payload, headers=headers, timeout=10) as response:
+                            if response.status != 200:
+                                continue
+                            data = await response.json()
+                            segment_data = data.get("data", {}).get(seg, {})
+                            rec = segment_data.get(str(sec_id)) or segment_data.get(sec_id)
+                            if isinstance(rec, list) and rec:
+                                rec = rec[0]
+                            ltp = rec.get("ltp") or rec.get("LTP")
+                            if ltp is not None:
+                                commodity_futures_service.update_future_tick(
+                                    symbol=symbol,
+                                    expiry=str(meta.get("expiry")),
+                                    ltp=float(ltp),
+                                )
+                    except Exception:
+                        continue
+
+            return True
+        except Exception:
+            return False
+
     async def refresh_options_only(self, reason: str) -> None:
         logger.info(f"[MCX] Refreshing option chains ({reason})")
         for symbol in MCX_UNDERLYINGS:

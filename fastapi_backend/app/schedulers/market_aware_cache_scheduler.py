@@ -25,7 +25,7 @@ MARKET_CHECK_INTERVAL_SECONDS = 300  # 5 minutes
 # Time windows for market checks
 NSE_BSE_MARKET_HOURS = {
     "open_time": time(9, 15),      # 9:15 AM IST
-    "close_time": time(15, 30)     # 3:30 PM IST
+    "close_time": time(15, 31)     # 3:31 PM IST
 }
 
 MCX_MARKET_HOURS = {
@@ -50,6 +50,7 @@ class MarketAwareCacheScheduler:
         self.last_market_status: Dict[str, bool] = {}  # {exchange: is_open}
         self.last_refresh_time: Optional[datetime] = None
         self.last_successful_refresh: Optional[datetime] = None
+        self.last_closing_run_date: Optional[str] = None
         
     def _is_market_open_for_exchange(self, exchange: str) -> bool:
         """Determine if market is open for given exchange"""
@@ -140,6 +141,43 @@ class MarketAwareCacheScheduler:
                 
                 self.last_refresh_time = datetime.now()
                 await self._refresh_cache_if_needed()
+                
+                # One-time daily closing snapshot at 15:31 local time
+                try:
+                    now = datetime.now()
+                    today_key = now.date().isoformat()
+                    close_time = NSE_BSE_MARKET_HOURS["close_time"]
+                    if (
+                        now.weekday() < 5  # Mon-Fri
+                        and now.time() >= close_time
+                        and self.last_closing_run_date != today_key
+                    ):
+                        logger.info("🕞 Running one-time closing snapshot job (15:31)...")
+                        from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+                        ok = await authoritative_option_chain_service.populate_closing_snapshot_from_rest()
+                        if ok:
+                            self.last_closing_run_date = today_key
+                            logger.info("✅ Closing snapshot job completed")
+                        else:
+                            logger.warning("⚠️ Closing snapshot job failed")
+                    
+                    # MCX one-time closing snapshot after 23:30
+                    mcx_close_time = MCX_MARKET_HOURS["close_time"]
+                    if (
+                        now.weekday() < 5
+                        and now.time() >= mcx_close_time
+                        and self.last_closing_run_date != (today_key + "_MCX")
+                    ):
+                        logger.info("🕚 Running MCX closing snapshot job (23:30)...")
+                        from app.commodity_engine import commodity_engine
+                        ok2 = await commodity_engine.populate_closing_snapshot_from_rest()
+                        if ok2:
+                            self.last_closing_run_date = today_key + "_MCX"
+                            logger.info("✅ MCX closing snapshot job completed")
+                        else:
+                            logger.warning("⚠️ MCX closing snapshot job failed")
+                except Exception as e:
+                    logger.error(f"❌ Error running closing snapshot job: {e}")
                 
             except asyncio.CancelledError:
                 logger.info("🛑 Market-aware cache scheduler cancelled")

@@ -1,0 +1,2 @@
+.git_untracked.txt
+temp_reference/fastapi-backend/trading_terminal.db

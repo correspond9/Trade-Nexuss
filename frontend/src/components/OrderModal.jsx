@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { apiService } from '../services/apiService';
+import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
 
@@ -182,7 +183,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
 
   const parseOptionMeta = useCallback((data) => {
     const symbolText = String(data?.symbol || '').trim();
-    const parts = symbolText.split(' ').filter(Boolean);
+    const parts = symbolText.replace(/_/g, ' ').split(' ').filter(Boolean);
     let optionType = String(data?.optionType || '').toUpperCase();
     let strike = data?.strike;
     let underlying = '';
@@ -202,6 +203,18 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
       expiry: normalizeExpiry(data?.expiry_iso ?? data?.expiry) || data?.expiry || null,
     };
   }, []);
+  
+  const getEffectiveLotSize = (data) => {
+    const explicit = Number(data?.lotSize || 0);
+    if (explicit > 0) return explicit;
+    const underlying = String(data?.underlying || '').trim();
+    if (underlying) {
+      return Number(getConfiguredLotSize(underlying) || 1);
+    }
+    const meta = parseOptionMeta(data);
+    if (!meta?.underlying) return 1;
+    return Number(getConfiguredLotSize(meta.underlying) || 1);
+  };
 
   useEffect(() => {
     if (!isOpen || !orderData) return;
@@ -282,8 +295,8 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
 
   const fetchMargin = async () => {
     try {
-      const lotSize = Number(orderData?.lotSize || 1);
-      const effectiveQty = Math.max(1, Number(quantity || 1)) * lotSize;
+      const effectiveLot = getEffectiveLotSize(orderData);
+      const effectiveQty = Math.max(1, Number(quantity || 1)) * effectiveLot;
       const priceForMargin = priceType === 'Limit'
         ? Number(limitPrice || orderData?.ltp || 0)
         : Number(orderData?.ltp || 0);
@@ -299,7 +312,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
       if (canUseMulti) {
         const scripts = legs.map((leg) => {
           const meta = parseOptionMeta(leg);
-          const legLot = Number(leg?.lotSize || lotSize || 1);
+          const legLot = Number(leg?.lotSize || effectiveLot || 1);
           const legQty = Math.max(1, Number(quantity || 1)) * legLot;
           const legPrice = priceType === 'Limit'
             ? Number(leg?.ltp ?? priceForMargin)
@@ -357,7 +370,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
           orderType: currentOrderType,
           priceType: priceType,
           price: priceForMargin,
-          lotSize: lotSize,
+          lotSize: effectiveLot,
           product_type: productType
         })
       });
@@ -414,8 +427,8 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
   const handleSubmit = async () => {
     const productType = resolveProductType();
     const exchangeSegment = resolveExchangeSegment(orderData);
-    const lotSize = Number(orderData?.lotSize || 1);
-    const effectiveQty = Math.max(1, Number(quantity || 1)) * lotSize;
+    const effectiveLot = getEffectiveLotSize(orderData);
+    const effectiveQty = Math.max(1, Number(quantity || 1)) * effectiveLot;
     const resolvedPrice = priceType === 'Limit'
       ? Number(limitPrice || orderData?.ltp || 0)
       : 0;
@@ -462,7 +475,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
         // Place Regular Order
         if (isBasketOrder) {
           const legs = (orderData.legs?.length ? orderData.legs : [orderData]).map((leg) => {
-            const legLot = Number(leg?.lotSize || orderData?.lotSize || 1);
+            const legLot = Number(leg?.lotSize || effectiveLot || 1);
             const legQty = Math.max(1, Number(quantity || 1)) * legLot;
             const legPrice = priceType === 'Market'
               ? 0
@@ -522,7 +535,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
         if (legs && legs.length > 1) {
           const responses = [];
           for (const leg of legs) {
-            const legLot = Number(leg?.lotSize || orderData?.lotSize || 1);
+            const legLot = Number(leg?.lotSize || effectiveLot || 1);
             const legQty = Math.max(1, Number(quantity || 1)) * legLot;
             const legPrice = priceType === 'Market'
               ? 0
@@ -921,7 +934,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
 
               {/* Total Quantity */}
               <div className="text-xs text-gray-600">
-                Total Qty: {quantity * (orderData.lotSize || 50)}
+                Total Qty: {quantity * getEffectiveLotSize(orderData)}
               </div>
 
               {/* Margin */}

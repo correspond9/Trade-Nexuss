@@ -55,6 +55,10 @@ async def refresh_commodities():
     await commodity_engine.refresh_all("manual_refresh")
     return {"status": "ok"}
 
+@router.post("/api/v2/commodities/refresh-closing")
+async def refresh_commodities_closing():
+    ok = await commodity_engine.populate_closing_snapshot_from_rest()
+    return {"status": "ok" if ok else "failed"}
 
 @router.websocket("/ws/commodities")
 async def commodities_ws(ws: WebSocket):

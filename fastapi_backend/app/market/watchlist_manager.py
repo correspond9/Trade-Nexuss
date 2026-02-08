@@ -232,6 +232,32 @@ class WatchlistManager:
                 
                 count = 0
                 for entry in entries:
+                    # Skip clearing if there is an open position for this symbol+expiry
+                    try:
+                        from app.storage.models import MockPosition
+                        from app.rms.span_margin_calculator import _parse_symbol as parse_fno_symbol
+                        from app.rms.mcx_margin_calculator import _parse_symbol as parse_mcx_symbol
+                        pos_query = self.db.query(MockPosition).filter(
+                            MockPosition.user_id == user_id,
+                            MockPosition.quantity != 0,
+                            MockPosition.status == "OPEN"
+                        ).all()
+                        has_open = False
+                        for pos in pos_query:
+                            sym = (pos.symbol or "").strip()
+                            meta = parse_fno_symbol(sym)
+                            if not meta or not meta.get("underlying"):
+                                meta = parse_mcx_symbol(sym)
+                            underlying = (meta.get("underlying") or "").upper()
+                            expiry = meta.get("expiry")
+                            if underlying == (entry.symbol or "").upper() and (expiry == entry.expiry_date):
+                                has_open = True
+                                break
+                        if has_open:
+                            continue
+                    except Exception:
+                        pass
+                    
                     # Unsubscribe related chains
                     if entry.instrument_type in ("STOCK_OPTION", "INDEX_OPTION"):
                         chain = self.atm_engine.get_cached_chain(

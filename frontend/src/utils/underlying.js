@@ -11,6 +11,8 @@ export const normalizeUnderlying = (value) => {
     'BANKNIFTY': 'BANKNIFTY',
     'SENSEX': 'SENSEX',
     'SENSEX 30': 'SENSEX',
+    'BSE SENSEX': 'SENSEX',
+    'S&P BSE SENSEX': 'SENSEX',
   };
 
   if (aliases[raw]) return aliases[raw];

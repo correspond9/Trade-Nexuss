@@ -1,0 +1,23 @@
+{
+  "apiBase": "http://127.0.0.1:8000/api/v2",
+  "endpoints": {
+    "liveOptionChain": "/options/live",
+    "refreshClosing": "/options/refresh-closing"
+  },
+  "underlyings": ["NIFTY", "BANKNIFTY", "SENSEX"],
+  "display": {
+    "showClosingWhenMarketClosed": true,
+    "priceFallbackOrder": ["ltp", "close", "last_price"]
+  },
+  "marketHours": {
+    "NSE_BSE": {"open": "09:15", "close": "15:31"},
+    "MCX": {"open": "09:00", "close": "23:30"}
+  },
+  "refresh": {
+    "pollMs": 30000,
+    "autoSwitchMarketAware": true
+  },
+  "aliases": {
+    "SENSEX": ["SENSEX", "BSE SENSEX", "SENSEX30", "BSESN"]
+  }
+}

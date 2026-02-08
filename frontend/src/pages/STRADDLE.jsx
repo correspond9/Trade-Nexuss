@@ -1,12 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { apiService } from '../services/apiService';
 import { useAuthoritativeOptionChain } from '../hooks/useAuthoritativeOptionChain';
 import normalizeUnderlying from '../utils/underlying';
+import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
 
 const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry = null }) => {
   const [centerStrike, setCenterStrike] = useState(null);
   const [underlyingPrice, setUnderlyingPrice] = useState(null);
   const [strikeInterval, setStrikeInterval] = useState(null);
+  const [snapshotStrikes, setSnapshotStrikes] = useState([]);
+  const listRef = useRef(null);
+  const didInitialScroll = useRef(false);
 
   // Convert selectedIndex to symbol for API calls
   // Get symbol
@@ -88,22 +92,134 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
     }
   }, [straddleAtmStrike]);
 
+  // Fallback snapshot loader when authoritative chain is unavailable
+  useEffect(() => {
+    const loadSnapshot = async () => {
+      try {
+        // Try v1-style snapshot: /optionchain
+        const res1 = await apiService.get('/optionchain', { symbol, expiry: expiry || 'current' });
+        const payload1 = res1?.data ?? res1;
+        const series1 = Array.isArray(payload1)
+          ? payload1
+          : payload1?.[symbol]?.current || payload1?.current || [];
+        if (Array.isArray(series1) && series1.length) {
+          setSnapshotStrikes(series1);
+          console.log('[STRADDLE] Loaded snapshot from /optionchain', symbol, series1.length);
+          return;
+        }
+        // Try v2-style builder: /option-chain/{symbol}?expiry=...&underlying_ltp=...
+        if (underlyingPrice) {
+          const res2 = await apiService.get(`/option-chain/${symbol}`, {
+            expiry: expiry,
+            underlying_ltp: underlyingPrice,
+          });
+          const payload2 = res2?.chain || res2?.data || res2;
+          const arr2 = Array.isArray(payload2) ? payload2 : [];
+          const normalized = arr2.map((item) => ({
+            strike: Number(item.strike || item.strike_price || 0),
+            ltpCE: Number(
+              item?.ce?.ltp ??
+              item?.CE?.ltp ??
+              item?.ce?.close ??
+              item?.CE?.close ??
+              item?.ce?.last_price ??
+              item?.CE?.last_price ??
+              0
+            ),
+            ltpPE: Number(
+              item?.pe?.ltp ??
+              item?.PE?.ltp ??
+              item?.pe?.close ??
+              item?.PE?.close ??
+              item?.pe?.last_price ??
+              item?.PE?.last_price ??
+              0
+            ),
+          }));
+          if (normalized.length) {
+            setSnapshotStrikes(normalized);
+            console.log('[STRADDLE] Loaded snapshot from /option-chain builder', symbol, normalized.length);
+            return;
+          }
+        }
+        setSnapshotStrikes([]);
+      } catch (e) {
+        console.log('[STRADDLE] Snapshot load failed', symbol, e?.message || e);
+        setSnapshotStrikes([]);
+      }
+    };
+    loadSnapshot();
+  }, [symbol, expiry, underlyingPrice]);
+
   // Convert authoritative chain data to straddle format
   const straddles = useMemo(() => {
     if (!chainData || !chainData.strikes) {
+      if (snapshotStrikes.length) {
+        const configuredLot = getConfiguredLotSize(symbol);
+        const lotSize = chainData?.lot_size && chainData.lot_size > 0 ? chainData.lot_size : configuredLot;
+        return snapshotStrikes
+          .map((s) => {
+            const strike = Number(s.strike);
+            const ceLtp = Number(s.ltpCE || 0);
+            const peLtp = Number(s.ltpPE || 0);
+            const hasCe = ceLtp > 0;
+            const hasPe = peLtp > 0;
+            const isDisplayValid = hasCe || hasPe;
+            const isTradeReady = hasCe && hasPe;
+            return {
+              strike,
+              isATM: false,
+              ce_ltp: ceLtp,
+              pe_ltp: peLtp,
+              straddle_premium: (ceLtp + peLtp).toFixed(2),
+              lot_size: lotSize,
+              ceSymbol: `${symbol}_${strike}_CE`,
+              peSymbol: `${symbol}_${strike}_PE`,
+              ceToken: null,
+              peToken: null,
+              timestamp: new Date().toISOString(),
+              price_source: 'snapshot',
+              isValid: isDisplayValid,
+              trade_ready: isTradeReady,
+            };
+          })
+          .sort((a, b) => a.strike - b.strike);
+      }
       return [];
     }
 
     const atmStrike = straddleAtmStrike;
-    // Get lot size from hook data (never hardcoded)
-    const lotSize = chainData.lot_size;
+    const configuredLot = getConfiguredLotSize(symbol);
+    const lotSize = chainData?.lot_size && chainData.lot_size > 0 ? chainData.lot_size : configuredLot;
+    const snapshotMap = Object.fromEntries(
+      (snapshotStrikes || []).map((s) => [Number(s.strike), s])
+    );
 
     return Object.entries(chainData.strikes)
       .map(([strikeStr, strikeData]) => {
         const strike = parseFloat(strikeStr);
-        const ceLtp = strikeData.CE?.ltp || 0;
-        const peLtp = strikeData.PE?.ltp || 0;
-        const isValid = ceLtp > 0 && peLtp > 0;
+        let ceLtp = Number(
+          strikeData.CE?.ltp ??
+          strikeData.CE?.close ??
+          strikeData.CE?.last_price ??
+          0
+        );
+        let peLtp = Number(
+          strikeData.PE?.ltp ??
+          strikeData.PE?.close ??
+          strikeData.PE?.last_price ??
+          0
+        );
+        if (ceLtp <= 0 && snapshotMap[strike]?.ltpCE) {
+          ceLtp = Number(snapshotMap[strike].ltpCE);
+        }
+        if (peLtp <= 0 && snapshotMap[strike]?.ltpPE) {
+          peLtp = Number(snapshotMap[strike].ltpPE);
+        }
+        const hasCe = ceLtp > 0;
+        const hasPe = peLtp > 0;
+        const isDisplayValid = hasCe || hasPe;
+        const isTradeReady = hasCe && hasPe;
         
         return {
           strike,
@@ -117,12 +233,56 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
           ceToken: strikeData.CE?.token,
           peToken: strikeData.PE?.token,
           timestamp: new Date().toISOString(),
-          price_source: strikeData.CE?.source || 'live_cache',
-          isValid: isValid,
+          price_source: (strikeData.CE?.source || 'live_cache') + (snapshotMap[strike] ? '|snapshot_merge' : ''),
+          isValid: isDisplayValid,
+          trade_ready: isTradeReady,
         };
       })
       .sort((a, b) => a.strike - b.strike);
-  }, [chainData, symbol, straddleAtmStrike]);
+  }, [chainData, symbol, straddleAtmStrike, snapshotStrikes]);
+
+  const displayedStraddles = useMemo(() => {
+    if (!straddles.length) return [];
+    const strikesSorted = straddles.map(s => s.strike).sort((a, b) => a - b);
+    const atm = centerStrike ?? (straddleAtmStrike || null);
+    if (atm == null) return straddles;
+    let centerIdx = strikesSorted.findIndex(v => v === atm);
+    if (centerIdx < 0) {
+      let nearest = 0;
+      let minDiff = Infinity;
+      strikesSorted.forEach((v, i) => {
+        const d = Math.abs(v - atm);
+        if (d < minDiff) {
+          minDiff = d;
+          nearest = i;
+        }
+      });
+      centerIdx = nearest;
+    }
+    const total = 31;
+    let start = Math.max(0, centerIdx - 15);
+    let end = start + total - 1;
+    if (end > strikesSorted.length - 1) {
+      end = strikesSorted.length - 1;
+      start = Math.max(0, end - total + 1);
+    }
+    const allowed = new Set(strikesSorted.slice(start, end + 1));
+    return straddles.filter(s => allowed.has(s.strike));
+  }, [straddles, centerStrike, straddleAtmStrike]);
+
+  useEffect(() => {
+    if (didInitialScroll.current) return;
+    const el = listRef.current;
+    if (!el) return;
+    const atmEl = el.querySelector('[data-atm="true"]');
+    if (!atmEl) return;
+    const elRect = el.getBoundingClientRect();
+    const rowRect = atmEl.getBoundingClientRect();
+    const delta = rowRect.top - elRect.top;
+    const target = el.scrollTop + delta - (el.clientHeight / 2) + (atmEl.clientHeight / 2);
+    el.scrollTo({ top: Math.max(target, 0), behavior: 'smooth' });
+    didInitialScroll.current = true;
+  }, [displayedStraddles]);
 
   // Manual refresh
   const handleRefresh = () => {
@@ -140,19 +300,9 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
             ATM: {centerStrike}
           </span>
         )}
-        {strikeInterval && (
-          <span className="text-purple-600 font-semibold">
-            Step: {strikeInterval}
-          </span>
-        )}
         {underlyingPrice && (
           <span className="text-green-600 font-bold">
             LTP: {underlyingPrice.toFixed(2)}
-          </span>
-        )}
-        {strikeCount > 0 && (
-          <span className="text-gray-600">
-            ({strikeCount} strikes)
           </span>
         )}
       </div>
@@ -197,22 +347,24 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
     )}
 
     {/* Straddle data */}
-    {straddles.length > 0 && (
-      <div className="overflow-y-auto flex-grow">
-        <div className="flex items-center bg-gray-100 px-2 py-1 text-[10px] sm:text-xs font-bold text-gray-500 uppercase">
+    {displayedStraddles.length > 0 && (
+      <div className="overflow-y-auto flex-grow" ref={listRef} style={{ maxHeight: '640px' }}>
+        <div className="flex items-center bg-gray-100 px-2 py-1 text-[10px] sm:text-xs font-bold text-gray-500 uppercase sticky top-0 z-10">
           <div className="flex-1 text-left">Strike</div>
           <div className="flex-1 text-center">Trade</div>
           <div className="flex-1 text-right">Premium</div>
         </div>
         
-        {straddles.map((straddle) => {
+        {displayedStraddles.map((straddle) => {
           const isValidStraddle = straddle.isValid;
+          const isTradeReady = straddle.trade_ready;
           const displayValue = isValidStraddle ? parseFloat(straddle.straddle_premium).toFixed(2) : '0.00';
           
           return (
             <div
               key={straddle.strike}
-              className={`flex items-center border-b p-2 text-xs sm:h-10 ${
+              data-atm={straddle.isATM ? 'true' : 'false'}
+              className={`flex items-center border-b p-2 text-xs h-10 sm:h-10 ${
                 straddle.isATM ? 'bg-indigo-50 font-bold' : ''
               } ${!isValidStraddle ? 'opacity-50' : ''}`}
             >
@@ -230,46 +382,50 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
               <div className="flex-1 flex justify-center">
                 <button
                   onClick={() => {
-                    if (!isValidStraddle) return;
+                    if (!isTradeReady) return;
                     handleOpenOrderModal([
                       {
                         symbol: straddle.ceSymbol,
                         action: 'BUY',
                         ltp: straddle.ce_ltp,
                         lotSize: straddle.lot_size,
+                        underlying: symbol,
                       },
                       {
                         symbol: straddle.peSymbol,
                         action: 'BUY',
                         ltp: straddle.pe_ltp,
                         lotSize: straddle.lot_size,
+                        underlying: symbol,
                       },
                     ]);
                   }}
-                  disabled={!isValidStraddle}
+                  disabled={!isTradeReady}
                   className="px-2 py-1 sm:px-3 sm:py-2 text-black text-xs sm:text-[11px] font-bold hover:opacity-90 transition-opacity ring-1 ring-gray-100 hover:ring-gray-300 rounded-md mx-1 my-0 hover:bg-blue-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   BUY
                 </button>
                 <button
                   onClick={() => {
-                    if (!isValidStraddle) return;
+                    if (!isTradeReady) return;
                     handleOpenOrderModal([
                       {
                         symbol: straddle.ceSymbol,
                         action: 'SELL',
                         ltp: straddle.ce_ltp,
                         lotSize: straddle.lot_size,
+                        underlying: symbol,
                       },
                       {
                         symbol: straddle.peSymbol,
                         action: 'SELL',
                         ltp: straddle.pe_ltp,
                         lotSize: straddle.lot_size,
+                        underlying: symbol,
                       },
                     ]);
                   }}
-                  disabled={!isValidStraddle}
+                  disabled={!isTradeReady}
                   className="px-2 py-1 sm:px-3 sm:py-2 text-black text-xs sm:text-[11px] font-bold hover:opacity-90 transition-opacity ring-1 ring-gray-100 hover:ring-gray-300 rounded-md mx-1 my-0 hover:bg-orange-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   SELL

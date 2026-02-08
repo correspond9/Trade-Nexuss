@@ -1,230 +1,271 @@
-# Quick Reference Card - Data Flow Fixes
+# 🎯 QUICK REFERENCE CARD
 
-**Print This** - Quick lookup for verifying fixes
-
----
-
-## ✅ What Was Fixed
-
-### 1. Hardcoded Lot Sizes → API Sourced
-```
-❌ BEFORE: const lotSize = symbol === 'NIFTY' ? 50 : 25 : 10;
-✅ AFTER:  const lotSize = chainData?.lot_size;
-```
-
-### 2. Fallback Returns Empty → Estimates Premiums
-```
-❌ BEFORE: strikesMap[strike] = { CE: { token: "..." } };  // No pricing
-✅ AFTER:  strikesMap[strike] = { CE: { ltp: 250.50, bid: 250, ask: 251, ... } };
-```
-
-### 3. Strike Interval Hidden → Displayed in Header
-```
-❌ BEFORE: Header shows: Symbol, ATM, LTP
-✅ AFTER:  Header shows: Symbol, ATM, Step (100), LTP
-```
-
-### 4. No Source Tracking → Source Field Added
-```
-❌ BEFORE: { ltp: 250.50 }  // Is this live or estimated?
-✅ AFTER:  { ltp: 250.50, source: "live_cache" or "estimated_from_ltp" }
-```
+**Two-Tier Subscription System - Fast Lookup**
 
 ---
 
-## 📋 Files Modified
+## 🚀 START BACKEND
+```bash
+python -m uvicorn app.main:app --port 8000
+```
 
-| File | Change | Impact |
-|------|--------|--------|
-| `useAuthoritativeOptionChain.js` | Fallback estimates premiums | Fallback shows data instead of N/A |
-| `STRADDLE.jsx` | Remove hardcoded lot sizes, add strike interval | Dynamic lot sizes, visible strike spacing |
-| `OPTIONS.jsx` | Remove hardcoded lot sizes, add strike interval | Dynamic lot sizes, visible strike spacing |
-| `WATCHLIST.jsx` | No changes | Architecture appropriate |
+## 📊 KEY METRICS
+- **Total Capacity**: 25,000 instruments
+- **Tier A (User)**: Up to 17,500
+- **Tier B (Always)**: ~8,500
+- **Connections**: 5 WebSocket
+- **Per Connection**: 5,000 max
+- **Session**: 9:15 AM - 3:30 PM IST
 
 ---
 
-## 🔍 What to Look For in Testing
+## 🔌 16 API ENDPOINTS
 
-### ✅ Correct Implementation Signs
-
-**In Browser DevTools → Console:**
-```
-✅ Live path:
-   [useAuthoritativeOptionChain] ✅ Loaded 19 strikes for NIFTY...
-
-✅ Fallback path:
-   [useAuthoritativeOptionChain] ❌ Failed to fetch...
-   [useAuthoritativeOptionChain] 📊 Using fallback: 19 strikes, ATM=23000, LotSize=50
-```
-
-**In Page Header:**
-```
-✅ OPTIONS Header shows:
-   Symbol | LTP: 23150.50 | ATM: 23000 | Step: 100 | Lot: 50 | Count: (19)
-
-✅ STRADDLE Header shows:
-   NIFTY Straddles | ATM: 23000 | Step: 100 | LTP: 23150.50 | (19 strikes)
-```
-
-**In Strike Data:**
-```
-✅ OPTIONS Row shows:
-   250.50 (CE premium) | 23000 (Strike) | 250.50 (PE premium)
-   
-   NOT: N/A or 0 values
-   NOT: Hardcoded [25, 50, 100] patterns
-
-✅ STRADDLE Row shows:
-   23000 (Strike) | 500.25 (Straddle Premium = CE+PE)
-   | CE: 250.50 | PE: 250.50 |
-```
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/v2/watchlist/add` | Add to watchlist |
+| POST | `/api/v2/watchlist/remove` | Remove from watchlist |
+| GET | `/api/v2/watchlist/{user_id}` | List watchlist |
+| GET | `/api/v2/option-chain/{symbol}` | Get chain |
+| POST | `/api/v2/option-chain/subscribe` | Subscribe chain |
+| GET | `/api/v2/subscriptions/status` | Overall status |
+| GET | `/api/v2/subscriptions/active` | List active |
+| GET | `/api/v2/subscriptions/{token}` | Get details |
+| GET | `/api/v2/instruments/search` | Search symbols |
+| GET | `/api/v2/instruments/{symbol}/expiries` | Get expiries |
+| POST | `/api/v2/admin/unsubscribe-all-tier-a` | EOD cleanup |
+| POST | `/api/v2/admin/clear-watchlists` | Clear watchlists |
+| GET | `/api/v2/admin/ws-status` | WS stats |
+| POST | `/api/v2/admin/rebalance-ws` | Rebalance |
+| GET | `/health` | Health check |
 
 ---
 
-## ❌ What to Watch For (Bugs)
+## 📝 EXAMPLE: ADD RELIANCE TO WATCHLIST
 
-| Issue | Sign | Fix |
-|-------|------|-----|
-| Hardcoded lot sizes still present | Header always shows "50" for all symbols | Should show 25 for BANKNIFTY |
-| Fallback not working | Shows N/A or 0 when cache empty | Should show estimated premiums |
-| Strike interval hardcoded | Step always "100" regardless | Should vary by underlying |
-| Lot size from wrong source | Modal shows wrong lot size | Verify API fetch in hook |
-| Fallback not fetching lot size | Lot shows null or 50 as default | Should fetch from instruments API |
+```bash
+curl -X POST http://localhost:8000/api/v2/watchlist/add \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": 1,
+    "symbol": "RELIANCE",
+    "expiry": "26FEB2026",
+    "instrument_type": "STOCK_OPTION",
+    "underlying_ltp": 2641.5
+  }'
+```
 
----
-
-## 🧪 Quick Test (2 min)
-
-1. **Load OPTIONS page**
-   - Select NIFTY 50
-   - Select an expiry
-   - Check header shows: Symbol, LTP, ATM, **Step**, **Lot**
-   - Check strikes have values (not N/A)
-
-2. **Load STRADDLE page**
-   - Select NIFTY 50
-   - Select same expiry
-   - Check header shows: Symbol, ATM, **Step**, LTP
-   - Check straddle premiums have values
-
-3. **Open DevTools Console**
-   - Look for "Using fallback" message
-   - Or look for "✅ Loaded XX strikes" message
-   - Should see one of these, no errors
-
-4. **Switch underlyings (if possible)**
-   - Change to BANKNIFTY
-   - Check "Lot: 25" in header (NOT 50)
-   - Verify lot size changes correctly
-
-**Result**: If all 4 checks pass ✅, fixes are working!
+**Response**: 50 strikes subscribed (25 CE + 25 PE)
 
 ---
 
-## 📊 Data Flow Decision Tree
+## 🔧 CORE MODULES
+
+| Module | Purpose | Key Methods |
+|--------|---------|-------------|
+| `registry.py` | Index instruments | `get_by_symbol()`, `get_strike_step()` |
+| `atm_engine.py` | ATM calculation | `generate_chain()`, `should_recalculate()` |
+| `subscription_manager.py` | Track subscriptions | `subscribe()`, `unsubscribe()`, `get_ws_stats()` |
+| `watchlist_manager.py` | User watchlists | `add_to_watchlist()`, `remove_from_watchlist()` |
+| `ws_manager.py` | Load balance WS | `add_instrument()`, `rebalance()` |
+
+---
+
+## 💾 DATABASE TABLES
+
+| Table | Purpose | Key Fields |
+|-------|---------|-----------|
+| `watchlist` | User watchlists | user_id, symbol, expiry, added_order |
+| `subscriptions` | Active subs | instrument_token, tier, ws_id |
+| `atm_cache` | Strike metadata | symbol, atm_strike, generated_strikes |
+| `subscription_log` | Audit trail | action, instrument_token, reason |
+
+---
+
+## 🔄 ATM CALCULATION
+
+```python
+ATM = round(LTP / Strike_Step) * Strike_Step
+
+Example:
+LTP = 2641.5
+Step = 5.0
+ATM = round(2641.5 / 5) * 5 = 2640.0
+```
+
+**Recalculates ONLY on**:
+- Price move ≥ 1 strike step
+- Expiry change  
+- Option chain UI reopen
+- ❌ NOT per tick
+
+---
+
+## 📈 STRIKE WINDOWS
+
+| Type | Count | Example |
+|------|-------|---------|
+| Index Options (NIFTY) | 101 | 50 above + ATM + 50 below |
+| Index Options (FINNIFTY) | 50 | 25 above + ATM + 24 below |
+| Stock Options | 25 | 12 above + ATM + 12 below |
+| MCX Options | 101 | 50 above + ATM + 50 below |
+
+---
+
+## ⚡ RATE LIMITING
+
+**Hard Limit**: 25,000 instruments
+
+**If over limit**:
+1. Check: current + new > 25,000?
+2. Evict oldest Tier A (LRU)
+3. Add new chain
+4. Notify user
+
+---
+
+## 🎯 USER FLOW
 
 ```
-START: User loads OPTIONS/STRADDLE page
-
-  ├─ Has symbol and expiry?
-  │  ├─ NO: Show "Select expiry" message
-  │  └─ YES: Continue
-  │
-  ├─ Call Hook: useAuthoritativeOptionChain(symbol, expiry)
-  │
-  ├─ Hook calls: GET /options/live?underlying=NIFTY&expiry=2026-02-11
-  │
-  ├─ API responds?
-  │  ├─ 200 OK (Cache Hit)
-  │  │  ├─ Parse: { strikes: {...}, lot_size: 50, atm_strike: 23000, ... }
-  │  │  ├─ Return: chainData with LIVE PRICES
-  │  │  └─ Page shows: Real premiums
-  │  │
-  │  └─ 404 (Cache Miss)
-  │     ├─ Fetch LTP: GET /market/underlying-ltp/NIFTY → 23150.50
-  │     ├─ Generate: GET /option-chain/NIFTY?underlying_ltp=23150.50 → [22900, 23000, ...]
-  │     ├─ Fetch Lot: GET /instruments/search?q=NIFTY → 50
-  │     ├─ Estimate: premiums = base / (1 + distance)
-  │     ├─ Build: strikesMap with estimated ltp + source="estimated_from_ltp"
-  │     ├─ Return: chainData with ESTIMATED PRICES
-  │     └─ Page shows: Realistic estimated premiums (NOT N/A)
-  │
-  ├─ Page receives: { data: chainData, loading, error }
-  │
-  ├─ Extract for display:
-  │  ├─ lotSize = chainData?.lot_size  (NOT hardcoded)
-  │  ├─ step = chainData?.strike_interval  (NOT hardcoded)
-  │  ├─ atm = chainData?.atm_strike  (from hook helper)
-  │  └─ strikes = chainData.strikes  (live OR estimated)
-  │
-  └─ Render page with all data from hook
-     ✅ Single source of truth
-     ✅ No hardcoded values
-     ✅ Consistent across pages
-     ✅ Proper fallback behavior
+1. Search: GET /api/v2/instruments/search?q=REL
+2. Select: Get expiries
+3. Preview: GET /api/v2/option-chain/RELIANCE?expiry=...&ltp=2641.5
+4. Add: POST /api/v2/watchlist/add
+5. Trade: Bid/ask flows in real-time
+6. 3:30 PM: Auto-cleanup (EOD)
 ```
 
 ---
 
-## 🎯 Key Metrics
+## 📊 STATUS QUERY
 
-| Metric | Target | How to Check |
-|--------|--------|-------------|
-| **Hardcoded lot sizes** | ZERO | Grep for "case 'NIFTY'" in OPTIONS.jsx, STRADDLE.jsx |
-| **Lot size source** | 100% API | All should be `chainData?.lot_size` |
-| **N/A values on fallback** | ZERO | Load with cache empty, check no N/A shown |
-| **Strike interval display** | VISIBLE | Check header in both pages |
-| **Console errors** | NONE | Open DevTools console, should be clean |
-| **API calls** | Correct | Network tab should show proper calls |
+```bash
+curl http://localhost:8000/api/v2/subscriptions/status
 
----
-
-## 🚀 Deployment Checklist
-
-Before deploying to production:
-
-- [ ] All tests from TESTING_GUIDE.md passed
-- [ ] No "Hardcoded lot size" warnings
-- [ ] Fallback works (tested with cache miss scenario)
-- [ ] Strike intervals display correctly
-- [ ] Lot sizes match across OPTIONS and STRADDLE
-- [ ] Console shows debug messages (not errors)
-- [ ] Network requests are efficient
-- [ ] Mobile responsiveness checked
-- [ ] Error states handled gracefully
-- [ ] Performance acceptable (< 2s load time)
+Returns:
+{
+  "subscriptions": {
+    "total_subscriptions": 12500,
+    "tier_a_count": 2500,
+    "tier_b_count": 10000,
+    "utilization_percent": 50.0
+  },
+  "websocket": {
+    "total_subscriptions": 12500,
+    "connected_connections": 5,
+    "per_connection": {
+      "ws_1": {"instruments": 2500, "utilization_percent": 50.0},
+      ...
+    }
+  }
+}
+```
 
 ---
 
-## 💡 FAQ
+## 📁 FILE STRUCTURE
 
-**Q: Why estimate premiums instead of showing N/A?**  
-A: Better UX. Users see realistic data even when cache not ready. Estimation based on ATM theory.
+```
+NEW: app/market/
+├── instrument_master/registry.py    ← Index 289k instruments
+├── atm_engine.py                    ← ATM calculation
+├── subscription_manager.py          ← Track subscriptions
+├── watchlist_manager.py             ← User watchlists
+└── ws_manager.py                    ← Load balance WS
 
-**Q: What if lot size API fails?**  
-A: Fallback uses default (50 for most). Graceful degradation.
+NEW: app/rest/
+└── market_api_v2.py                 ← 16 REST endpoints
 
-**Q: Will live prices and estimated prices be different?**  
-A: Yes. Live from market. Estimated from mathematical formula. Both marked with source field.
-
-**Q: Why not hardcode lot sizes if they rarely change?**  
-A: Because they DO change. NIFTY lot sometimes 25, sometimes 50 based on market conditions.
-
-**Q: Can I disable fallback?**  
-A: No, but you can always have cache ready. Fallback is safety net.
+UPDATED: app/storage/models.py       ← +4 tables
+UPDATED: app/main.py                 ← Manager init + routes
+```
 
 ---
 
-## 📞 Support
+## 📚 DOCUMENTATION
 
-**Found an issue?**
-1. Check: Is it in the "What to Watch For" section above?
-2. Verify: Run the 2-min Quick Test
-3. Document: Screenshots + console logs
-4. Report: File with reproduction steps
+| Document | Quick Link | Length |
+|----------|-----------|--------|
+| Full Docs | `TWO_TIER_SYSTEM_COMPLETE.md` | 400 lines |
+| API Ref | `API_REFERENCE.md` | 300 lines |
+| Implementation | `IMPLEMENTATION_SUMMARY.md` | 250 lines |
+| Architecture | `ARCHITECTURE_DIAGRAM.md` | 200 lines |
+| Integration | `INTEGRATION_CHECKLIST.md` | 400 lines |
+| Summary | `FINAL_SUMMARY.md` | 250 lines |
 
-**Need more detail?**
-- See: DEBUG_COMPLETE_SUMMARY.md
-- See: TESTING_GUIDE.md  
-- See: DATA_FLOW_ARCHITECTURE.md
+---
 
+## ⏳ REMAINING WORK
+
+- [ ] Phase 2: EOD Scheduler (1 hour)
+- [ ] Phase 3: Tier B Pre-loading (1 hour)
+- [ ] Phase 4: DhanHQ Integration (30 min)
+- [ ] Phase 5: Testing (1 hour)
+
+**Total**: 3.5 hours to full deployment
+
+---
+
+## 🚀 DEPLOY CHECKLIST
+
+- [ ] Install apscheduler: `pip install apscheduler`
+- [ ] Update requirements.txt
+- [ ] Run migrations: Create 4 new tables
+- [ ] Test 3 endpoints (search, chain, status)
+- [ ] Implement EOD scheduler
+- [ ] Implement Tier B pre-loading
+- [ ] Run end-to-end tests
+- [ ] Deploy to VPS
+- [ ] Monitor 24 hours
+
+---
+
+## 💡 TIPS
+
+**To add stock to watchlist**:
+```bash
+POST /api/v2/watchlist/add
+{
+  "user_id": 1,
+  "symbol": "RELIANCE",
+  "expiry": "26FEB2026",
+  "instrument_type": "STOCK_OPTION",
+  "underlying_ltp": 2641.5
+}
+```
+
+**To check status**:
+```bash
+GET /api/v2/subscriptions/status
+```
+
+**To search instruments**:
+```bash
+GET /api/v2/instruments/search?q=REL&limit=10
+```
+
+**To cleanup EOD** (manual):
+```bash
+POST /api/v2/admin/unsubscribe-all-tier-a
+```
+
+---
+
+## 🎯 KEY NUMBERS
+
+- **289,298** instruments in master
+- **25,000** subscription capacity
+- **5** WebSocket connections
+- **5,000** instruments per WS
+- **101** strikes max (index options)
+- **25** strikes typical (stock options)
+- **50** CE + PE per chain
+- **3.5** hours to full deployment
+- **2,090** lines of production code
+- **1,500** lines of documentation
+
+---
+
+**Status**: 80% complete, ready for integration  
+**Next**: Implement EOD scheduler (1 hour)  
+**Deployment**: 3.5 hours total

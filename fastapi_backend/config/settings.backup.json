@@ -1,0 +1,10 @@
+{
+  "timestamp": "2026-02-08T15:51:51.683616",
+  "version": "1.0",
+  "client_id": "1100353799",
+  "auth_mode": "DAILY_TOKEN",
+  "api_key": "",
+  "api_secret": "",
+  "notes": "This is a backup of working settings. Daily token must be entered fresh each day.",
+  "locked": false
+}

@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuthoritativeOptionChain } from '../hooks/useAuthoritativeOptionChain';
 import normalizeUnderlying from '../utils/underlying';
+import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
 
 const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) => {
   const [underlyingPrice, setUnderlyingPrice] = useState(null);
   const [strikeInterval, setStrikeInterval] = useState(null);
+  const listRef = useRef(null);
+  const didInitialScroll = useRef(false);
 
   // Convert selectedIndex to symbol for API calls
   const symbol = normalizeUnderlying(selectedIndex);
@@ -29,8 +32,11 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
     refreshInterval: 1000, // 1 second real-time updates
   });
 
-  // Get lot size from hook (never hardcoded)
-  const getLotSize = () => chainData?.lot_size || 50;
+  const getLotSize = () => {
+    const configured = getConfiguredLotSize(symbol);
+    const fromChain = chainData?.lot_size;
+    return fromChain && fromChain > 0 ? fromChain : configured;
+  };
 
   // Fetch underlying price for display
   useEffect(() => {
@@ -99,6 +105,49 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
 
   const atmStrike = getATMStrike();
 
+  const displayedStrikes = React.useMemo(() => {
+    if (!strikes.length) return [];
+    const sorted = strikes.map(s => s.strike).sort((a, b) => a - b);
+    const atm = atmStrike ?? null;
+    if (atm == null) return strikes;
+    let centerIdx = sorted.findIndex(v => v === atm);
+    if (centerIdx < 0) {
+      let nearest = 0;
+      let minDiff = Infinity;
+      sorted.forEach((v, i) => {
+        const d = Math.abs(v - atm);
+        if (d < minDiff) {
+          minDiff = d;
+          nearest = i;
+        }
+      });
+      centerIdx = nearest;
+    }
+    const total = 31;
+    let start = Math.max(0, centerIdx - 15);
+    let end = start + total - 1;
+    if (end > sorted.length - 1) {
+      end = sorted.length - 1;
+      start = Math.max(0, end - total + 1);
+    }
+    const allowed = new Set(sorted.slice(start, end + 1));
+    return strikes.filter(s => allowed.has(s.strike));
+  }, [strikes, atmStrike]);
+
+  useEffect(() => {
+    if (didInitialScroll.current) return;
+    const el = listRef.current;
+    if (!el) return;
+    const atmEl = el.querySelector('[data-atm="true"]');
+    if (!atmEl) return;
+    const elRect = el.getBoundingClientRect();
+    const rowRect = atmEl.getBoundingClientRect();
+    const delta = rowRect.top - elRect.top;
+    const target = el.scrollTop + delta - (el.clientHeight / 2) + (atmEl.clientHeight / 2);
+    el.scrollTo({ top: Math.max(target, 0), behavior: 'smooth' });
+    didInitialScroll.current = true;
+  }, [displayedStrikes]);
+
   // Manual refresh
   const handleRefresh = () => {
     refreshChain();
@@ -120,19 +169,9 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
               ATM: {getATMStrike()}
             </span>
           )}
-          {strikeInterval && (
-            <span className="text-xs text-purple-600 font-medium">
-              Step: {strikeInterval}
-            </span>
-          )}
           {getLotSize() && (
             <span className="text-xs text-blue-600 font-medium">
               Lot: {getLotSize()}
-            </span>
-          )}
-          {strikeCount > 0 && (
-            <span className="text-xs text-gray-500">
-              ({strikeCount} strikes)
             </span>
           )}
           {expiry && (
@@ -154,7 +193,7 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
       </div>
 
       {/* Options Matrix */}
-      <div className="overflow-y-auto flex-grow">
+      <div className="overflow-y-auto flex-grow" ref={listRef} style={{ maxHeight: '640px' }}>
         {/* Loading State */}
         {chainLoading && !strikes.length && (
           <div className="m-2 p-3 bg-blue-50 border border-blue-200 rounded text-blue-700 text-sm text-center">
@@ -184,7 +223,7 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
         )}
         
         {/* Column Headers */}
-        {strikes.length > 0 && (
+        {displayedStrikes.length > 0 && (
           <div className="grid grid-cols-3 bg-gray-100 p-2 text-xs font-bold text-gray-500 uppercase sticky top-0 z-10">
             <div className="text-left">CE Premium</div>
             <div className="text-center">Strike</div>
@@ -193,10 +232,11 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
         )}
 
         {/* Strike Rows */}
-        {strikes.map((strikeData) => (
+        {displayedStrikes.map((strikeData) => (
           <div
             key={strikeData.strike}
-            className={`grid grid-cols-3 p-2 border-b items-center text-xs ${
+            data-atm={strikeData.isATM ? 'true' : 'false'}
+            className={`grid grid-cols-3 p-2 border-b items-center text-xs h-10 sm:h-10 ${
               strikeData.isATM ? 'bg-indigo-50 font-bold' : 'bg-white hover:bg-gray-50'
             }`}
           >
@@ -214,6 +254,7 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                       action: 'BUY',
                       ltp: strikeData.ltpCE,
                       lotSize: strikeData.lotSize,
+                      underlying: symbol,
                       security_id: strikeData.ceToken,
                       exchange_segment: resolveOptionSegment(symbol),
                       bid: strikeData.bidCE,
@@ -238,6 +279,7 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                       action: 'SELL',
                       ltp: strikeData.ltpCE,
                       lotSize: strikeData.lotSize,
+                      underlying: symbol,
                       security_id: strikeData.ceToken,
                       exchange_segment: resolveOptionSegment(symbol),
                       bid: strikeData.bidCE,
@@ -275,6 +317,7 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                       action: 'BUY',
                       ltp: strikeData.ltpPE,
                       lotSize: strikeData.lotSize,
+                      underlying: symbol,
                       security_id: strikeData.peToken,
                       exchange_segment: resolveOptionSegment(symbol),
                       bid: strikeData.bidPE,
@@ -299,6 +342,7 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                       action: 'SELL',
                       ltp: strikeData.ltpPE,
                       lotSize: strikeData.lotSize,
+                      underlying: symbol,
                       security_id: strikeData.peToken,
                       exchange_segment: resolveOptionSegment(symbol),
                       bid: strikeData.bidPE,

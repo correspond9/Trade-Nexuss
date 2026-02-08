@@ -18,6 +18,7 @@ class DhanSecurityIdMapper:
     def __init__(self):
         self.security_id_cache: Dict[str, int] = {}
         self.csv_data: Dict[str, Dict] = {}
+        self.lot_size_by_underlying: Dict[str, int] = {}
         self.last_updated = None
         
     async def load_security_ids(self) -> bool:
@@ -55,6 +56,18 @@ class DhanSecurityIdMapper:
                 strike = (row.get('STRIKE_PRICE') or '').strip()
                 option_type = (row.get('OPTION_TYPE') or '').strip()
                 segment = (row.get('SEGMENT') or '').strip()
+                lot_size_raw = row.get('LOT_SIZE') or row.get('MARKET_LOT') or row.get('LOT') or ''
+                
+                # Extract and store lot size per underlying (for all derivative instruments)
+                try:
+                    lot_val = int(float(str(lot_size_raw).strip())) if str(lot_size_raw).strip() else None
+                    if lot_val and lot_val > 0 and symbol:
+                        key = symbol.strip().upper()
+                        # Keep the largest seen (defensive) or just set once
+                        if key not in self.lot_size_by_underlying:
+                            self.lot_size_by_underlying[key] = lot_val
+                except Exception:
+                    pass
                 
                 # Only process index options
                 if 'OPTIDX' not in instrument_type:
@@ -113,6 +126,8 @@ class DhanSecurityIdMapper:
             logger.info(f"   • NIFTY options: {nifty_count:,}")
             logger.info(f"   • BANKNIFTY options: {banknifty_count:,}")
             logger.info(f"   • SENSEX options: {sensex_count:,}")
+            if self.lot_size_by_underlying:
+                logger.info(f"   • Lot sizes mapped: {len(self.lot_size_by_underlying)} underlyings")
             
             return True
             
@@ -159,6 +174,12 @@ class DhanSecurityIdMapper:
         """Find security ID by components (fallback method)"""
         token_key = f"{option_type}_{symbol}_{strike}_{expiry}"
         return self.security_id_cache.get(token_key)
+    
+    def get_lot_size(self, underlying: str) -> Optional[int]:
+        """Get lot size for an underlying symbol (stocks, indices, MCX) from CSV"""
+        if not underlying:
+            return None
+        return self.lot_size_by_underlying.get(underlying.strip().upper())
     
     def get_statistics(self) -> Dict:
         """Get loading statistics"""

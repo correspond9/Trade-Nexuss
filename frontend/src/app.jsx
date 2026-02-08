@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from './components/core/ErrorBoundary';
 import { AppProvider } from './contexts/AppContext';
 import { AuthProvider } from './contexts/AuthContext';
@@ -47,12 +47,38 @@ const LoadingSpinner = () => (
   </div>
 );
 
+const ScrollToTop = () => {
+  const location = useLocation();
+  React.useEffect(() => {
+    try {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    } catch {
+      window.scrollTo(0, 0);
+    }
+  }, [location.pathname, location.search, location.hash]);
+  return null;
+};
+
 const App = () => {
+  React.useEffect(() => {
+    try {
+      if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    } catch {
+      try {
+        window.scrollTo(0, 0);
+      } catch {}
+    }
+  }, []);
+  
   return (
     <ErrorBoundary>
       <AuthProvider>
         <AppProvider>
           <Router>
+            <ScrollToTop />
             <Routes>
               {/* Public routes */}
               <Route path="/login" element={

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import apiService from '../services/apiService';
-import { authService } from '../services/authService';
+import { RefreshCw } from 'lucide-react';
 
 // HUMAN-READABLE INSTRUMENT DISPLAY FORMATTING
 // PRESENTATION LAYER ONLY - Canonical data remains unchanged
@@ -55,6 +55,9 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  const [sortBy, setSortBy] = useState('AZ');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchContainerRef = useRef(null);
 
   const getBaseUrl = () => import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
 
@@ -76,6 +79,18 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     const indexSet = new Set(['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'MIDCPNIFTY', 'BANKEX']);
     return indexSet.has((symbol || '').toUpperCase());
   };
+
+  const fetchFutureQuote = useCallback(async (symbol, expiry, exchange = 'NSE') => {
+    try {
+      const url = `${getBaseUrl()}/futures/quote?exchange=${encodeURIComponent(exchange)}&symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`;
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const payload = await response.json();
+      return payload?.data || null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Add instrument to current watchlist (subscribe if on-demand)
   const addToWatchlist = useCallback(async (instrument) => {
@@ -125,9 +140,22 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
           throw new Error(data?.detail || 'Failed to add to watchlist');
         }
 
+        let enriched = instrument;
+        if (instrument.instrumentType === 'FUT' && instrument.expiry) {
+          const fut = await fetchFutureQuote(instrument.symbol, instrument.expiry, instrument.exchange || 'NSE');
+          if (fut) {
+            enriched = {
+              ...instrument,
+              ltp: fut.ltp || 0,
+              change: fut.change || 0,
+              changePercent: fut.changePercent || 0,
+              lotSize: fut.lot_size || instrument.lotSize || 1
+            };
+          }
+        }
         setWatchlists(prev => ({
           ...prev,
-          [selectedWatchlist]: [...currentList, instrument]
+          [selectedWatchlist]: [...currentList, enriched]
         }));
       }
 
@@ -247,6 +275,54 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     }
   }, []);
 
+  const extractUnderlyingFromQuery = (text) => {
+    const tokens = (text || '').trim().toUpperCase().split(/\s+/);
+    const indexSet = new Set(['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'MIDCPNIFTY', 'BANKEX']);
+    for (const t of tokens) {
+      if (indexSet.has(t)) return t;
+    }
+    return null;
+  };
+
+  const fetchOptionStrikeSuggestions = useCallback(async (searchText) => {
+    try {
+      const underlying = extractUnderlyingFromQuery(searchText);
+      const base = `${getBaseUrl()}/options/strikes/search?q=${encodeURIComponent(searchText)}&limit=20`;
+      const url = underlying ? `${base}&underlying=${encodeURIComponent(underlying)}` : base;
+      const response = await fetch(url);
+      if (!response.ok) return [];
+      const data = await response.json();
+      return (data.results || []).map((row) => {
+        const instrument = {
+          symbol: row.symbol,
+          instrumentType: row.option_type,
+          expiry: row.expiry,
+          strike: row.strike,
+        };
+        const { primaryDisplay, subtext } = formatInstrumentDisplay(instrument);
+        return {
+          id: row.token,
+          symbol: row.symbol,
+          exchange: row.exchange || 'NSE',
+          instrumentType: row.option_type, // CE/PE
+          expiry: row.expiry,
+          strike: row.strike,
+          lotSize: 1,
+          ltp: 0,
+          change: 0,
+          changePercent: 0,
+          primaryDisplay,
+          subtext,
+          tier: 'TIER_A',
+          isSubscribed: false,
+        };
+      });
+    } catch (err) {
+      console.warn('[WATCHLIST] Option strike suggestion fetch failed:', err);
+      return [];
+    }
+  }, []);
+
   const fetchTierBSuggestions = useCallback(async (searchText) => {
     try {
       const url = `${getBaseUrl()}/subscriptions/search?q=${encodeURIComponent(searchText)}&tier=TIER_B&limit=20`;
@@ -283,6 +359,111 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       return [];
     }
   }, []);
+
+  const fetchTierASubscriptionSuggestions = useCallback(async (searchText) => {
+    try {
+      const url = `${getBaseUrl()}/subscriptions/search?q=${encodeURIComponent(searchText)}&tier=TIER_A&limit=20`;
+      const response = await fetch(url);
+      if (!response.ok) return [];
+      const data = await response.json();
+      return (data.results || []).map((sub) => {
+        const instrument = {
+          symbol: sub.symbol,
+          instrumentType: sub.option_type || 'EQUITY',
+          expiry: sub.expiry,
+          strike: sub.strike,
+        };
+        const { primaryDisplay, subtext } = formatInstrumentDisplay(instrument);
+        return {
+          id: sub.token,
+          symbol: sub.symbol,
+          exchange: sub.exchange || 'NSE',
+          instrumentType: sub.option_type || 'EQUITY',
+          expiry: sub.expiry,
+          strike: sub.strike,
+          lotSize: sub.lot_size || 1,
+          ltp: 0,
+          change: 0,
+          changePercent: 0,
+          primaryDisplay,
+          subtext,
+          tier: 'TIER_A',
+          isSubscribed: true,
+        };
+      });
+    } catch (err) {
+      console.warn('[WATCHLIST] Tier A subscription suggestion fetch failed:', err);
+      return [];
+    }
+  }, []);
+
+  const fetchFuturesSuggestions = useCallback(async (searchText) => {
+    try {
+      const url = `${getBaseUrl()}/instruments/futures/search?q=${encodeURIComponent(searchText)}&limit=20`;
+      const response = await fetch(url);
+      if (!response.ok) return [];
+      const data = await response.json();
+      return (data.results || []).map((fut) => {
+        const instrument = {
+          symbol: fut.symbol,
+          instrumentType: 'FUT',
+          expiry: fut.expiry,
+          strike: null,
+        };
+        const { primaryDisplay, subtext } = formatInstrumentDisplay(instrument);
+        return {
+          id: fut.token,
+          symbol: fut.symbol,
+          exchange: fut.exchange || 'NSE',
+          instrumentType: 'FUT',
+          expiry: fut.expiry,
+          strike: null,
+          lotSize: fut.lot_size || 1,
+          ltp: 0,
+          change: 0,
+          changePercent: 0,
+          primaryDisplay,
+          subtext,
+          tier: 'TIER_A',
+          isSubscribed: false,
+        };
+      });
+    } catch (err) {
+      console.warn('[WATCHLIST] Futures suggestion fetch failed:', err);
+      return [];
+    }
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    const currentList = watchlists[selectedWatchlist] || [];
+    const updatedList = await Promise.all(currentList.map(async (item) => {
+      if (item.instrumentType === 'FUT' && item.expiry) {
+        const fut = await fetchFutureQuote(item.symbol, item.expiry, item.exchange || 'NSE');
+        if (fut) {
+          return {
+            ...item,
+            ltp: fut.ltp || item.ltp || 0,
+            change: fut.change || item.change || 0,
+            changePercent: fut.changePercent || item.changePercent || 0,
+            lotSize: fut.lot_size || item.lotSize || 1
+          };
+        }
+      } else {
+        const ltp = await getUnderlyingLtp(item.symbol);
+        if (ltp !== null && ltp !== undefined) {
+          return {
+            ...item,
+            ltp: ltp,
+          };
+        }
+      }
+      return item;
+    }));
+    setWatchlists(prev => ({
+      ...prev,
+      [selectedWatchlist]: updatedList
+    }));
+  }, [watchlists, selectedWatchlist, fetchFutureQuote]);
 
   const fetchTierASuggestions = useCallback(async (searchText) => {
     try {
@@ -361,57 +542,26 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
     setLoading(true);
     try {
-      const [tierB, tierA] = await Promise.all([
+      const [tierB, tierASubs, tierAMaster, futures, optionStrikes] = await Promise.all([
         fetchTierBSuggestions(searchText),
-        fetchTierASuggestions(searchText)
+        fetchTierASubscriptionSuggestions(searchText),
+        fetchTierASuggestions(searchText),
+        fetchFuturesSuggestions(searchText),
+        fetchOptionStrikeSuggestions(searchText)
       ]);
 
-      const merged = [...tierB, ...tierA].slice(0, 20);
+      const merged = [...tierB, ...tierASubs, ...tierAMaster, ...futures, ...optionStrikes].slice(0, 20);
       setSearchResults(merged);
+      setShowSuggestions(true);
     } catch (error) {
       console.error('Search error:', error);
       setError('Failed to search instruments');
     } finally {
       setLoading(false);
     }
-  }, [fetchTierBSuggestions, fetchTierASuggestions]);
+  }, [fetchTierBSuggestions, fetchTierASubscriptionSuggestions, fetchTierASuggestions, fetchFuturesSuggestions, fetchOptionStrikeSuggestions]);
 
-  // Load default watchlist data
-  useEffect(() => {
-    const loadDefaultWatchlists = async () => {
-      try {
-        setLoading(true);
-        const allowedExchanges = authService.getAllowedExchanges();
-
-        // Execute fetches in parallel for speed
-        // Watchlist 1: NSE - Index options (NIFTY) + Index futures
-        // Watchlist 2: BSE - Index options (SENSEX) + Index futures  
-        // Watchlist 3: MCX - Commodity futures (GOLD)
-        const [nseOptionsRes, nseOptionFutRes, bseRes, mcxRes] = await Promise.all([
-          allowedExchanges.includes('NSE_INDEX') ? fetchInstruments('NSE_INDEX', 'NIFTY').catch(() => []) : Promise.resolve([]),
-          allowedExchanges.includes('NSE_INDEX') ? fetchInstruments('NSE_INDEX', 'NIFTY FUT').catch(() => []) : Promise.resolve([]),
-          allowedExchanges.includes('BSE_INDEX') ? fetchInstruments('BSE_INDEX', 'SENSEX').catch(() => []) : Promise.resolve([]),
-          allowedExchanges.includes('MCX') ? fetchInstruments('MCX', 'GOLD').catch(() => []) : Promise.resolve([])
-        ]);
-        
-        // Combine NSE options and futures, limit to 20 total
-        const nseRes = [...nseOptionsRes, ...nseOptionFutRes].slice(0, 20);
-
-        setWatchlists({
-          1: nseRes,  // Already sliced to 20 above
-          2: bseRes.slice(0, 20),
-          3: mcxRes.slice(0, 20)
-        });
-      } catch (err) {
-        console.error('Error loading watchlists:', err);
-        setError('Failed to load market data.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadDefaultWatchlists();
-  }, [fetchInstruments]);
+  // Do not auto-load any default watchlist data on mount
 
   // Handle search with debouncing
   useEffect(() => {
@@ -420,30 +570,62 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
         searchAllExchanges(searchTerm);
       } else {
         setSearchResults([]);
+        setShowSuggestions(false);
       }
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timeoutId);
   }, [searchTerm, searchAllExchanges]);
 
+  useEffect(() => {
+    const handler = (e) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   // Get current display data
   const currentWatchlist = watchlists[selectedWatchlist] || [];
   const displayData = currentWatchlist;
+  const sortedDisplayData = useMemo(() => {
+    const arr = [...displayData];
+    if (sortBy === 'AZ') {
+      arr.sort((a, b) => (a.symbol || '').localeCompare(b.symbol || ''));
+    } else if (sortBy === 'PERCENT') {
+      arr.sort((a, b) => (b.changePercent || 0) - (a.changePercent || 0));
+    } else if (sortBy === 'LTP') {
+      arr.sort((a, b) => (b.ltp || 0) - (a.ltp || 0));
+    }
+    return arr;
+  }, [displayData, sortBy]);
 
   return (
     <div className="h-[80vh] bg-gray-50 flex flex-col">
-      {/* Header - Full Width */}
+      {/* Header - Full Width (merged row) */}
       <div className="bg-white shadow-sm border-b border-gray-200 flex-shrink-0">
-        <div className="px-6 py-4">
+        <div className="px-6 py-3">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold text-gray-900">Watchlist</h1>
-            <span className="text-sm text-gray-500">Total Scripts: {displayData.length}</span>
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-bold text-gray-900">Watchlist</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-500">Total Scripts: {displayData.length}</span>
+              <button
+                onClick={handleRefresh}
+                className="p-1 text-blue-600 hover:text-blue-800"
+                title="Refresh"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
-
-        {/* Search Bar - Full Width */}
-        <div className="px-6 pb-4">
-          <div className="relative max-w-4xl mx-auto">
+        {/* Search Bar */}
+        <div className="px-6 pb-3">
+          <div ref={searchContainerRef} className="relative max-w-4xl mx-auto">
             <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
               {loading ? (
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"></div>
@@ -461,7 +643,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
               className="block w-full rounded-md border-0 py-2 pl-10 pr-3 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-500 sm:text-sm sm:leading-5 bg-gray-50"
             />
 
-            {searchTerm && searchResults.length > 0 && (
+            {showSuggestions && searchTerm && searchResults.length > 0 && (
               <div className="absolute z-20 mt-2 w-full rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5">
                 <ul className="max-h-60 overflow-y-auto py-1 text-sm text-gray-700">
                   {searchResults.map((item) => (
@@ -479,11 +661,11 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
                             <div className="text-xs text-gray-500">{item.subtext}</div>
                           )}
                         </div>
-                        <span className={`text-xs font-semibold px-2 py-1 rounded ${item.tier === 'TIER_B'
+                        <span className={`text-xs font-semibold px-2 py-1 rounded ${item.isSubscribed
                           ? 'bg-green-100 text-green-700'
                           : 'bg-blue-100 text-blue-700'}`}
                         >
-                          {item.tier === 'TIER_B' ? 'Subscribed' : 'Available'}
+                          {item.isSubscribed ? 'Subscribed' : 'Available'}
                         </span>
                       </div>
                     </li>
@@ -491,7 +673,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
                 </ul>
               </div>
             )}
-            {searchTerm && !loading && searchResults.length === 0 && (
+            {showSuggestions && searchTerm && !loading && searchResults.length === 0 && (
               <div className="absolute z-20 mt-2 w-full rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5">
                 <div className="px-3 py-2 text-sm text-gray-500">
                   No suggestions found.
@@ -542,7 +724,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
               {/* Table Body */}
               <div className="bg-white">
-                {displayData.map((item, index) => (
+                {sortedDisplayData.map((item, index) => (
                   <div
                     key={`${item.exchange}-${item.id}-${index}`}
                     className="grid grid-cols-12 px-6 py-2 border-b border-gray-100 hover:bg-gray-50 transition-colors"

@@ -1,0 +1,15 @@
+{
+  "apiBase": "http://127.0.0.1:8000/api/v2",
+  "endpoints": {
+    "liveOptionChain": "/options/live"
+  },
+  "defaultTabs": ["NIFTY", "BANKNIFTY", "SENSEX"],
+  "display": {
+    "showClosingWhenMarketClosed": true,
+    "priceFallbackOrder": ["ltp", "close", "last_price"]
+  },
+  "refresh": {
+    "pollMs": 30000,
+    "autoSwitchMarketAware": true
+  }
+}

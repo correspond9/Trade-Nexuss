@@ -62,7 +62,14 @@ class CommodityFuturesService:
 
     def _build_entry(self, symbol: str, expiry: str, record: Dict) -> Dict:
         security_id = (record.get("SECURITY_ID") or "").strip()
-        lot_size = record.get("LOT_SIZE") or record.get("MARKET_LOT")
+        lot_size = None
+        try:
+            from app.services.dhan_security_id_mapper import dhan_security_mapper
+            lot_from_csv = dhan_security_mapper.get_lot_size(symbol)
+            if isinstance(lot_from_csv, int) and lot_from_csv > 0:
+                lot_size = lot_from_csv
+        except Exception:
+            pass
         tick_size = record.get("TICK_SIZE")
         try:
             lot_size = int(float(lot_size)) if lot_size is not None else None

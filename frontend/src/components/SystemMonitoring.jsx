@@ -10,6 +10,8 @@ const SystemMonitoring = () => {
   const [systemData, setSystemData] = useState({});
   const [lastUpdate, setLastUpdate] = useState(null);
   const [notifications, setNotifications] = useState([]);
+  const [actionMessage, setActionMessage] = useState(null);
+  const [actionError, setActionError] = useState(null);
 
   useEffect(() => {
     const fetchSystemStatus = async () => {
@@ -79,6 +81,31 @@ const SystemMonitoring = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const handleReconnect = async () => {
+    setActionMessage(null);
+    setActionError(null);
+    const confirmed = window.confirm(
+      'This will explicitly clear cooldowns and trigger one reconnect attempt.\n\nAre you sure you want to proceed?\n\nSelect YES to continue or NO to cancel.'
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/market/stream-reconnect`, {
+        method: 'POST'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.message || 'Failed to trigger reconnect');
+      }
+      setActionMessage('Reconnect triggered: cooldowns cleared and one attempt initiated');
+      setTimeout(() => setActionMessage(null), 5000);
+    } catch (err) {
+      setActionError(err.message || 'Error triggering reconnect');
+      setTimeout(() => setActionError(null), 7000);
+    }
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'healthy':
@@ -141,10 +168,30 @@ const SystemMonitoring = () => {
       
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-800">System Monitoring</h2>
-        <div className="text-sm text-gray-500">
-          Last updated: {lastUpdate ? formatTimeAgo(lastUpdate) : 'Never'}
+        <div className="flex items-center space-x-3">
+          <div className="text-sm text-gray-500">
+            Last updated: {lastUpdate ? formatTimeAgo(lastUpdate) : 'Never'}
+          </div>
+          <button
+            onClick={handleReconnect}
+            className="px-3 py-1.5 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400"
+            title="Clear cooldowns and trigger single reconnect attempt"
+          >
+            Clear Cooldown & Reconnect
+          </button>
         </div>
       </div>
+
+      {actionMessage && (
+        <div className="p-3 bg-green-100 border border-green-300 text-green-800 rounded-md text-sm">
+          {actionMessage}
+        </div>
+      )}
+      {actionError && (
+        <div className="p-3 bg-red-100 border border-red-300 text-red-800 rounded-md text-sm">
+          {actionError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Database Status */}

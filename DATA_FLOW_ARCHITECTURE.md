@@ -20,25 +20,25 @@ chainData = {
       strike_price: 22900,
       CE: {
         token: "12345",
-        ltp: 250.50,             // ✅ From live cache OR estimated
-        bid: 250.00,             // ✅ From live cache OR estimated
-        ask: 251.00,             // ✅ From live cache OR estimated
-        greeks: { delta: 0.5 },  // ✅ From live cache (empty if estimated)
-        source: "live_cache"     // OR "estimated_from_ltp"
+        ltp: 250.50,             // ✅ From live cache OR fallback REST API Snapshot
+        bid: 250.00,             // ✅ From live cache OR fallback REST API Snapshot
+        ask: 251.00,             // ✅ From live cache OR fallback REST API Snapshot
+        greeks: { delta: 0.5 },  // ✅ From live cache
+        source: "live_cache"     // OR "fallback REST API Snapshot_ltp"
       },
       PE: {
         token: "12346",
-        ltp: 250.50,             // ✅ From live cache OR estimated
+        ltp: 250.50,             // ✅ From live cache OR fallback REST API Snapshot
         bid: 250.00,
         ask: 251.00,
         greeks: {},
-        source: "live_cache"     // OR "estimated_from_ltp"
+        source: "live_cache"     // OR "fallback REST API Snapshot"
       }
     },
     "23000": {
       // ATM strike - typically higher estimated premium if fallback
-      CE: { ltp: 350.00, source: "estimated_from_ltp" },
-      PE: { ltp: 350.00, source: "estimated_from_ltp" }
+      CE: { ltp: 350.00, source: "fallback REST API Snapshot" },
+      PE: { ltp: 350.00, source: "fallback REST API Snapshot" }
     },
     // ... more strikes
   }
@@ -143,7 +143,7 @@ setData({
   }
 })
      ↓
-Pages render with ESTIMATED PREMIUMS
+Pages render with fallback REST API Snapshot ltp PREMIUMS
   - OPTIONS: Shows estimated CE/PE LTPs
   - STRADDLE: Shows estimated straddle premiums
   - Headers: LTP, ATM, Step, Lot size - all available

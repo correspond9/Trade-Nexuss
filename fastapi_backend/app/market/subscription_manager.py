@@ -364,16 +364,60 @@ class SubscriptionManager:
     
     def unsubscribe_all_tier_a(self) -> int:
         """Unsubscribe all Tier A subscriptions (e.g., at EOD)"""
+        # Build protection set from open mock positions
+        protected_tokens = set()
+        protected_normalized = set()
+        try:
+            from app.storage.db import SessionLocal
+            from app.storage.models import MockPosition
+            from app.rms.span_margin_calculator import _parse_symbol as parse_fno_symbol
+            from app.rms.mcx_margin_calculator import _parse_symbol as parse_mcx_symbol
+            db = SessionLocal()
+            positions = (
+                db.query(MockPosition)
+                .filter(MockPosition.quantity != 0)
+                .filter(MockPosition.status == "OPEN")
+                .all()
+            )
+            for pos in positions:
+                sym = (pos.symbol or "").strip()
+                if sym:
+                    protected_tokens.add(sym)
+                meta = parse_fno_symbol(sym)
+                if not meta or not meta.get("underlying"):
+                    meta = parse_mcx_symbol(sym)
+                underlying = (meta.get("underlying") or "").upper()
+                expiry = meta.get("expiry")
+                strike = meta.get("strike")
+                opt = (meta.get("option_type") or "").upper() or None
+                protected_normalized.add((underlying, expiry, strike, opt))
+        except Exception:
+            pass
+        
+        # Unsubscribe Tier A except protected
+        unsubscribed = 0
         with self.lock:
-            tier_a_tokens = [
-                token for token, data in self.subscriptions.items()
+            tier_a_items = [
+                (token, data) for token, data in self.subscriptions.items()
                 if data.get("tier") == "TIER_A"
             ]
-            
-            for token in tier_a_tokens:
-                self.unsubscribe(token, reason="EOD_CLEANUP")
-            
-            return len(tier_a_tokens)
+            for token, data in tier_a_items:
+                if token in protected_tokens:
+                    continue
+                underlying = (data.get("symbol_canonical") or data.get("symbol") or "").upper()
+                expiry = data.get("expiry")
+                strike = data.get("strike")
+                try:
+                    strike = float(strike) if strike is not None else None
+                except Exception:
+                    strike = None
+                opt = (data.get("option_type") or "").upper() or None
+                if (underlying, expiry, strike, opt) in protected_normalized:
+                    continue
+                ok, _msg = self.unsubscribe(token, reason="EOD_CLEANUP")
+                if ok:
+                    unsubscribed += 1
+        return unsubscribed
     
     def _evict_lru_tier_a(self) -> bool:
         """

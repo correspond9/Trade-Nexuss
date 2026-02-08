@@ -7,6 +7,9 @@ import SystemMonitoring from '../components/SystemMonitoring';
 
 const SuperAdmin = () => {
   const { user } = useAuth();
+  const [marketConfig, setMarketConfig] = useState(null);
+  const [mcError, setMcError] = useState(null);
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
   
   // Use custom hook for authentication settings
   const {
@@ -33,6 +36,87 @@ const SuperAdmin = () => {
       // Clear error after 5 seconds
       setTimeout(() => setSaveError(null), 5000);
     }
+  };
+
+  const fetchMarketConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/market-config`);
+      const data = await res.json();
+      setMarketConfig(data?.data || null);
+    } catch (e) {
+      setMcError('Failed to load market config');
+      setTimeout(() => setMcError(null), 5000);
+    }
+  };
+
+  const saveMarketConfig = async () => {
+    try {
+      const payload = { config: marketConfig };
+      const res = await fetch(`${API_BASE}/admin/market-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      setMarketConfig(data?.data || marketConfig);
+    } catch (e) {
+      setMcError('Failed to save market config');
+      setTimeout(() => setMcError(null), 5000);
+    }
+  };
+
+  const setForce = async (exchange, state) => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/market-force`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exchange, state }),
+      });
+      const data = await res.json();
+      setMarketConfig(data?.data || marketConfig);
+    } catch (e) {
+      setMcError('Failed to set force state');
+      setTimeout(() => setMcError(null), 5000);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchMarketConfig();
+  }, []);
+
+  const timeInput = (value, onChange) => (
+    <input
+      type="time"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="border rounded px-2 py-1 text-sm"
+    />
+  );
+
+  const dayCheckboxes = (days, onChange) => {
+    const labels = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    return (
+      <div className="flex flex-wrap gap-2">
+        {labels.map((lbl, idx) => {
+          const checked = Array.isArray(days) ? days.includes(idx) : false;
+          return (
+            <label key={idx} className="flex items-center space-x-1 text-xs">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(e) => {
+                  const set = new Set(days || []);
+                  if (e.target.checked) set.add(idx);
+                  else set.delete(idx);
+                  onChange(Array.from(set).sort());
+                }}
+              />
+              <span>{lbl}</span>
+            </label>
+          );
+        })}
+      </div>
+    );
   };
 
   return (
@@ -301,6 +385,86 @@ const SuperAdmin = () => {
                     {loading ? 'Saving...' : `Save ${localSettings.authMode === 'DAILY_TOKEN' ? 'Token' : 'Credentials'}`}
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* Market Hours & Days Configuration */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-6">
+                <div className="flex items-center mb-6">
+                  <Settings className="w-5 h-5 text-blue-600 mr-2" />
+                  <h2 className="text-lg font-semibold text-gray-900">Market Hours & Days</h2>
+                </div>
+                {mcError && (
+                  <div className="mb-3 p-2 bg-red-100 border border-red-200 text-red-700 rounded text-xs">
+                    {mcError}
+                  </div>
+                )}
+                {!marketConfig ? (
+                  <div className="text-sm text-gray-600">Loading config...</div>
+                ) : (
+                  <div className="space-y-4">
+                    {['NSE','BSE','MCX'].map((ex) => {
+                      const cfg = marketConfig[ex];
+                      return (
+                        <div key={ex} className="border rounded p-4">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-gray-900">{ex}</h3>
+                            <div className="text-xs text-gray-600">Force: {cfg.force_state || 'none'}</div>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
+                            <div>
+                              <div className="text-xs text-gray-600 mb-1">Open Time</div>
+                              {timeInput(cfg.open_time, (val) => {
+                                setMarketConfig((c) => ({...c, [ex]: {...c[ex], open_time: val}}));
+                              })}
+                            </div>
+                            <div>
+                              <div className="text-xs text-gray-600 mb-1">Close Time</div>
+                              {timeInput(cfg.close_time, (val) => {
+                                setMarketConfig((c) => ({...c, [ex]: {...c[ex], close_time: val}}));
+                              })}
+                            </div>
+                            <div>
+                              <div className="text-xs text-gray-600 mb-1">Working Days</div>
+                              {dayCheckboxes(cfg.working_days, (days) => {
+                                setMarketConfig((c) => ({...c, [ex]: {...c[ex], working_days: days}}));
+                              })}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 mt-3">
+                            <button
+                              onClick={() => setForce(ex, 'open')}
+                              className="px-3 py-1.5 text-xs rounded bg-green-600 text-white hover:bg-green-700"
+                            >
+                              Force Open
+                            </button>
+                            <button
+                              onClick={() => setForce(ex, 'close')}
+                              className="px-3 py-1.5 text-xs rounded bg-red-600 text-white hover:bg-red-700"
+                            >
+                              Force Close
+                            </button>
+                            <button
+                              onClick={() => setForce(ex, 'none')}
+                              className="px-3 py-1.5 text-xs rounded bg-gray-600 text-white hover:bg-gray-700"
+                            >
+                              Clear Override
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="flex justify-end">
+                      <button
+                        onClick={saveMarketConfig}
+                        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm"
+                      >
+                        Save Market Config
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

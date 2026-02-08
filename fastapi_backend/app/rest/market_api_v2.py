@@ -6,6 +6,7 @@ Watchlist, option chains, and subscription status.
 from fastapi import APIRouter, Query, HTTPException, Depends
 from typing import Optional, Dict, List
 from pydantic import BaseModel
+import re
 from app.market.watchlist_manager import get_watchlist_manager
 from app.market.atm_engine import get_atm_engine
 from app.market.subscription_manager import get_subscription_manager
@@ -13,6 +14,8 @@ from app.market.ws_manager import get_ws_manager
 from app.market.instrument_master.registry import REGISTRY
 from app.schedulers.expiry_refresh_scheduler import get_expiry_scheduler
 from app.routers.authoritative_option_chain import router as option_chain_router
+from datetime import datetime
+from typing import Optional
 
 router = APIRouter(prefix="/api/v2", tags=["market"])
 
@@ -229,6 +232,36 @@ async def reconnect_streams():
 
     return {"status": "ok", "message": "reconnect_triggered"}
 
+
+# ================== ADMIN: MARKET HOURS & FORCE OVERRIDE ==================
+@router.get("/admin/market-config")
+async def get_market_config():
+    from app.ems.market_config import market_config
+    return {"status": "ok", "data": market_config.get()}
+
+
+class MarketConfigUpdate(BaseModel):
+    config: Dict[str, Dict]
+
+
+@router.post("/admin/market-config")
+async def update_market_config(payload: MarketConfigUpdate):
+    from app.ems.market_config import market_config
+    market_config.update(payload.config or {})
+    return {"status": "ok", "data": market_config.get()}
+
+
+class MarketForcePayload(BaseModel):
+    exchange: str
+    state: str  # "open" | "close" | "none"
+
+
+@router.post("/admin/market-force")
+async def set_market_force(payload: MarketForcePayload):
+    from app.ems.market_config import market_config
+    market_config.set_force(payload.exchange.strip().upper(), payload.state.strip().lower())
+    return {"status": "ok", "data": market_config.get()}
+
 @router.get("/subscriptions/active")
 async def list_active_subscriptions(tier: Optional[str] = None):
     """List active subscriptions, optionally filtered by tier"""
@@ -291,6 +324,329 @@ async def get_subscription_details(token: str):
         "details": sub
     }
 
+@router.post("/admin/migrate-tier-a-to-b")
+async def migrate_tier_a_to_b():
+    """
+    Move all currently active Tier A subscriptions to Tier B.
+    Persists the change to the database and returns counts.
+    """
+    sub_mgr = get_subscription_manager()
+    changed = 0
+    for token, data in list(sub_mgr.subscriptions.items()):
+        if (data.get("tier") or "").upper() == "TIER_A":
+            data["tier"] = "TIER_B"
+            changed += 1
+    # Persist to DB
+    try:
+        sub_mgr.sync_to_db()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to persist: {e}")
+    stats = sub_mgr.get_ws_stats()
+    return {
+        "action": "MIGRATE_TIER_A_TO_TIER_B",
+        "changed_count": changed,
+        "tier_a_count": stats.get("tier_a_count"),
+        "tier_b_count": stats.get("tier_b_count"),
+    }
+
+# ============================================================================
+# FUTURES QUOTE/LIST ENDPOINTS (served from backend cache)
+# ============================================================================
+@router.get("/futures/quote")
+async def get_future_quote(
+    exchange: str = Query(..., min_length=2),
+    symbol: str = Query(..., min_length=1),
+    expiry: str = Query(..., min_length=1),
+):
+    """
+    Return futures quote from backend cache (no direct frontend WS).
+    """
+    try:
+        from app.market_cache.futures import get_future
+        entry = get_future(exchange.upper(), symbol.upper(), expiry)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Future not found in cache")
+        return {"status": "success", "data": entry}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/futures/list")
+async def list_futures_cached(
+    exchange: Optional[str] = Query(None),
+    symbol: Optional[str] = Query(None),
+    expiry: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """
+    List futures entries from backend cache with optional filters.
+    """
+    try:
+        from app.market_cache.futures import list_futures
+        rows = list_futures(exchange=exchange.upper() if exchange else None,
+                            symbol=symbol.upper() if symbol else None,
+                            expiry=expiry)
+        return {"status": "success", "count": min(len(rows), limit), "data": rows[:limit]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# INSTRUMENT SEARCH ENDPOINTS (UNIVERSE, NOT JUST SUBSCRIPTIONS)
+# ============================================================================
+
+@router.get("/instruments/search")
+async def search_instruments(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=100)
+):
+    """
+    Return a list of underlying symbols matching query.
+    Includes F&O eligibility flag to guide UI.
+    """
+    query = q.upper().strip()
+    # Ensure registry loaded (startup does it; this is safe)
+    if not REGISTRY.loaded:
+        REGISTRY.load()
+
+    # Search over underlying symbol keys
+    underlyings = list(REGISTRY.by_underlying.keys())
+    matched = []
+    for sym in underlyings:
+        if query in sym.upper():
+            matched.append({
+                "symbol": sym,
+                "f_o_eligible": REGISTRY.is_f_o_eligible(sym),
+                "count": len(REGISTRY.by_underlying.get(sym, []))
+            })
+            if len(matched) >= limit:
+                break
+    return {
+        "query": q,
+        "count": len(matched),
+        "results": matched
+    }
+
+@router.get("/instruments/{symbol}/expiries")
+async def get_instrument_expiries(symbol: str):
+    """
+    Return available expiries for an underlying symbol (stock/index).
+    """
+    if not REGISTRY.loaded:
+        REGISTRY.load()
+    expiries = REGISTRY.get_expiries_for_underlying(symbol.upper())
+    return {
+        "symbol": symbol.upper(),
+        "count": len(expiries),
+        "expiries": expiries
+    }
+
+def _normalize_expiry(expiry: str) -> datetime.date | None:
+    text = (expiry or "").strip().upper()
+    for fmt in ("%Y-%m-%d", "%d%b%Y", "%d%b%y", "%d%B%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+@router.get("/instruments/futures/search")
+async def search_stock_futures_current_next(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100)
+):
+    """
+    Search NSE stock and index futures (current + next monthly) by query.
+    Returns token-like entries for UI suggestions.
+    """
+    query = q.upper().strip()
+    if not REGISTRY.loaded:
+        REGISTRY.load()
+
+    today = datetime.now().date()
+
+    results = []
+    # Candidate symbols = F&O stocks + known indices
+    index_symbols = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+    candidates = sorted(set(REGISTRY.f_o_stocks) | index_symbols)
+
+    # Tokenize query and drop generic words
+    tokens = [t for t in re.split(r"\s+", query) if t]
+    tokens = [t for t in tokens if t not in {"FUT", "FUTURE", "FUTURES"}]
+
+    for sym in candidates:
+        hay = sym.upper()
+        if tokens and not any(t in hay for t in tokens):
+            continue
+        # Collect expiries that have FUTSTK/FUTIDX instruments only
+        expiries = set()
+        records = REGISTRY.by_underlying.get(sym.upper(), [])
+        for row in records:
+            instr = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
+            if instr not in {"FUTSTK", "FUTIDX"}:
+                continue
+            exp = (row.get("SM_EXPIRY_DATE") or "").strip()
+            dt = _normalize_expiry(exp)
+            if dt and dt >= today:
+                expiries.add(exp)
+        parsed = sorted([(exp, _normalize_expiry(exp)) for exp in expiries if _normalize_expiry(exp)], key=lambda x: x[1])
+        # Pick current and next month
+        selected = [exp for exp, _ in parsed[:2]]
+        for exp in selected:
+            # Construct suggestion payload
+            token = f"{sym}_{exp}_FUT"
+            results.append({
+                "token": token,
+                "symbol": sym,
+                "expiry": exp,
+                "option_type": None,
+                "exchange": "NSE",
+                "lot_size": 1,
+                "tier": "TIER_A",  # Futures fall under on-demand tier for user
+                "active": False
+            })
+            if len(results) >= limit:
+                break
+        if len(results) >= limit:
+            break
+
+    return {
+        "query": q,
+        "count": len(results),
+        "results": results
+    }
+
+@router.get("/options/strikes/search")
+async def search_option_strikes_near_atm(
+    q: str = Query(..., min_length=1),
+    underlying: Optional[str] = Query(None),
+    tab: Optional[str] = Query("current"),
+    limit: int = Query(20, ge=1, le=100)
+):
+    """
+    Search option strikes near a target value or ATM for index/stocks.
+    - If 'underlying' provided, restrict to that symbol, else search common indices.
+    - 'tab' chooses current or next expiry.
+    Returns CE/PE suggestion entries suitable for watchlist.
+    """
+    if not REGISTRY.loaded:
+        REGISTRY.load()
+    # Detect underlying from query if not provided
+    if underlying:
+        symbols = [underlying.upper()]
+    else:
+        q_tokens = [t for t in re.split(r"\s+", q.upper().strip()) if t]
+        known = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+        symbols = [t for t in q_tokens if t in known] or list(known)
+    # Parse target strike if numeric
+    target = None
+    num = re.search(r"(\d+(?:\.\d+)?)", q)
+    if num:
+        try:
+            target = float(num.group(1))
+        except Exception:
+            target = None
+
+    today = datetime.now().date()
+    suggestions = []
+    for sym in symbols:
+        expiries = REGISTRY.get_expiries_for_underlying(sym)
+        parsed = [(exp, _normalize_expiry(exp)) for exp in expiries]
+        parsed = [(exp, dt) for exp, dt in parsed if dt and dt >= today]
+        parsed.sort(key=lambda x: x[1])
+        if not parsed:
+            continue
+        selected_list: List[str] = []
+        exp_to_dt: Dict[str, datetime.date] = {}
+        if sym in {"NIFTY", "SENSEX"}:
+            parsed_sorted = sorted(parsed, key=lambda x: x[1])
+            for exp, dt in parsed_sorted[:3]:
+                selected_list.append(exp)
+                exp_to_dt[exp] = dt
+        elif sym == "BANKNIFTY":
+            groups = {}
+            for exp, dt in parsed:
+                key = (dt.year, dt.month)
+                groups.setdefault(key, []).append((exp, dt))
+            keys_sorted = sorted(groups.keys(), key=lambda k: (k[0], k[1]))
+            cur_idx = 0
+            for i, k in enumerate(keys_sorted):
+                if datetime(k[0], k[1], 1).date() >= datetime(today.year, today.month, 1).date():
+                    cur_idx = i
+                    break
+            if keys_sorted:
+                cur_key = keys_sorted[cur_idx]
+                cur_month_last_exp, cur_month_last_dt = sorted(groups[cur_key], key=lambda x: x[1])[-1]
+                selected_list.append(cur_month_last_exp)
+                exp_to_dt[cur_month_last_exp] = cur_month_last_dt
+                if cur_idx + 1 < len(keys_sorted):
+                    next_key = keys_sorted[cur_idx + 1]
+                    next_month_last_exp, next_month_last_dt = sorted(groups[next_key], key=lambda x: x[1])[-1]
+                    selected_list.append(next_month_last_exp)
+                    exp_to_dt[next_month_last_exp] = next_month_last_dt
+        else:
+            parsed_sorted = sorted(parsed, key=lambda x: x[1])
+            for exp, dt in parsed_sorted[:2]:
+                selected_list.append(exp)
+                exp_to_dt[exp] = dt
+        # Estimate ATM using cached/REST LTP if target not provided
+        if target is None:
+            try:
+                # Best-effort LTP fetch
+                ltp_resp = await get_underlying_ltp(sym)  # reuse internal function
+                ltp_val = float(ltp_resp.get("ltp") or 0.0)
+            except Exception:
+                ltp_val = 0.0
+        else:
+            ltp_val = target
+        step = REGISTRY.get_strike_step(sym)
+        atm = round(ltp_val / step) * step if step > 0 else ltp_val
+        offsets_order = [0, 1, -1, 2, -2, 3, -3]
+        window = []
+        for off in offsets_order:
+            strike = atm + (off * step)
+            if strike > 0:
+                window.append(strike)
+        built = []
+        for selected_exp in selected_list:
+            dt = exp_to_dt.get(selected_exp)
+            days_left = (dt - today).days if dt else 9999
+            for strike in window:
+                dist = abs((ltp_val or 0.0) - strike)
+                token_ce = f"{sym}_{selected_exp}_{int(strike)}CE"
+                token_pe = f"{sym}_{selected_exp}_{int(strike)}PE"
+                built.append((
+                    dist, days_left, {
+                        "token": token_ce,
+                        "symbol": sym,
+                        "expiry": selected_exp,
+                        "strike": strike,
+                        "option_type": "CE",
+                        "exchange": "NSE",
+                        "tier": "TIER_A",
+                        "active": False
+                    }
+                ))
+                built.append((
+                    dist, days_left, {
+                        "token": token_pe,
+                        "symbol": sym,
+                        "expiry": selected_exp,
+                        "strike": strike,
+                        "option_type": "PE",
+                        "exchange": "NSE",
+                        "tier": "TIER_A",
+                        "active": False
+                    }
+                ))
+        built.sort(key=lambda x: (x[0], x[1]))
+        suggestions.extend([item for _, _, item in built][:limit])
+    return {
+        "query": q,
+        "count": len(suggestions),
+        "results": suggestions[:limit]
+    }
+
 @router.get("/market/underlying-ltp/{symbol}")
 async def get_underlying_ltp(symbol: str):
     """Return latest underlying LTP from live price cache"""
@@ -325,7 +681,23 @@ async def get_underlying_ltp(symbol: str):
         "ltp": ltp
     }
 
+@router.post("/options/refresh-closing")
+async def refresh_closing_cache():
+    from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+    ok = await authoritative_option_chain_service.populate_cache_with_market_aware_data()
+    if not ok:
+        raise HTTPException(status_code=500, detail="refresh_failed")
+    stats = authoritative_option_chain_service.get_cache_statistics()
+    return {"status": "success", "stats": stats}
 
+@router.post("/options/refresh-closing-rest")
+async def refresh_closing_cache_from_rest():
+    from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+    ok = await authoritative_option_chain_service.populate_closing_snapshot_from_rest()
+    if not ok:
+        raise HTTPException(status_code=500, detail="refresh_failed")
+    stats = authoritative_option_chain_service.get_cache_statistics()
+    return {"status": "success", "stats": stats}
 @router.get("/market/option-depth")
 async def get_option_depth(
     underlying: str = Query(...),
@@ -464,6 +836,84 @@ async def admin_rebalance_ws():
     return {
         "action": "REBALANCE_WS",
         **result
+    }
+
+@router.post("/admin/refresh-lot-sizes")
+async def admin_refresh_lot_sizes():
+    """Admin: Force-run lot size refresh from Dhan CSV and update caches."""
+    from app.schedulers.lot_size_refresh_scheduler import get_lot_size_scheduler
+    from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+    from app.commodity_engine.commodity_option_chain_service import commodity_option_chain_service
+    from app.commodity_engine.commodity_futures_service import commodity_futures_service
+    from datetime import datetime
+
+    ok = await get_lot_size_scheduler().refresh_all_lot_sizes()
+
+    opt_updated = 0
+    for underlying, exp_map in authoritative_option_chain_service.option_chain_cache.items():
+        for expiry, skeleton in exp_map.items():
+            try:
+                if int(skeleton.lot_size) > 0:
+                    opt_updated += 1
+            except Exception:
+                continue
+
+    mcx_opt_updated = 0
+    for symbol, exp_map in commodity_option_chain_service.option_chain_cache.items():
+        for expiry, skeleton in exp_map.items():
+            try:
+                if int(skeleton.get("lot_size") or 0) > 0:
+                    mcx_opt_updated += 1
+            except Exception:
+                continue
+
+    mcx_fut_updated = 0
+    for symbol, exp_map in commodity_futures_service.futures_cache.items():
+        for expiry, entry in exp_map.items():
+            try:
+                if int(entry.get("lot_size") or 0) > 0:
+                    mcx_fut_updated += 1
+            except Exception:
+                continue
+
+    return {
+        "status": "ok" if ok else "failed",
+        "updated": {
+            "index_option_chains": opt_updated,
+            "mcx_option_chains": mcx_opt_updated,
+            "mcx_futures": mcx_fut_updated,
+        },
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+@router.get("/admin/lot-sizes/status")
+async def admin_lot_sizes_status():
+    """Admin: Report last lot size refresh time and coverage across caches."""
+    from app.schedulers.lot_size_refresh_scheduler import get_lot_size_scheduler
+    from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+    from app.commodity_engine.commodity_option_chain_service import commodity_option_chain_service
+    from app.commodity_engine.commodity_futures_service import commodity_futures_service
+
+    scheduler = get_lot_size_scheduler()
+    last = scheduler.last_refresh.get("LOT_SIZE")
+    last_txt = last.isoformat() if last else None
+
+    opt_total = sum(1 for _, exp_map in authoritative_option_chain_service.option_chain_cache.items() for _ in exp_map.items())
+    opt_with_lot = sum(1 for _, exp_map in authoritative_option_chain_service.option_chain_cache.items() for _, s in exp_map.items() if getattr(s, "lot_size", 0))
+
+    mcx_opt_total = sum(1 for _, exp_map in commodity_option_chain_service.option_chain_cache.items() for _ in exp_map.items())
+    mcx_opt_with_lot = sum(1 for _, exp_map in commodity_option_chain_service.option_chain_cache.items() for _, s in exp_map.items() if int((s.get("lot_size") or 0)) > 0)
+
+    mcx_fut_total = sum(1 for _, exp_map in commodity_futures_service.futures_cache.items() for _ in exp_map.items())
+    mcx_fut_with_lot = sum(1 for _, exp_map in commodity_futures_service.futures_cache.items() for _, s in exp_map.items() if int((s.get("lot_size") or 0)) > 0)
+
+    return {
+        "last_refresh": last_txt,
+        "coverage": {
+            "index_option_chains": {"total": opt_total, "with_lot_size": opt_with_lot},
+            "mcx_option_chains": {"total": mcx_opt_total, "with_lot_size": mcx_opt_with_lot},
+            "mcx_futures": {"total": mcx_fut_total, "with_lot_size": mcx_fut_with_lot},
+        }
     }
 
 @router.post("/admin/subscribe-indices")

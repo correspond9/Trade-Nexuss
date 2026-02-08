@@ -176,7 +176,7 @@ class AuthoritativeOptionChainService:
                 "segment": "IDX_I",
                 "security_id": 13,
                 "strike_interval": 50.0,
-                "lot_size": 50
+                "lot_size": 65
             },
             "BANKNIFTY": {
                 "weekly_expiries": 0,
@@ -185,7 +185,7 @@ class AuthoritativeOptionChainService:
                 "segment": "IDX_I",
                 "security_id": 25,
                 "strike_interval": 100.0,
-                "lot_size": 25
+                "lot_size": 30
             },
             "SENSEX": {
                 "weekly_expiries": 4,
@@ -194,7 +194,7 @@ class AuthoritativeOptionChainService:
                 "segment": "IDX_I",
                 "security_id": 51,
                 "strike_interval": 100.0,
-                "lot_size": 10
+                "lot_size": 20
             },
             "FINNIFTY": {
                 "weekly_expiries": 0,
@@ -384,6 +384,100 @@ class AuthoritativeOptionChainService:
             
         except Exception as e:
             logger.error(f"❌ Market-aware population failed completely: {e}")
+            return False
+    
+    async def populate_closing_snapshot_from_rest(self) -> bool:
+        """
+        Build closing snapshot from DhanHQ REST API and populate cache.
+        Runs with REST rate limiter compliance. Intended for one-time run at market close.
+        """
+        try:
+            logger.info("🌙 Building closing snapshot from DhanHQ REST API...")
+            
+            # Ensure instrument master is loaded
+            if not self.instrument_master_cache:
+                await self._load_instrument_master_cache()
+            
+            closing_payload: Dict[str, Any] = {}
+            underlyings = ["NIFTY", "BANKNIFTY", "SENSEX"]
+            
+            for underlying in underlyings:
+                try:
+                    # Market data (current price + expiries)
+                    market_data = await self._fetch_market_data_from_api(underlying)
+                    if not market_data:
+                        logger.warning(f"⚠️ No market data for {underlying}; skipping")
+                        continue
+                    
+                    current_price = float(market_data.get("current_price") or 0.0)
+                    expiries = market_data.get("expiries") or []
+                    selected = self._select_current_next_expiries(underlying, expiries)
+                    if not selected:
+                        logger.warning(f"⚠️ No expiries selected for {underlying}; skipping")
+                        continue
+                    
+                    closing_prices_for_underlying: Dict[str, Dict[str, Dict[str, float]]] = {}
+                    
+                    for expiry in selected:
+                        chain = await self._fetch_option_chain_from_api(underlying, expiry)
+                        strikes = chain.get("strikes") if chain else []
+                        if not strikes:
+                            logger.warning(f"⚠️ No strikes from REST for {underlying} {expiry}")
+                            closing_prices_for_underlying[expiry] = {}
+                            continue
+                        
+                        strike_map: Dict[str, Dict[str, float]] = {}
+                        for item in strikes:
+                            try:
+                                strike_price = float(item.get("strike_price") or item.get("strike") or 0.0)
+                                if strike_price <= 0:
+                                    continue
+                                
+                                ce_data = item.get("ce") or item.get("CE") or {}
+                                pe_data = item.get("pe") or item.get("PE") or {}
+                                
+                                def _v(d: Dict[str, Any]) -> float:
+                                    return float(
+                                        d.get("ltp")
+                                        or d.get("LTP")
+                                        or d.get("close")
+                                        or d.get("last_price")
+                                        or 0.0
+                                    )
+                                
+                                ce_ltp = _v(ce_data)
+                                pe_ltp = _v(pe_data)
+                                
+                                strike_map[str(strike_price)] = {
+                                    "CE": ce_ltp if ce_ltp > 0 else 0.0,
+                                    "PE": pe_ltp if pe_ltp > 0 else 0.0,
+                                }
+                            except Exception:
+                                continue
+                        
+                        closing_prices_for_underlying[expiry] = strike_map
+                    
+                    closing_payload[underlying] = {
+                        "expiries": selected,
+                        "closing_prices": closing_prices_for_underlying,
+                        "current_price": current_price,
+                    }
+                
+                except Exception as e:
+                    logger.error(f"❌ Error building closing snapshot for {underlying}: {e}")
+                    continue
+            
+            if not closing_payload:
+                logger.warning("⚠️ Closing snapshot payload empty")
+                return False
+            
+            self.populate_with_closing_prices_sync(closing_payload)
+            stats = self.get_cache_statistics()
+            logger.info(f"✅ Closing snapshot populated: underlyings={stats.get('total_underlyings')} expiries={stats.get('total_expiries')}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"❌ Failed to populate closing snapshot from REST: {e}")
             return False
     
     async def initialize(self) -> bool:
@@ -584,9 +678,9 @@ class AuthoritativeOptionChainService:
             logger.error(f"❌ Failed to load instrument master from API/Registry: {e}")
             # Fallback to minimal hardcoded data
             self.instrument_master_cache = {
-                "NIFTY": {"segment": "IDX_I", "security_id": 13, "strike_interval": 50.0, "lot_size": 50},
-                "BANKNIFTY": {"segment": "IDX_I", "security_id": 25, "strike_interval": 100.0, "lot_size": 25},
-                "SENSEX": {"segment": "IDX_I", "security_id": 51, "strike_interval": 100.0, "lot_size": 10}
+                "NIFTY": {"segment": "IDX_I", "security_id": 13, "strike_interval": 50.0, "lot_size": 65},
+                "BANKNIFTY": {"segment": "IDX_I", "security_id": 25, "strike_interval": 100.0, "lot_size": 30},
+                "SENSEX": {"segment": "IDX_I", "security_id": 51, "strike_interval": 100.0, "lot_size": 20}
             }
             logger.warning(f"⚠️ Using fallback instrument data: {len(self.instrument_master_cache)} instruments")
     
@@ -815,9 +909,9 @@ class AuthoritativeOptionChainService:
 
         # Weekly selection for NIFTY and SENSEX (as per current exchange schedule)
         weekly_day_map = {
-            "NIFTY": 1,     # Tuesday
-            "NIFTY50": 1,   # Tuesday
-            "SENSEX": 3     # Thursday
+            "NIFTY": 1,
+            "NIFTY50": 1,
+            "SENSEX": 3
         }
 
         if upper in weekly_day_map:
@@ -1247,16 +1341,17 @@ class AuthoritativeOptionChainService:
         return sorted(set(strikes))
 
     def _resolve_lot_size(self, underlying: str, option_chain_data: Dict[str, Any]) -> int:
-        candidates: List[int] = []
+        # Prefer CSV-derived lot size from Dhan official scrip master
+        try:
+            lot_from_csv = self.security_mapper.get_lot_size(underlying)
+            if isinstance(lot_from_csv, int) and lot_from_csv > 0:
+                return lot_from_csv
+        except Exception:
+            pass
 
-        for key in (
-            "lot_size",
-            "lotSize",
-            "lot_size_value",
-            "marketLot",
-            "market_lot",
-            "market_lot_size",
-        ):
+        # Fallback: infer from provided chain payload if present
+        candidates: List[int] = []
+        for key in ("lot_size", "lotSize", "lot_size_value", "marketLot", "market_lot", "market_lot_size"):
             value = option_chain_data.get(key)
             if isinstance(value, (int, float)) and value > 0:
                 candidates.append(int(value))
@@ -1280,14 +1375,8 @@ class AuthoritativeOptionChainService:
         if candidates:
             return max(1, int(candidates[0]))
 
-        meta = self.instrument_master_cache.get(underlying)
-        if meta:
-            try:
-                return max(1, int(meta.get("lot_size") or 0))
-            except (TypeError, ValueError):
-                pass
-
-        return int(self.index_options.get(underlying, {}).get("lot_size") or 1)
+        # Final defensive default to avoid zero/None
+        return 1
 
     def _synthesize_missing_prices(self, strikes: Dict[float, StrikeData], option_type: str) -> int:
         missing = []

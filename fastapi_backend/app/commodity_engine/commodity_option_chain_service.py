@@ -54,18 +54,13 @@ class CommodityOptionChainService:
         return best
 
     def _resolve_lot_size(self, symbol: str) -> Optional[int]:
-        symbol_upper = symbol.upper()
-        for row in REGISTRY.by_underlying.get(symbol_upper, []):
-            exchange = (row.get("EXCH_ID") or "").strip().upper()
-            if exchange != "MCX":
-                continue
-            lot = row.get("LOT_SIZE") or row.get("MARKET_LOT")
-            try:
-                lot_val = int(float(lot))
-                if lot_val > 0:
-                    return lot_val
-            except (TypeError, ValueError):
-                continue
+        try:
+            from app.services.dhan_security_id_mapper import dhan_security_mapper
+            lot = dhan_security_mapper.get_lot_size(symbol)
+            if isinstance(lot, int) and lot > 0:
+                return lot
+        except Exception:
+            pass
         return None
 
     def _build_strikes(self, atm: float, strike_interval: float) -> List[float]:

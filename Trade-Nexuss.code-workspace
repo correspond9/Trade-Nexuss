@@ -18,6 +18,7 @@
 				"approve": true,
 				"matchCommandLine": true
 			}
-		}
+		},
+		"editor.fontSize": 14
 	}
 }

@@ -24,6 +24,7 @@ from app.market_orchestrator import get_orchestrator
 from app.services.authoritative_option_chain_service import authoritative_option_chain_service
 from app.market.closing_prices import get_closing_prices
 from app.schedulers.expiry_refresh_scheduler import get_expiry_scheduler
+from app.schedulers.lot_size_refresh_scheduler import get_lot_size_scheduler
 from app.schedulers.market_aware_cache_scheduler import get_market_aware_cache_scheduler
 from app.schedulers.mock_exchange_scheduler import get_mock_exchange_scheduler
 
@@ -79,6 +80,15 @@ async def startup():
         print("[STARTUP] ✅ Expiry scheduler started")
     except Exception as e:
         print(f"[STARTUP] ⚠️ Failed to start expiry scheduler: {e}")
+    
+    # Start daily lot size refresh scheduler
+    print("[STARTUP] Starting daily lot size refresh scheduler (runs at 08:45 AM daily)...")
+    try:
+        lot_scheduler = get_lot_size_scheduler()
+        await lot_scheduler.start()
+        print("[STARTUP] ✅ Lot size refresh scheduler started")
+    except Exception as e:
+        print(f"[STARTUP] ⚠️ Failed to start lot size refresh scheduler: {e}")
     
     # Initialize managers
     print("[STARTUP] Initializing managers...")
@@ -201,4 +211,3 @@ def health():
         "mcx_websocket_status": mcx_ws_status,
         "orchestrator_status": orchestrator_status,
     }
-
