@@ -9,3 +9,4 @@ aiohttp
 ruff
 mypy
 python-dotenv
+python-multipart
