@@ -1,6 +1,13 @@
 
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Float, Text, ForeignKey, UniqueConstraint
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# IST timezone offset (UTC+5:30)
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
+def ist_now():
+    """Get current IST time"""
+    return datetime.utcnow() + IST_OFFSET
 from .db import Base
 
 class DhanCredential(Base):
@@ -13,7 +20,7 @@ class DhanCredential(Base):
     daily_token = Column(String)
     auth_mode = Column(String)  # DAILY_TOKEN | STATIC_IP
     is_default = Column(Boolean, default=False)
-    last_updated = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=ist_now)
 
 
 class Watchlist(Base):
@@ -24,7 +31,7 @@ class Watchlist(Base):
     symbol = Column(String, nullable=False)  # e.g., "RELIANCE", "NIFTY50"
     expiry_date = Column(String, nullable=False)  # e.g., "26FEB2026"
     instrument_type = Column(String, nullable=False)  # "EQUITY", "STOCK_OPTION", "INDEX_OPTION"
-    added_at = Column(DateTime, default=datetime.utcnow)
+    added_at = Column(DateTime, default=ist_now)
     added_order = Column(Integer)  # For LRU eviction on rate limit
     __table_args__ = (UniqueConstraint('user_id', 'symbol', 'expiry_date', name='uq_user_symbol_expiry'),)
 
@@ -39,7 +46,7 @@ class Subscription(Base):
     strike_price = Column(Float)
     option_type = Column(String)  # "CE", "PE", None for futures/equity
     tier = Column(String, nullable=False)  # "TIER_A" or "TIER_B"
-    subscribed_at = Column(DateTime, default=datetime.utcnow)
+    subscribed_at = Column(DateTime, default=ist_now)
     ws_connection_id = Column(Integer)  # Which of 5 WS connections (1-5)
     active = Column(Boolean, default=True)
 
@@ -52,7 +59,7 @@ class ATMCache(Base):
     current_ltp = Column(Float, nullable=False)
     atm_strike = Column(Float, nullable=False)
     strike_step = Column(Float, nullable=False)
-    cached_at = Column(DateTime, default=datetime.utcnow)
+    cached_at = Column(DateTime, default=ist_now)
     generated_strikes = Column(Text)  # JSON: {"26FEB": [2600, 2625, ...]}
 
 
@@ -63,7 +70,7 @@ class SubscriptionLog(Base):
     action = Column(String, nullable=False)  # "SUBSCRIBE", "UNSUBSCRIBE", "RATE_LIMIT_EVICT", "EOD_CLEANUP"
     instrument_token = Column(String)
     reason = Column(String)  # Why was it unsubscribed
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=ist_now)
 
 
 class Notification(Base):
@@ -72,7 +79,7 @@ class Notification(Base):
     id = Column(Integer, primary_key=True)
     message = Column(Text, nullable=False)
     level = Column(String, default="WARN")  # INFO | WARN | ERROR
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
 
 
 # ==================== MOCK EXCHANGE MODELS ====================
@@ -84,7 +91,7 @@ class BrokeragePlan(Base):
     flat_fee = Column(Float, default=20.0)  # flat per order
     percent_fee = Column(Float, default=0.0)  # optional percent of turnover
     max_fee = Column(Float, default=20.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
 
 
 class UserAccount(Base):
@@ -103,8 +110,8 @@ class UserAccount(Base):
     wallet_balance = Column(Float, default=0.0)
     margin_multiplier = Column(Float, default=5.0)
     brokerage_plan_id = Column(Integer, ForeignKey("brokerage_plans.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
+    updated_at = Column(DateTime, default=ist_now)
 
 
 class MarginAccount(Base):
@@ -113,7 +120,7 @@ class MarginAccount(Base):
     user_id = Column(Integer, ForeignKey("user_accounts.id"), nullable=False, unique=True)
     available_margin = Column(Float, default=0.0)
     used_margin = Column(Float, default=0.0)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=ist_now)
 
 
 class MockOrder(Base):
@@ -137,8 +144,8 @@ class MockOrder(Base):
     stop_loss_price = Column(Float, nullable=True)
     trailing_jump = Column(Float, nullable=True)
     remarks = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
+    updated_at = Column(DateTime, default=ist_now)
 
 
 class MockTrade(Base):
@@ -148,7 +155,7 @@ class MockTrade(Base):
     user_id = Column(Integer, ForeignKey("user_accounts.id"), nullable=False)
     price = Column(Float, nullable=False)
     qty = Column(Integer, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
 
 
 class ExecutionEvent(Base):
@@ -164,7 +171,7 @@ class ExecutionEvent(Base):
     reason = Column(String, nullable=True)
     latency_ms = Column(Integer, nullable=True)
     slippage = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
 
 
 class MockPosition(Base):
@@ -178,8 +185,8 @@ class MockPosition(Base):
     avg_price = Column(Float, default=0.0)
     realized_pnl = Column(Float, default=0.0)
     status = Column(String, default="OPEN")  # OPEN | CLOSED
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
+    updated_at = Column(DateTime, default=ist_now)
     __table_args__ = (UniqueConstraint('user_id', 'symbol', 'product_type', name='uq_user_symbol_product'),)
 
 
@@ -192,7 +199,7 @@ class LedgerEntry(Base):
     debit = Column(Float, default=0.0)
     balance = Column(Float, default=0.0)
     remarks = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
 
 
 class PnlSnapshot(Base):
@@ -202,7 +209,7 @@ class PnlSnapshot(Base):
     realized_pnl = Column(Float, default=0.0)
     mtm = Column(Float, default=0.0)
     total_pnl = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
 
 
 class MockBasket(Base):
@@ -211,8 +218,8 @@ class MockBasket(Base):
     user_id = Column(Integer, ForeignKey("user_accounts.id"), nullable=False)
     name = Column(String, nullable=False)
     status = Column(String, default="ACTIVE")  # ACTIVE | EXECUTED | CANCELLED
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)
+    updated_at = Column(DateTime, default=ist_now)
 
 
 class MockBasketLeg(Base):
@@ -227,4 +234,4 @@ class MockBasketLeg(Base):
     order_type = Column(String, default="MARKET")
     product_type = Column(String, default="MIS")
     price = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=ist_now)

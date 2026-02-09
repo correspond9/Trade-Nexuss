@@ -1,4 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+
+# IST timezone offset (UTC+5:30)
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
+def ist_now():
+    """Get current IST time"""
+    return datetime.utcnow() + IST_OFFSET
 import asyncio
 from typing import Optional, List
 
@@ -355,7 +362,7 @@ def _segment_allowed(user: models.UserAccount, exchange_segment: str) -> bool:
 def _update_ledger(db: Session, user: models.UserAccount, credit: float, debit: float, entry_type: str, remarks: str):
     balance = (user.wallet_balance or 0.0) + credit - debit
     user.wallet_balance = balance
-    user.updated_at = datetime.utcnow()
+    user.updated_at = ist_now()
     entry = models.LedgerEntry(
         user_id=user.id,
         entry_type=entry_type,
@@ -410,7 +417,7 @@ def _apply_position(db: Session, user_id: int, symbol: str, exchange_segment: st
             position.status = "CLOSED"
         else:
             position.avg_price = price
-    position.updated_at = datetime.utcnow()
+    position.updated_at = ist_now()
 
 
 def _execute_order(db: Session, order: models.MockOrder, execution_price: float):
@@ -419,7 +426,7 @@ def _execute_order(db: Session, order: models.MockOrder, execution_price: float)
         return
     order.filled_qty += remaining
     order.status = "EXECUTED"
-    order.updated_at = datetime.utcnow()
+    order.updated_at = ist_now()
 
     trade = models.MockTrade(
         order_id=order.id,
@@ -749,6 +756,14 @@ def close_position(position_id: int, req: SquareOffRequest, db: Session = Depend
     qty = min(abs(pos.quantity), qty)
     ltp = _get_ltp(pos.symbol, pos.avg_price)
 
+    # ✨ ENHANCE: Add fallback for square-off when depth is unavailable
+    snapshot = EXEC_ENGINE._snapshot_for_order(pos.symbol, pos.exchange_segment)
+    if not snapshot.get("best_bid") or not snapshot.get("best_ask"):
+        # Use LTP as fallback when depth data is not available
+        print(f"[SQUAREOFF] Using LTP fallback for {pos.symbol}: {ltp}")
+        snapshot["best_bid"] = ltp * 0.999  # Small spread
+        snapshot["best_ask"] = ltp * 1.001
+
     order = models.MockOrder(
         user_id=pos.user_id,
         symbol=pos.symbol,
@@ -841,7 +856,7 @@ def append_basket_legs(basket_id: int, req: BasketAppendRequest, db: Session = D
             price=leg.price or 0.0,
         ))
 
-    basket.updated_at = datetime.utcnow()
+    basket.updated_at = ist_now()
     db.commit()
     return {"data": {"basket_id": basket.id, "legs_added": len(req.legs)}}
 
@@ -868,7 +883,7 @@ def execute_basket(req: BasketExecuteRequest, db: Session = Depends(get_db)):
         )
         results.append(place_order(order_req, db))
     basket.status = "EXECUTED"
-    basket.updated_at = datetime.utcnow()
+    basket.updated_at = ist_now()
     db.commit()
     return {"data": results}
 
@@ -1127,7 +1142,7 @@ def wallet_payin(req: LedgerAdjustRequest, db: Session = Depends(get_db)):
     _update_ledger(db, user, credit=req.credit, debit=0.0, entry_type="PAYIN", remarks=req.remarks or "Payin")
     margin = _get_or_create_margin(db, user.id)
     margin.available_margin += req.credit * _normalize_margin_multiplier(user.margin_multiplier)
-    margin.updated_at = datetime.utcnow()
+    margin.updated_at = ist_now()
     db.commit()
     return {"status": "ok"}
 
@@ -1140,7 +1155,7 @@ def wallet_payout(req: LedgerAdjustRequest, db: Session = Depends(get_db)):
     _update_ledger(db, user, credit=0.0, debit=req.debit, entry_type="PAYOUT", remarks=req.remarks or "Payout")
     margin = _get_or_create_margin(db, user.id)
     margin.available_margin = max(0.0, margin.available_margin - (req.debit * _normalize_margin_multiplier(user.margin_multiplier)))
-    margin.updated_at = datetime.utcnow()
+    margin.updated_at = ist_now()
     db.commit()
     return {"status": "ok"}
 
@@ -1249,8 +1264,8 @@ def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depends(get_
                 0.0,
                 margin.available_margin + (delta_wallet * previous_multiplier)
             )
-        margin.updated_at = datetime.utcnow()
-    user.updated_at = datetime.utcnow()
+        margin.updated_at = ist_now()
+    user.updated_at = ist_now()
     db.commit()
     return {"data": _serialize(user)}
 
@@ -1268,7 +1283,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.status = "BLOCKED"
-    user.updated_at = datetime.utcnow()
+    user.updated_at = ist_now()
     db.commit()
     return {"status": "blocked"}
 
@@ -1292,7 +1307,7 @@ def admin_restrict_user(user_id: int, req: RestrictRequest, db: Session = Depend
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.allowed_segments = req.allowed_segments
-    user.updated_at = datetime.utcnow()
+    user.updated_at = ist_now()
     db.commit()
     return {"data": _serialize(user)}
 
@@ -1303,7 +1318,7 @@ def admin_set_brokerage_plan(user_id: int, req: BrokeragePlanRequest, db: Sessio
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.brokerage_plan_id = req.brokerage_plan_id
-    user.updated_at = datetime.utcnow()
+    user.updated_at = ist_now()
     db.commit()
     return {"data": _serialize(user)}
 
@@ -1318,7 +1333,7 @@ def admin_recalculate_margins(db: Session = Depends(get_db)):
         wallet = user.wallet_balance or 0.0
         used = margin.used_margin or 0.0
         margin.available_margin = max(0.0, (wallet * multiplier) - used)
-        margin.updated_at = datetime.utcnow()
+        margin.updated_at = ist_now()
         updated += 1
     db.commit()
     return {"updated": updated}
@@ -1408,6 +1423,6 @@ def adjust_margin(req: MarginAdjustRequest, db: Session = Depends(get_db)):
         margin.available_margin = req.available_margin
     if req.used_margin is not None:
         margin.used_margin = req.used_margin
-    margin.updated_at = datetime.utcnow()
+    margin.updated_at = ist_now()
     db.commit()
     return {"data": _serialize(margin)}

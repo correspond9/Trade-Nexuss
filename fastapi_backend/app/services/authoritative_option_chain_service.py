@@ -491,6 +491,9 @@ class AuthoritativeOptionChainService:
             # Registries are loaded via _load_instrument_master_cache
             # No separate registry initialization needed
             
+            # Fetch F&O lot sizes from API
+            await self._fetch_fo_lot_sizes_from_api()
+            
             logger.info("✅ Authoritative Option Chain Service initialized")
             logger.info(f"📊 Subscription estimate: {self.total_subscription_estimate} tokens across {self.websockets_needed} WebSocket(s)")
             
@@ -634,16 +637,11 @@ class AuthoritativeOptionChainService:
                     # Get strike step from registry
                     strike_step = REGISTRY.get_strike_step(symbol)
                     
-                    # Get lot size from first available record
-                    records = REGISTRY.get_by_symbol(symbol)
-                    lot_size = 50  # Default
-                    if records:
-                        try:
-                            lot_size = int(records[0].get("LOT_SIZE", 50))
-                        except (ValueError, TypeError):
-                            lot_size = 50
+                    # Get lot size from index_options configuration (NOT from registry)
+                    lot_size = self.index_options.get(symbol, {}).get("lot_size", 50)
                     
-                    # Get security_id/segment (prefer known DhanHQ IDs for indices)
+                    # Get security_id/segment from registry (ONLY for security IDs and segments)
+                    records = REGISTRY.get_by_symbol(symbol)
                     mapping = index_mapping.get(symbol, {})
                     security_id = mapping.get("security_id")
                     segment = mapping.get("segment", "NSE_IDX")
@@ -676,14 +674,75 @@ class AuthoritativeOptionChainService:
             
         except Exception as e:
             logger.error(f"❌ Failed to load instrument master from API/Registry: {e}")
-            # Fallback to minimal hardcoded data
-            self.instrument_master_cache = {
-                "NIFTY": {"segment": "IDX_I", "security_id": 13, "strike_interval": 50.0, "lot_size": 65},
-                "BANKNIFTY": {"segment": "IDX_I", "security_id": 25, "strike_interval": 100.0, "lot_size": 30},
-                "SENSEX": {"segment": "IDX_I", "security_id": 51, "strike_interval": 100.0, "lot_size": 20}
-            }
+            # Fallback to minimal hardcoded data using index_options configuration
+            self.instrument_master_cache = {}
+            for symbol in index_symbols:
+                self.instrument_master_cache[symbol] = {
+                    "segment": self.index_options[symbol]["segment"],
+                    "security_id": self.index_options[symbol]["security_id"],
+                    "strike_interval": self.index_options[symbol]["strike_interval"],
+                    "lot_size": self.index_options[symbol]["lot_size"]
+                }
             logger.warning(f"⚠️ Using fallback instrument data: {len(self.instrument_master_cache)} instruments")
-    
+        
+        # Cache for F&O lot sizes fetched from API
+        self.fo_lot_size_cache: Dict[str, int] = {}
+        self.fo_lot_size_cache_updated = None
+
+    async def _fetch_fo_lot_sizes_from_api(self) -> bool:
+        """Fetch F&O instrument lot sizes from DhanHQ API with proper rate limiting"""
+        try:
+            logger.info("🔄 Fetching F&O lot sizes from DhanHQ API...")
+            
+            # Check if cache needs refresh (24 hours TTL)
+            now = datetime.now()
+            if (self.fo_lot_size_cache_updated and 
+                (now - self.fo_lot_size_cache_updated).total_seconds() < 86400):  # 24 hours
+                logger.info("✅ F&O lot sizes cache still valid, using cached data")
+                return True
+            
+            # Force rate limit compliance
+            await self._enforce_rest_rate_limit("data")
+            
+            # Get credentials
+            creds = await self._fetch_dhanhq_credentials()
+            if not creds:
+                logger.error("❌ No DhanHQ credentials for F&O lot size fetch")
+                return False
+            
+            # Fetch F&O securities
+            headers = {
+                "access-token": creds["access_token"],
+                "client-id": creds["client_id"],
+                "Content-Type": "application/json"
+            }
+
+            fo_url = f"{self.dhan_base_url}/v2/instruments/fno"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(fo_url, headers=headers, timeout=30) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # Process F&O instruments and extract lot sizes
+                        fo_instruments = data.get("data", [])
+                        for instrument in fo_instruments:
+                            symbol = instrument.get("symbol", "")
+                            lot_size = instrument.get("lot_size", 1)
+                            if symbol and lot_size > 1:
+                                self.fo_lot_size_cache[symbol] = int(lot_size)
+                                logger.debug(f"📊 Cached F&O lot size: {symbol} = {lot_size}")
+                        
+                        logger.info(f"✅ Fetched {len(fo_instruments)} F&O instruments with lot sizes")
+                        self.fo_lot_size_cache_updated = now
+                        return True
+                    else:
+                        logger.error(f"❌ Failed to fetch F&O instruments: {response.status}")
+                        return False
+        except Exception as e:
+            logger.error(f"❌ Error fetching F&O lot sizes: {e}")
+            return False
+        
     async def _fetch_dhanhq_credentials(self) -> Optional[Dict[str, str]]:
         """Fetch DhanHQ credentials from database"""
         try:
@@ -1603,29 +1662,8 @@ class AuthoritativeOptionChainService:
 
                                     # Fallback to instrument master if mapper is empty
                                     if not registry_strike_tokens:
-                                        from app.market.instrument_master.registry import REGISTRY
-                                        records = REGISTRY.get_by_symbol_expiry(underlying, expiry)
-                                        if not records:
-                                            records = REGISTRY.by_underlying_expiry.get((underlying.upper(), expiry), [])
-                                        if not records:
-                                            # fallback to normalized expiry match
-                                            target_expiry = REGISTRY._normalize_expiry(expiry)
-                                            if target_expiry:
-                                                for row in REGISTRY.by_underlying.get(underlying.upper(), []):
-                                                    row_expiry = REGISTRY._normalize_expiry(row.get("SM_EXPIRY_DATE", ""))
-                                                    if row_expiry and row_expiry == target_expiry:
-                                                        records.append(row)
-
-                                        for row in records:
-                                            try:
-                                                strike_val = float(row.get("STRIKE_PRICE"))
-                                            except (TypeError, ValueError):
-                                                continue
-                                            opt_type = (row.get("OPTION_TYPE") or "").strip().upper()
-                                            sec_id = row.get("SECURITY_ID") or row.get("SecurityId")
-                                            if not sec_id or opt_type not in ("CE", "PE"):
-                                                continue
-                                            registry_strike_tokens.setdefault(strike_val, {})[opt_type] = str(sec_id)
+                                        continue
+                                    registry_strike_tokens.setdefault(strike_val, {})[opt_type] = str(sec_id)
 
                                     # Build display strikes from registry strikes around ATM
                                     available_strikes = sorted(registry_strike_tokens.keys())
@@ -1888,11 +1926,13 @@ class AuthoritativeOptionChainService:
                         sorted_strikes = sorted(strikes_dict.keys())
                         atm_strike = sorted_strikes[len(sorted_strikes) // 2]
                     
-                    # Create skeleton
+                    # Create skeleton - use index_options directly for lot sizes (NOT from instrument master)
+                    lot_size = self.index_options.get(underlying, {}).get("lot_size", 50)
+                    
                     skeleton = OptionChainSkeleton(
                         underlying=underlying,
                         expiry=expiry,
-                        lot_size=self.index_options[underlying]["lot_size"],
+                        lot_size=lot_size,
                         strike_interval=self.index_options[underlying]["strike_interval"],
                         atm_strike=atm_strike,
                         strikes=strikes_dict,

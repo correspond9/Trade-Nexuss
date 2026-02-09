@@ -1,7 +1,14 @@
 """Execution simulator engine orchestrating fills, queues, and logging."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+
+# IST timezone offset (UTC+5:30)
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
+def ist_now():
+    """Get current IST time"""
+    return datetime.utcnow() + IST_OFFSET
 import time
 from typing import Dict, List, Optional
 
@@ -47,7 +54,7 @@ class ExecutionEngine:
                         "best_ask": best_ask,
                         "bid_qty": bid_qty,
                         "ask_qty": ask_qty,
-                        "last_update_time": datetime.utcnow().isoformat(),
+                        "last_update_time": ist_now().isoformat(),
                     }
         except Exception:
             pass
@@ -87,7 +94,7 @@ class ExecutionEngine:
                                 "best_ask": ask,
                                 "bid_qty": None,
                                 "ask_qty": None,
-                                "last_update_time": datetime.utcnow().isoformat(),
+                                "last_update_time": ist_now().isoformat(),
                             }
                     except Exception:
                         pass
@@ -167,7 +174,7 @@ class ExecutionEngine:
             order.status = "EXECUTED"
         else:
             order.status = "PARTIAL"
-        order.updated_at = datetime.utcnow()
+        order.updated_at = ist_now()
 
         trade = models.MockTrade(
             order_id=order.id,
@@ -209,7 +216,7 @@ class ExecutionEngine:
             required_margin = required_margin / multiplier
         margin.used_margin += required_margin
         margin.available_margin -= required_margin
-        margin.updated_at = datetime.utcnow()
+        margin.updated_at = ist_now()
 
         if order.transaction_type == "BUY":
             user.wallet_balance = (user.wallet_balance or 0.0) - (turnover + brokerage)
@@ -260,7 +267,7 @@ class ExecutionEngine:
                 position.status = "CLOSED"
             else:
                 position.avg_price = fill_price
-        position.updated_at = datetime.utcnow()
+        position.updated_at = ist_now()
 
     def process_new_order(self, db: Session, order: models.MockOrder) -> None:
         exchange = self._exchange_from_segment(order.exchange_segment)
@@ -273,7 +280,7 @@ class ExecutionEngine:
             if trigger is None:
                 order.status = "REJECTED"
                 order.remarks = "INVALID_TRIGGER"
-                order.updated_at = datetime.utcnow()
+                order.updated_at = ist_now()
                 self._log_event(db, order, "ORDER_REJECTED", ask or bid, None, None, "INVALID_TRIGGER", None, None)
                 return
             if order.transaction_type == "BUY" and ask is not None and ask >= trigger:
@@ -288,7 +295,7 @@ class ExecutionEngine:
         if reason:
             order.status = "REJECTED"
             order.remarks = reason
-            order.updated_at = datetime.utcnow()
+            order.updated_at = ist_now()
             self._log_event(db, order, "ORDER_REJECTED", snapshot.get("best_ask") or snapshot.get("best_bid"), None, None, reason, None, None)
             return
 
@@ -351,11 +358,11 @@ class ExecutionEngine:
             exchange = self._exchange_from_segment(order.exchange_segment)
             snapshot = self._snapshot_for_order(order.symbol, order.exchange_segment)
             cfg = self.config.for_exchange(exchange)
-            now = datetime.utcnow()
+            now = ist_now()
             if order.created_at and (now - order.created_at).total_seconds() > cfg.timeout_seconds:
                 order.status = "REJECTED"
                 order.remarks = "NO_LIQUIDITY_TIMEOUT"
-                order.updated_at = datetime.utcnow()
+                order.updated_at = ist_now()
                 self._log_event(db, order, "ORDER_REJECTED", snapshot.get("best_ask") or snapshot.get("best_bid"), None, None, "NO_LIQUIDITY_TIMEOUT", None, None)
                 continue
 

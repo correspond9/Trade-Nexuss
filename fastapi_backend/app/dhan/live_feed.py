@@ -849,6 +849,15 @@ def on_message_callback(feed, message):
 
             bid, ask = _extract_bid_ask(message)
             depth = _extract_depth(message)
+            
+            # ✨ CRITICAL: Update market state with depth data for square-off functionality
+            try:
+                from app.market.market_state import state
+                if depth and (depth.get("bids") or depth.get("asks")):
+                    state["depth"][symbol] = depth
+            except Exception as state_e:
+                print(f"[WARN] Failed to update market state depth: {state_e}")
+            
             try:
                 from app.services.authoritative_option_chain_service import authoritative_option_chain_service
                 authoritative_option_chain_service.update_option_tick_from_websocket(
@@ -901,6 +910,16 @@ def on_message_callback(feed, message):
 
         update_price(symbol, ltp)
         print(f"[PRICE] {symbol} = {ltp}")
+
+        # ✨ CRITICAL: Update market state with depth data for non-option instruments
+        try:
+            from app.market.market_state import state
+            bid, ask = _extract_bid_ask(message)
+            depth = _extract_depth(message)
+            if depth and (depth.get("bids") or depth.get("asks")):
+                state["depth"][symbol] = depth
+        except Exception as state_e:
+            print(f"[WARN] Failed to update market state depth for {symbol}: {state_e}")
 
         try:
             orchestrator = get_orchestrator()
