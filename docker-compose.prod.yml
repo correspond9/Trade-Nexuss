@@ -61,19 +61,6 @@ services:
     restart: always
     command: redis-server --appendonly yes
 
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.prod.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/nginx/ssl
-      - ./logs/nginx:/var/log/nginx
-    depends_on:
-      - backend
-    restart: always
-
 volumes:
   postgres_data:
   redis_data:
