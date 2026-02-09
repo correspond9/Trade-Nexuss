@@ -1,73 +1,47 @@
-"""
-Market API V2
-Clean production-safe version for deployment
-"""
+# ==============================
+# MARKET API V2 ROUTER (STABLE BUILD)
+# Compatible with Python 3.9+
+# ==============================
 
 from fastapi import APIRouter, HTTPException
-from typing import Optional, List
 from datetime import datetime, date
+from typing import Optional
+import logging
 
-# ==========================================================
-# ROUTER
-# ==========================================================
+router = APIRouter()
+logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v2", tags=["market-v2"])
+# =====================================
+# SECTION 1 — SAFE DATE NORMALIZER
+# =====================================
 
-
-# ==========================================================
-# SECTION 1 — UTILS
-# ==========================================================
-
-def _normalize_expiry(expiry: Optional[str]) -> Optional[date]:
+def normalize_expiry(expiry: Optional[str]) -> Optional[date]:
     """
-    Safely convert expiry string to date.
-    Compatible with all Python 3.10+ runtimes.
+    Converts expiry string into date safely.
+    Prevents startup crashes.
     """
-    if not expiry:
+    if expiry is None:
         return None
-
+    
     try:
         return datetime.strptime(expiry, "%Y-%m-%d").date()
     except Exception:
         return None
 
 
-# ==========================================================
-# SECTION 2 — HEALTH CHECK
-# ==========================================================
+# =====================================
+# SECTION 2 — HEALTH CHECK ROUTE
+# =====================================
 
 @router.get("/health")
-async def health():
-    return {"status": "ok", "service": "market-api-v2"}
+def health():
+    return {"status": "ok"}
 
 
-# ==========================================================
-# SECTION 3 — SAMPLE ROUTE (SAFE STARTUP)
-# ==========================================================
+# =====================================
+# SECTION 3 — TEST ROUTE
+# =====================================
 
-@router.get("/ping")
-async def ping():
-    return {"message": "Market API v2 running"}
-
-
-# ==========================================================
-# SECTION 4 — PLACEHOLDER ROUTES
-# (We enable these AFTER server stabilizes)
-# ==========================================================
-
-@router.get("/subscriptions/status")
-async def get_subscription_status():
-    """
-    Temporary stub to avoid startup crash.
-    """
-    return {
-        "subscriptions": [],
-        "websocket": "inactive"
-    }
-
-
-# ==========================================================
-# SECTION 5 — DEBUG STARTUP LOG
-# ==========================================================
-
-print("[OK] Market API v2 router loaded")
+@router.get("/test")
+def test():
+    return {"message": "Market API running"}
