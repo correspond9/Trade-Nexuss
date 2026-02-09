@@ -467,7 +467,7 @@ async def get_instrument_expiries(symbol: str):
         "expiries": expiries
     }
 
-def _normalize_expiry(expiry: str) -> datetime.date | None:
+from datetime import date
     text = (expiry or "").strip().upper()
     for fmt in ("%Y-%m-%d", "%d%b%Y", "%d%b%y", "%d%B%Y"):
         try:
