@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAppContext } from '../contexts/AppContext';
 import { apiService } from '../services/apiService';
-import { Search, Download, TrendingUp, TrendingDown, DollarSign, BarChart3, Activity, User, Target } from 'lucide-react';
+import { Search, Download, TrendingUp, TrendingDown, DollarSign, BarChart3, Activity, User, Target, X, CheckSquare } from 'lucide-react';
 
 const Userwise = () => {
   const { users } = useAppContext();
@@ -11,6 +11,8 @@ const Userwise = () => {
   const [dateRange, setDateRange] = useState('7d');
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
+  const [userPositions, setUserPositions] = useState([]);
+  const [selectedPositionIds, setSelectedPositionIds] = useState(new Set());
 
   const fetchUserStats = useCallback(async () => {
     if (!selectedUser) {
@@ -25,6 +27,9 @@ const Userwise = () => {
 
       const orders = ordersResponse?.data || [];
       const positions = positionsResponse?.data || [];
+      
+      // Store positions for live positions tab
+      setUserPositions(positions);
 
       const totalTrades = orders.length;
       const pnlByPosition = positions.map((pos) => Number(pos.mtm || 0) + Number(pos.realizedPnl || 0));
@@ -34,6 +39,44 @@ const Userwise = () => {
       const totalPnL = pnlByPosition.reduce((sum, p) => sum + p, 0);
       const totalVolume = orders.reduce((sum, o) => sum + (Number(o.quantity || 0) * Number(o.price || 0)), 0);
       const averageTradeSize = totalTrades ? totalVolume / totalTrades : 0;
+
+      const exitPositions = async (idsSet) => {
+        try {
+          // Call backend API to close positions
+          for (const id of idsSet) {
+            const response = await apiService.post(`/positions/${id}/close`, {
+              quantity: undefined  // Let backend determine quantity
+            });
+            console.log(`Exit position ${id} for user ${selectedUser.id}:`, response?.data || response);
+          }
+          
+          // Wait a moment for backend processing
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Refresh positions
+          await fetchUserPositions();
+          setSelectedPositionIds(new Set());
+        } catch (err) {
+          console.error('Error exiting positions:', err);
+        }
+      };
+
+      const handleExitSelected = () => {
+        if (!selectedPositionIds.size) return;
+        exitPositions(selectedPositionIds);
+      };
+
+      const togglePositionSelection = (id) => {
+        setSelectedPositionIds(prev => {
+          const newSet = new Set(prev);
+          if (newSet.has(id)) {
+            newSet.delete(id);
+          } else {
+            newSet.add(id);
+          }
+          return newSet;
+        });
+      };
 
       const instrumentsMap = new Map();
       orders.forEach((o) => {
@@ -95,6 +138,13 @@ const Userwise = () => {
       fetchUserStats();
     }
   }, [selectedUser, dateRange, fetchUserStats]);
+
+  // Fetch user positions when user is selected
+  useEffect(() => {
+    if (selectedUser) {
+      fetchUserPositions();
+    }
+  }, [selectedUser]);
 
   const filteredUsers = (users || []).filter(user =>
     user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -277,7 +327,7 @@ const Userwise = () => {
               <div className="bg-white rounded-lg shadow">
                 <div className="border-b border-gray-200">
                   <nav className="flex space-x-8 px-6">
-                    {['overview', 'performance', 'instruments', 'trades'].map((tab) => (
+                    {['overview', 'performance', 'instruments', 'trades', 'positions'].map((tab) => (
                       <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
@@ -421,6 +471,117 @@ const Userwise = () => {
                     </div>
                   )}
 
+                  {activeTab === 'positions' && (
+                    <div className="space-y-6">
+                      {/* Positions Header */}
+                      <div className="bg-white rounded-lg shadow p-6">
+                        <div className="flex justify-between items-center mb-4">
+                          <h3 className="text-lg font-semibold text-gray-900">Live Positions</h3>
+                          <div className="flex items-center space-x-3">
+                            <button
+                              onClick={handleExitSelected}
+                              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                              disabled={!selectedPositionIds.size}
+                            >
+                              <X className="w-4 h-4" />
+                              Exit Selected ({selectedPositionIds.size})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Positions Table */}
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left">
+                                <input
+                                  type="checkbox"
+                                  checked={userPositions.length > 0 && selectedPositionIds.size === userPositions.length}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedPositionIds(new Set(userPositions.map(p => p.id)));
+                                    } else {
+                                      setSelectedPositionIds(new Set());
+                                    }
+                                  }}
+                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Symbol</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg Price</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">LTP</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">MTM</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">P&L</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {userPositions.length === 0 ? (
+                              <tr>
+                                <td colSpan="8" className="px-6 py-8 text-center text-gray-500">
+                                  No open positions found for this user.
+                                </td>
+                              </tr>
+                            ) : (
+                              userPositions.map((position) => (
+                                <tr key={position.id}>
+                                  <td className="px-6 py-4 whitespace-nowrap">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedPositionIds.has(position.id)}
+                                      onChange={() => togglePositionSelection(position.id)}
+                                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    {position.symbol}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    {position.product_type || 'MIS'}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    {Math.abs(position.quantity || 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    ₹{(position.avg_price || 0).toFixed(2)}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    ₹{(position.ltp || 0).toFixed(2)}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    ₹{((position.ltp - position.avg_price) * (position.quantity || 0)).toFixed(2)}
+                                  </td>
+                                  <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
+                                    (position.mtm || 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                                  }`}>
+                                    ₹{(position.mtm || 0).toFixed(2)}
+                                  </td>
+                                  <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
+                                    (position.realized_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                                  }`}>
+                                    ₹{(position.realized_pnl || 0).toFixed(2)}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap">
+                                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                                      position.status === 'OPEN' ? 'bg-green-100 text-green-800' : 
+                                      position.status === 'CLOSED' ? 'bg-red-100 text-red-800' : 
+                                      'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {position.status || 'UNKNOWN'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                   {activeTab === 'trades' && (
                     <div className="space-y-6">
                       {/* Recent Trades */}
