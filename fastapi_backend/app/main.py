@@ -1,55 +1,53 @@
+# ==================================================
+# FastAPI Application Entry Point
+# ==================================================
 
-Delete everything.
-
-Paste this:
-
-```python
 from fastapi import FastAPI
 import logging
 
-# routers
+# Routers
 from app.rest.market_api_v2 import router as market_router
 
-# DB modules (keep imports, but do NOT run immediately)
+# Optional DB utilities (safe startup)
 from app.storage.migrations import init_db
 from app.storage.auto_credentials import auto_load_credentials
 from app.storage.settings_manager import restore_settings_to_database
 
-app = FastAPI()
+# --------------------------------------------------
+# App Initialization
+# --------------------------------------------------
+
+app = FastAPI(
+    title="Trading Nexus API",
+    version="1.0.0"
+)
 
 logger = logging.getLogger(__name__)
 
-
-# -------------------------------------------------------
-# SAFE STARTUP (DB WILL NOT BLOCK APP BOOT)
-# -------------------------------------------------------
+# --------------------------------------------------
+# Safe Startup Hook (DB must NOT block boot)
+# --------------------------------------------------
 
 @app.on_event("startup")
 async def startup_event():
     try:
-        logger.info("Starting database initialization...")
-
-        # Run DB setup safely
+        logger.info("Starting optional database initialization...")
         init_db()
         auto_load_credentials()
         restore_settings_to_database()
-
         logger.info("Database initialization completed.")
-
     except Exception as e:
         logger.error(f"Database startup skipped: {e}")
 
-
-# -------------------------------------------------------
-# ROUTERS
-# -------------------------------------------------------
+# --------------------------------------------------
+# Routes
+# --------------------------------------------------
 
 app.include_router(market_router)
 
-
-# -------------------------------------------------------
-# BASIC HEALTH CHECK
-# -------------------------------------------------------
+# --------------------------------------------------
+# Health Check
+# --------------------------------------------------
 
 @app.get("/")
 def root():
