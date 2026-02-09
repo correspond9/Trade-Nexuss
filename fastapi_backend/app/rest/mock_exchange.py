@@ -730,10 +730,10 @@ def list_positions(user_id: Optional[int] = None, db: Session = Depends(get_db))
             "symbol": pos.symbol,
             "exchange_segment": pos.exchange_segment,
             "product_type": pos.product_type,
-            "quantity": pos.quantity,
-            "avg_price": pos.avg_price,
+            "qty": pos.quantity,  # Frontend expects 'qty'
+            "avgEntry": pos.avg_price,  # Frontend expects 'avgEntry'
             "mtm": mtm,
-            "realizedPnl": pos.realized_pnl,
+            "realizedPnl": pos.realized_pnl,  # Frontend expects 'realizedPnl'
             "status": pos.status,
         })
     return {"data": results}

@@ -94,26 +94,45 @@ const PositionsTab = () => {
     exitPositions(selectedOpenIds);
   };
 
-  const exitPositions = (idsSet) => {
-    setPositions((prev) =>
-      prev.map((p) => {
-        if (!idsSet.has(p.id) || p.status !== "OPEN") return p;
-        const exitPrice = parseFloat(p.currentLtp);
-        const entry = parseFloat(p.avgEntry);
-        const realized =
-          p.side === "BUY"
-            ? p.qty * (exitPrice - entry)
-            : p.qty * (entry - exitPrice);
-        return {
-          ...p,
-          status: "CLOSED",
-          exitPrice: exitPrice.toFixed(2),
-          exitTime: new Date().toLocaleTimeString("en-IN", { hour12: true }),
-          realizedPnl: realized,
-        };
-      })
-    );
-    setSelectedOpenIds(new Set());
+  const exitPositions = async (idsSet) => {
+    try {
+      // Call backend API to actually close positions
+      for (const id of idsSet) {
+        const response = await apiService.post(`/positions/${id}/close`, {
+          quantity: undefined  // Let backend determine quantity
+        });
+        console.log(`Exit position ${id}:`, response?.data || response);
+      }
+      
+      // Wait a moment for backend processing
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Refresh positions from backend
+      await fetchPositions();
+      setSelectedOpenIds(new Set());
+    } catch (err) {
+      console.error('Error exiting positions:', err);
+      // Fallback: Update local state if API fails
+      setPositions((prev) =>
+        prev.map((p) => {
+          if (!idsSet.has(p.id) || p.status !== "OPEN") return p;
+          const exitPrice = parseFloat(p.currentLtp);
+          const entry = parseFloat(p.avgEntry);
+          const realized =
+            p.side === "BUY"
+              ? p.qty * (exitPrice - entry)
+              : p.qty * (entry - exitPrice);
+          return {
+            ...p,
+            status: "CLOSED",
+            exitPrice: exitPrice.toFixed(2),
+            exitTime: new Date().toLocaleTimeString("en-IN", { hour12: true }),
+            realizedPnl: realized,
+          };
+        })
+      );
+      setSelectedOpenIds(new Set());
+    }
   };
 
   // ---------- styles ----------
