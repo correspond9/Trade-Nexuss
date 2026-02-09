@@ -744,6 +744,32 @@ def list_positions_legacy(user_id: Optional[int] = None, db: Session = Depends(g
     return list_positions(user_id=user_id, db=db)
 
 
+@router.post("/closeposition")
+def close_position_by_data(req: SquareOffRequest, db: Session = Depends(get_db)):
+    """Close position by position data (for frontend compatibility)"""
+    # Try to find position by ID first
+    position = None
+    
+    # If request has position_id, use it
+    if hasattr(req, 'position_id') and req.position_id:
+        position = db.query(models.MockPosition).filter(
+            models.MockPosition.id == req.position_id,
+            models.MockPosition.user_id == 1,  # SUPER_ADMIN user
+            models.MockPosition.status == "OPEN"
+        ).first()
+    else:
+        # Otherwise, find the first open position for SUPER_ADMIN
+        position = db.query(models.MockPosition).filter(
+            models.MockPosition.user_id == 1,  # SUPER_ADMIN user
+            models.MockPosition.status == "OPEN"
+        ).first()
+    
+    if not position:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    return close_position(position_id=position.id, req=req, db=db)
+
+
 @router.post("/positions/{position_id}/close")
 def close_position(position_id: int, req: SquareOffRequest, db: Session = Depends(get_db)):
     pos = db.query(models.MockPosition).filter(models.MockPosition.id == position_id).first()
