@@ -235,6 +235,22 @@ class SubscriptionManager:
             (success: bool, message: str, ws_id: int)
         """
         with self.lock:
+            try:
+                from app.market.security_ids import mcx_watch_symbols
+                allowed_indices = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
+                equities = set()
+                try:
+                    for r in REGISTRY.get_equity_stocks_nse(limit=2000):
+                        sym = (r.get("UNDERLYING_SYMBOL") or r.get("SYMBOL") or "").strip().upper()
+                        if sym:
+                            equities.add(sym)
+                except Exception:
+                    pass
+                allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | set(mcx_watch_symbols().keys()) | equities
+                if canonical_symbol(symbol) not in allowed_symbols:
+                    return (False, "NOT_ALLOWED", None)
+            except Exception:
+                pass
             if token in self.subscriptions:
                 return (True, f"Already subscribed: {token}", self.subscriptions[token]["ws_id"])
 
@@ -267,6 +283,14 @@ class SubscriptionManager:
 
             if not ok or ws_id is None:
                 return (False, f"Rate limit: {reason}", None)
+
+            # Reflect subscription in WS manager for admin visibility
+            try:
+                from app.market.ws_manager import get_ws_manager
+                ws_mgr = get_ws_manager()
+                ws_mgr.add_instrument(str(token), ws_id)
+            except Exception:
+                pass
 
             self.ws_usage[ws_id] = self.ws_usage.get(ws_id, 0) + 1
 
@@ -308,6 +332,14 @@ class SubscriptionManager:
             if ws_id in self.ws_usage:
                 self.ws_usage[ws_id] = max(self.ws_usage[ws_id] - 1, 0)
             
+            # Reflect removal in WS manager
+            try:
+                from app.market.ws_manager import get_ws_manager
+                ws_mgr = get_ws_manager()
+                ws_mgr.remove_instrument(str(token))
+            except Exception:
+                pass
+
             del self.subscriptions[token]
             
             # Remove from LRU if present
@@ -446,6 +478,22 @@ class SubscriptionManager:
             loaded_count = 0
             for sub in active_subs:
                 token = sub.instrument_token
+                try:
+                    from app.market.security_ids import mcx_watch_symbols
+                    allowed_indices = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
+                    equities = set()
+                    try:
+                        for r in REGISTRY.get_equity_stocks_nse(limit=2000):
+                            sym = (r.get("UNDERLYING_SYMBOL") or r.get("SYMBOL") or "").strip().upper()
+                            if sym:
+                                equities.add(sym)
+                    except Exception:
+                        pass
+                    allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | set(mcx_watch_symbols().keys()) | equities
+                    if canonical_symbol(sub.symbol) not in allowed_symbols:
+                        continue
+                except Exception:
+                    pass
                 metadata = _resolve_security_metadata(
                     symbol=sub.symbol,
                     expiry=sub.expiry_date,

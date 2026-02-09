@@ -43,7 +43,8 @@ async def get_option_chain_live(
             "data": option_chain,
             "source": "central_cache",
             "timestamp": datetime.now().isoformat(),
-            "cache_stats": authoritative_option_chain_service.get_cache_statistics()
+            "cache_stats": authoritative_option_chain_service.get_cache_statistics(),
+            "underlying_ltp": authoritative_option_chain_service.atm_registry.atm_strikes.get(underlying)
         }
         
         logger.info(f"✅ Served option chain for {underlying} {expiry}")

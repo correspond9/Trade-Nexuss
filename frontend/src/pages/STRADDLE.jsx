@@ -7,7 +7,6 @@ import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
 const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry = null }) => {
   const [centerStrike, setCenterStrike] = useState(null);
   const [underlyingPrice, setUnderlyingPrice] = useState(null);
-  const [strikeInterval, setStrikeInterval] = useState(null);
   const [snapshotStrikes, setSnapshotStrikes] = useState([]);
   const listRef = useRef(null);
   const didInitialScroll = useRef(false);
@@ -21,7 +20,6 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
     data: chainData,
     loading: chainLoading,
     error: chainError,
-    strikeCount,
     refresh: refreshChain,
   } = useAuthoritativeOptionChain(symbol, expiry, {
     autoRefresh: true,
@@ -46,14 +44,6 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
       fetchUnderlyingPrice();
     }
   }, [symbol]);
-
-  // Extract strike interval from hook data
-  useEffect(() => {
-    if (chainData?.strike_interval) {
-      setStrikeInterval(chainData.strike_interval);
-      console.log(`📏 [STRADDLE] Strike Interval: ${chainData.strike_interval}`);
-    }
-  }, [chainData?.strike_interval]);
 
   // STRADDLE ATM RULE:
   // Prefer authoritative ATM from cache; fallback to min CE+PE when ATM is missing.

@@ -2,7 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from './components/core/ErrorBoundary';
 import { AppProvider } from './contexts/AppContext';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/core/ProtectedRoute';
 import Layout from './components/core/Layout';
 
@@ -59,6 +59,13 @@ const ScrollToTop = () => {
   return null;
 };
 
+const HomeRedirect = () => {
+  const { user } = useAuth();
+  const role = user?.role;
+  const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+  return <Navigate to={isAdmin ? '/dashboard' : '/options'} replace />;
+};
+
 const App = () => {
   React.useEffect(() => {
     try {
@@ -88,7 +95,7 @@ const App = () => {
               } />
               
               {/* Specific routes first - to avoid conflicts */}
-              <Route path="/users" element={<Layout />}>
+              <Route path="/users" element={<ProtectedRoute requiredRoles={['ADMIN', 'SUPER_ADMIN']}><Layout /></ProtectedRoute>}>
                 <Route index element={
                   <React.Suspense fallback={<LoadingSpinner />}>
                     <Users />
@@ -127,7 +134,7 @@ const App = () => {
               </Route>
               
               <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route index element={<HomeRedirect />} />
                 <Route path="dashboard" element={
                   <React.Suspense fallback={<LoadingSpinner />}>
                     <SuperAdmin />

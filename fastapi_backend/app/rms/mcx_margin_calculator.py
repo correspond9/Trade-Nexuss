@@ -6,21 +6,7 @@ from app.storage.db import SessionLocal
 
 # ---------------- CONFIG ---------------- #
 
-MCX_SPAN_PERCENT = {
-    "CRUDEOIL": 0.12,
-    "NATURALGAS": 0.14,
-    "COPPER": 0.10,
-    "ALUMINIUM": 0.10,
-    "GOLD": 0.09,
-    "GOLDM": 0.09,
-    "SILVER": 0.11,
-    "SILVERM": 0.11
-}
-
-EXPOSURE_PERCENT = 0.05
-
-PRICE_SHOCKS = [-0.12, -0.08, -0.05, 0.05, 0.08, 0.12]
-VOL_SHOCKS = [0.2, 0.4]
+EXPOSURE_PERCENT = 0.0
 
 
 # ---------------- DB ---------------- #
@@ -187,28 +173,16 @@ def _get_lot_size(market_data, symbol, underlying, fallback_lot=1):
     data = _market_lookup(market_data, symbol, underlying)
     lot = data.get("lot_size")
     if not lot:
-        return fallback_lot
+        try:
+            from app.services.span_parameters_service import span_parameters_service
+            return span_parameters_service.get_lot_size(underlying or symbol, fallback=fallback_lot)
+        except Exception:
+            return fallback_lot
     return lot
 
 
 def calculate_futures_margin(positions, market_data):
-    margin = 0
-
-    for p in positions:
-        if p["instrument"] != "FUT":
-            continue
-
-        symbol = p["symbol"]
-        underlying = p["underlying"]
-        ltp = _get_ltp(market_data, symbol, underlying, p["price"])
-        lot = _get_lot_size(market_data, symbol, underlying)
-
-        span_percent = MCX_SPAN_PERCENT.get(underlying or symbol, 0.12)
-
-        contract_value = ltp * lot * abs(p["quantity"])
-        margin += contract_value * span_percent
-
-    return margin
+    return 0
 
 
 # ---------------- LONG OPTION ---------------- #
@@ -218,8 +192,7 @@ def calculate_long_option_margin(positions, market_data):
 
     for p in positions:
         if p["instrument"] == "OPT" and p["quantity"] > 0:
-            lot = _get_lot_size(market_data, p["symbol"], p["underlying"])
-            premium += (p["price"] or 0.0) * lot * abs(p["quantity"])
+            premium += (p["price"] or 0.0) * abs(p["quantity"])
 
     return premium
 
@@ -227,61 +200,40 @@ def calculate_long_option_margin(positions, market_data):
 # ---------------- SHORT OPTION ---------------- #
 
 def calculate_short_option_margin(positions, market_data):
-    margin = 0
-
-    for p in positions:
-        if p["instrument"] != "OPT" or p["quantity"] >= 0:
-            continue
-
-        symbol = p["symbol"]
-        underlying_key = p["underlying"]
-        underlying = _get_ltp(market_data, symbol, underlying_key, p["price"])
-        lot = _get_lot_size(market_data, symbol, underlying_key)
-
-        strike = p["strike"] or 0.0
-        if p["option_type"] == "PE":
-            intrinsic = max(0.0, strike - underlying)
-        else:
-            intrinsic = max(0.0, underlying - strike)
-        base_margin = underlying * 0.15 * lot
-
-        margin += max(base_margin - intrinsic, underlying * 0.1 * lot)
-
-    return margin
+    return 0
 
 
 # ---------------- SHOCK SIMULATION ---------------- #
 
 def simulate_mcx_risk(positions, market_data):
-    worst_loss = 0
-
-    for price_move in PRICE_SHOCKS:
-        for vol_move in VOL_SHOCKS:
-            effective_move = price_move * (1 + vol_move)
-
-            pnl = 0
-
-            for p in positions:
-                symbol = p["symbol"]
-                underlying = p["underlying"]
-                ltp = _get_ltp(market_data, symbol, underlying, p["price"])
-                shocked_price = ltp * (1 + effective_move)
-                lot = _get_lot_size(market_data, symbol, underlying)
-
-                if p["instrument"] == "FUT":
-                    pnl += (shocked_price - (p["price"] or 0.0)) * p["quantity"] * lot
-
-                elif p["instrument"] == "OPT":
-                    strike = p["strike"] or 0.0
-                    if p["option_type"] == "PE":
-                        intrinsic = max(0.0, strike - shocked_price)
-                    else:
-                        intrinsic = max(0.0, shocked_price - strike)
-                    pnl -= intrinsic * lot * abs(p["quantity"])
-
-            worst_loss = min(worst_loss, pnl)
-
-    return abs(worst_loss)
+    try:
+        from app.services.span_parameters_service import span_parameters_service
+    except Exception:
+        return 0
+    arrays = []
+    lots = []
+    for p in positions:
+        if p["instrument"] == "FUT":
+            arr = span_parameters_service.get_mcx_risk_array("FUT", p["underlying"] or p["symbol"], p.get("expiry"), None, None)
+            if arr:
+                arrays.append(arr)
+                lots.append(max(1, int(abs(p["quantity"]) // _get_lot_size(market_data, p["symbol"], p["underlying"], 1))))
+        elif p["instrument"] == "OPT" and p["quantity"] < 0:
+            strike = str(p.get("strike")) if p.get("strike") is not None else None
+            arr = span_parameters_service.get_mcx_risk_array("OPT", p["underlying"] or p["symbol"], p.get("expiry"), strike, p.get("option_type"))
+            if arr:
+                arrays.append(arr)
+                lots.append(max(1, int(abs(p["quantity"]) // _get_lot_size(market_data, p["symbol"], p["underlying"], 1))))
+    if not arrays:
+        return 0
+    worst = 0
+    for i in range(16):
+        s = 0
+        for idx, arr in enumerate(arrays):
+            s += arr[i] * lots[idx]
+        if s > worst:
+            worst = s
+    return worst
 
 
 # ---------------- EXPOSURE ---------------- #
@@ -293,8 +245,7 @@ def calculate_exposure(positions, market_data):
         symbol = p["symbol"]
         underlying = p["underlying"]
         ltp = _get_ltp(market_data, symbol, underlying, p["price"])
-        lot = _get_lot_size(market_data, symbol, underlying)
-        exposure += ltp * lot * abs(p["quantity"]) * EXPOSURE_PERCENT
+        exposure += 0.0
 
     return exposure
 
@@ -314,18 +265,23 @@ def calculate_mcx_margin_for_positions(positions, market_data):
     exposure_margin = calculate_exposure(positions, market_data)
 
     total_margin = (
-        futures_margin
+        0
         + long_option_margin
-        + short_option_margin
+        + 0
         + span_risk
         + exposure_margin
     )
+    total_lots = 0
+    for p in positions:
+        total_lots += max(1, int(abs(p["quantity"]) // _get_lot_size(market_data, p["symbol"], p["underlying"], 1)))
+    per_lot = total_margin / max(1, total_lots)
 
     return {
         "total_margin": max(total_margin, 0),
-        "futures_margin": futures_margin,
+        "futures_margin": 0,
         "long_option_margin": long_option_margin,
-        "short_option_margin": short_option_margin,
+        "short_option_margin": 0,
         "span_risk": span_risk,
-        "exposure_margin": exposure_margin
+        "exposure_margin": exposure_margin,
+        "per_lot_margin": per_lot
     }

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { apiService } from '../services/apiService';
 import { authService } from '../services/authService';
 
@@ -18,6 +18,17 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const initialized = useRef(false);
+
+  // Clear auth data
+  const clearAuth = useCallback(() => {
+    setUser(null);
+    setToken(null);
+    setError(null);
+    initialized.current = false;  // Reset initialization flag
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('authUser');
+    apiService.setAuthToken(null);
+  }, []);
 
   // Initialize auth state from localStorage on mount
   useEffect(() => {
@@ -60,18 +71,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     initAuth();
-  }, []);
-
-  // Clear auth data
-  const clearAuth = useCallback(() => {
-    setUser(null);
-    setToken(null);
-    setError(null);
-    initialized.current = false;  // Reset initialization flag
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('authUser');
-    apiService.setAuthToken(null);
-  }, []);
+  }, [clearAuth]);
 
   // Login function with JWT
   const login = useCallback(async (username, password) => {

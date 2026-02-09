@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { useAppContext } from '../contexts/AppContext';
 import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
 import { CheckCircle, XCircle, Clock } from 'lucide-react';
@@ -8,7 +6,6 @@ import { CheckCircle, XCircle, Clock } from 'lucide-react';
 const Users = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showEntries, setShowEntries] = useState(50);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -16,6 +13,7 @@ const Users = () => {
   const [showAddFundsModal, setShowAddFundsModal] = useState(false);
   const [editForm, setEditForm] = useState(null);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [addFundsForm, setAddFundsForm] = useState({ amount: '', method: '', remarks: '' });
   const [addForm, setAddForm] = useState({
     firstName: '',
     lastName: '',
@@ -23,20 +21,28 @@ const Users = () => {
     role: 'USER',
     status: 'ACTIVE',
     walletBalance: '0',
-    allowedSegments: 'NSE,NFO,BSE,MCX'
+    marginMultiplier: '5',
+    allowedSegments: 'NSE,NFO,BSE,MCX',
+    mobile: '',
+    brokeragePlanId: '',
+    initialPassword: ''
   });
   const [actionError, setActionError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(user?.role);
   const showEditColumn = isAdmin;
   const showRemoveColumn = isAdmin;
+  const [brokeragePlans, setBrokeragePlans] = useState([]);
 
   useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
     loadUsers();
-  }, []);
+    loadBrokeragePlans();
+  }, [isAdmin]);
 
   const loadUsers = async () => {
-    setLoading(true);
     try {
       const response = await apiService.get('/admin/users');
       const data = response?.data || [];
@@ -45,6 +51,7 @@ const Users = () => {
         const firstName = nameParts.shift() || '';
         const lastName = nameParts.join(' ');
         const walletBalanceRaw = Number(u.wallet_balance || 0);
+        const marginMultiplier = Number(u.margin_multiplier ?? 5);
         return {
           id: u.id,
           username: u.username || '',
@@ -54,18 +61,28 @@ const Users = () => {
           role: u.role || 'USER',
           email: u.email || '-',
           createdOn: u.created_at ? new Date(u.created_at).toLocaleDateString('en-IN') : '-',
-          mobile: '',
+          mobile: u.mobile || '-',
           walletBalance: `₹${walletBalanceRaw.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           walletBalanceRaw,
+          marginMultiplier,
           status: u.status || 'PENDING',
-          allowedSegments: u.allowed_segments || 'NSE,NFO,BSE,MCX'
+          allowedSegments: u.allowed_segments || 'NSE,NFO,BSE,MCX',
+          brokeragePlanId: u.brokerage_plan_id || ''
         };
       });
       setUsers(mapped);
     } catch (error) {
       console.error('Error loading users:', error);
-    } finally {
-      setLoading(false);
+    }
+  };
+  
+  const loadBrokeragePlans = async () => {
+    try {
+      const response = await apiService.get('/admin/brokerage-plans');
+      const data = response?.data || [];
+      setBrokeragePlans(data);
+    } catch (error) {
+      console.error('Error loading brokerage plans:', error);
     }
   };
 
@@ -79,13 +96,18 @@ const Users = () => {
       role: user.role || 'USER',
       status: user.status || 'PENDING',
       walletBalance: String(user.walletBalanceRaw ?? 0),
-      allowedSegments: user.allowedSegments || 'NSE,NFO,BSE,MCX'
+      marginMultiplier: String(user.marginMultiplier ?? 5),
+      allowedSegments: user.allowedSegments || 'NSE,NFO,BSE,MCX',
+      mobile: user.mobile || '',
+      brokeragePlanId: user.brokeragePlanId || '',
+      initialPassword: ''
     });
     setShowEditModal(true);
   };
 
   const handleAddFunds = (user) => {
     setSelectedUser(user);
+    setAddFundsForm({ amount: '', method: '', remarks: '' });
     setShowAddFundsModal(true);
   };
 
@@ -93,11 +115,18 @@ const Users = () => {
     setEditForm((prev) => ({ ...(prev || {}), [field]: value }));
   };
 
+  const handleAddFundsChange = (field, value) => {
+    setAddFundsForm((prev) => ({ ...prev, [field]: value }));
+  };
+
   const handleSaveEdit = async () => {
     if (!selectedUser || !editForm) return;
     setActionError(null);
     setActionLoading(true);
     try {
+      if (!editForm.mobile) {
+        throw new Error('Mobile number is required');
+      }
       const username = `${editForm.firstName || ''} ${editForm.lastName || ''}`.trim() || selectedUser.username;
       const payload = {
         username,
@@ -105,7 +134,11 @@ const Users = () => {
         role: editForm.role || 'USER',
         status: editForm.status || 'PENDING',
         allowed_segments: editForm.allowedSegments || 'NSE,NFO,BSE,MCX',
-        wallet_balance: Number(editForm.walletBalance || 0)
+        wallet_balance: Number(editForm.walletBalance || 0),
+        margin_multiplier: Number(editForm.marginMultiplier || 1),
+        mobile: editForm.mobile || null,
+        brokerage_plan_id: editForm.brokeragePlanId ? Number(editForm.brokeragePlanId) : null,
+        initial_password: editForm.initialPassword || null
       };
       await apiService.put(`/admin/users/${selectedUser.id}`, payload);
       await loadUsers();
@@ -131,13 +164,20 @@ const Users = () => {
       if (!username) {
         throw new Error('Username is required');
       }
+      if (!addForm.mobile) {
+        throw new Error('Mobile number is required');
+      }
       const payload = {
         username,
         email: addForm.email || null,
         role: addForm.role || 'USER',
         status: addForm.status || 'ACTIVE',
         allowed_segments: addForm.allowedSegments || 'NSE,NFO,BSE,MCX',
-        wallet_balance: Number(addForm.walletBalance || 0)
+        wallet_balance: Number(addForm.walletBalance || 0),
+        margin_multiplier: Number(addForm.marginMultiplier || 1),
+        mobile: addForm.mobile || null,
+        brokerage_plan_id: addForm.brokeragePlanId ? Number(addForm.brokeragePlanId) : null,
+        initial_password: addForm.initialPassword || null
       };
       await apiService.post('/admin/users', payload);
       await loadUsers();
@@ -149,7 +189,11 @@ const Users = () => {
         role: 'USER',
         status: 'ACTIVE',
         walletBalance: '0',
-        allowedSegments: 'NSE,NFO,BSE,MCX'
+        marginMultiplier: '5',
+        allowedSegments: 'NSE,NFO,BSE,MCX',
+        mobile: '',
+        brokeragePlanId: '',
+        initialPassword: ''
       });
     } catch (error) {
       setActionError(error?.message || 'Failed to create user');
@@ -169,6 +213,39 @@ const Users = () => {
       await loadUsers();
     } catch (error) {
       setActionError(error?.message || 'Failed to remove user');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAddFundsSubmit = async () => {
+    if (!selectedUser) return;
+    const amount = Number(addFundsForm.amount || 0);
+    if (!amount || amount <= 0) {
+      setActionError('Enter a valid amount');
+      return;
+    }
+    setActionError(null);
+    setActionLoading(true);
+    try {
+      const remarkParts = [];
+      if (addFundsForm.method) {
+        remarkParts.push(`Method: ${addFundsForm.method}`);
+      }
+      if (addFundsForm.remarks) {
+        remarkParts.push(addFundsForm.remarks);
+      }
+      await apiService.post('/wallet/payin', {
+        user_id: selectedUser.id,
+        credit: amount,
+        remarks: remarkParts.join(' | ') || 'Admin payin'
+      });
+      await loadUsers();
+      setShowAddFundsModal(false);
+      setSelectedUser(null);
+      setAddFundsForm({ amount: '', method: '', remarks: '' });
+    } catch (error) {
+      setActionError(error?.message || 'Failed to add funds');
     } finally {
       setActionLoading(false);
     }
@@ -199,44 +276,19 @@ const Users = () => {
 
   const paginatedUsers = filteredUsers.slice(0, showEntries);
 
+  if (!isAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Access Denied</h1>
+          <p className="text-gray-600">You do not have permission to access this page.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - Exact replica of straddly.com */}
-      <nav className="bg-white shadow">
-        <div className="mx-auto w-full sm:w-11/12 px-1 sm:px-6 lg:px-8">
-          <div className="relative flex h-16 justify-between">
-            <div className="flex flex-1 items-center justify-center sm:items-stretch sm:justify-start">
-              <div className="flex flex-shrink-0 items-center">
-                <img className="h-8 w-auto" src="/logo.png" alt="straddly.com" />
-              </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                <Link to="/trade" className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-900 hover:text-gray-700">Trade</Link>
-                <Link to="/trade/all-positions" className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700">P. MIS</Link>
-                <Link to="/trade/all-positions-normal" className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700">P. Normal</Link>
-                <Link to="/trade/all-positions-userwise" className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700">P.Userwise</Link>
-                <Link to="/users" className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-900 border-b-2 border-indigo-500">Users</Link>
-                <Link to="/payouts" className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700">Payouts</Link>
-                <Link to="/ledger" className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700">Ledger</Link>
-                <Link to="/trade/pandl" className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700">P&L</Link>
-              </div>
-            </div>
-            <div className="absolute inset-y-0 right-0 flex items-center pr-2 sm:static sm:inset-auto sm:ml-6 sm:pr-0">
-              <button className="flex rounded-full bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-                <span className="sr-only">Open user menu</span>
-                <div className="flex items-center">
-                  <span className="ml-3 block">
-                    <div className="text-base font-medium text-gray-800">Sufyan Ahmed Ansari</div>
-                    <div className="text-xs font-medium text-gray-500">UserId: 7521</div>
-                  </span>
-                  <img className="ml-3 h-8 w-8 rounded-full" src="/user-avatar.png" alt="" />
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* Main Content */}
       <div className="mx-auto w-full sm:w-11/12 px-1 sm:px-6 lg:px-8 py-6">
         <div className="bg-white shadow rounded-lg">
           {/* DataTable Header */}
@@ -295,6 +347,7 @@ const Users = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created On</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mobile</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Wallet Balance</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Margin Multiplier</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   {showEditColumn && (
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
@@ -308,6 +361,7 @@ const Users = () => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {/* Search input row */}
                 <tr className="bg-gray-50">
+                  <td className="px-6 py-2"><input type="text" className="w-full border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Search" /></td>
                   <td className="px-6 py-2"><input type="text" className="w-full border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Search" /></td>
                   <td className="px-6 py-2"><input type="text" className="w-full border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Search" /></td>
                   <td className="px-6 py-2"><input type="text" className="w-full border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Search" /></td>
@@ -333,6 +387,7 @@ const Users = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.createdOn}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.mobile}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.walletBalance}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{Number(user.marginMultiplier || 1).toFixed(2)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">{getStatusBadge(user.status)}</td>
                     {showEditColumn && (
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -358,7 +413,7 @@ const Users = () => {
                 
                 {paginatedUsers.length === 0 && (
                   <tr>
-                    <td colSpan={showEditColumn || showRemoveColumn ? 12 : 10} className="px-6 py-4 text-center text-sm text-gray-500">No matching records found</td>
+                    <td colSpan={showEditColumn || showRemoveColumn ? 13 : 11} className="px-6 py-4 text-center text-sm text-gray-500">No matching records found</td>
                   </tr>
                 )}
               </tbody>
@@ -438,6 +493,17 @@ const Users = () => {
                 />
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700">Margin Multiplier</label>
+                <input
+                  type="number"
+                  value={editForm?.marginMultiplier ?? '1'}
+                  onChange={(e) => handleEditChange('marginMultiplier', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700">Status</label>
                 <select
                   value={editForm?.status ?? 'PENDING'}
@@ -456,6 +522,38 @@ const Users = () => {
                   type="text"
                   value={editForm?.allowedSegments ?? ''}
                   onChange={(e) => handleEditChange('allowedSegments', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Mobile Number (Login ID)</label>
+                <input
+                  type="text"
+                  value={editForm?.mobile ?? ''}
+                  onChange={(e) => handleEditChange('mobile', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Brokerage Plan</label>
+                <select
+                  value={editForm?.brokeragePlanId ?? ''}
+                  onChange={(e) => handleEditChange('brokeragePlanId', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="">Default</option>
+                  {brokeragePlans.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} (₹{p.flat_fee})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Initial Password</label>
+                <input
+                  type="password"
+                  value={editForm?.initialPassword ?? ''}
+                  onChange={(e) => handleEditChange('initialPassword', e.target.value)}
+                  placeholder="Set initial password (optional)"
                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                 />
               </div>
@@ -544,11 +642,54 @@ const Users = () => {
                 />
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700">Margin Multiplier</label>
+                <input
+                  type="number"
+                  value={addForm.marginMultiplier}
+                  onChange={(e) => handleAddUserChange('marginMultiplier', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700">Allowed Segments</label>
                 <input
                   type="text"
                   value={addForm.allowedSegments}
                   onChange={(e) => handleAddUserChange('allowedSegments', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Mobile Number (Login ID)</label>
+                <input
+                  type="text"
+                  value={addForm.mobile}
+                  onChange={(e) => handleAddUserChange('mobile', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Brokerage Plan</label>
+                <select
+                  value={addForm.brokeragePlanId}
+                  onChange={(e) => handleAddUserChange('brokeragePlanId', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="">Default</option>
+                  {brokeragePlans.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} (₹{p.flat_fee})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Initial Password</label>
+                <input
+                  type="password"
+                  value={addForm.initialPassword}
+                  onChange={(e) => handleAddUserChange('initialPassword', e.target.value)}
+                  placeholder="Set initial password (optional)"
                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                 />
               </div>
@@ -579,13 +720,43 @@ const Users = () => {
             <div className="space-y-4">
               <div><label className="block text-sm font-medium text-gray-700">User</label><input type="text" value={`${selectedUser.firstName} ${selectedUser.lastName}`} className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" readOnly /></div>
               <div><label className="block text-sm font-medium text-gray-700">Current Balance</label><input type="text" value={selectedUser.walletBalance} className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" readOnly /></div>
-              <div><label className="block text-sm font-medium text-gray-700">Amount to Add</label><input type="number" placeholder="Enter amount" className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" /></div>
-              <div><label className="block text-sm font-medium text-gray-700">Payment Method</label><select className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"><option value="">Select payment method</option><option value="bank_transfer">Bank Transfer</option><option value="upi">UPI</option><option value="cash">Cash</option></select></div>
-              <div><label className="block text-sm font-medium text-gray-700">Remarks</label><textarea rows="3" placeholder="Add any remarks..." className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" /></div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Amount to Add</label>
+                <input
+                  type="number"
+                  value={addFundsForm.amount}
+                  onChange={(e) => handleAddFundsChange('amount', e.target.value)}
+                  placeholder="Enter amount"
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Payment Method</label>
+                <select
+                  value={addFundsForm.method}
+                  onChange={(e) => handleAddFundsChange('method', e.target.value)}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="">Select payment method</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="upi">UPI</option>
+                  <option value="cash">Cash</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Remarks</label>
+                <textarea
+                  rows="3"
+                  value={addFundsForm.remarks}
+                  onChange={(e) => handleAddFundsChange('remarks', e.target.value)}
+                  placeholder="Add any remarks..."
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
             </div>
             <div className="flex justify-end space-x-3 mt-6">
               <button onClick={() => setShowAddFundsModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">Cancel</button>
-              <button onClick={() => setShowAddFundsModal(false)} className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">Add Funds</button>
+              <button onClick={handleAddFundsSubmit} className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50" disabled={actionLoading}>Add Funds</button>
             </div>
           </div>
         </div>

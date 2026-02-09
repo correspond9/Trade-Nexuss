@@ -6,3 +6,5 @@ dhanhq
 requests
 apscheduler
 aiohttp
+ruff
+mypy

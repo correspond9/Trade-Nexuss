@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
 
 const PandL = () => {
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [pandlData, setPandlData] = useState([]);
   const [fromDate, setFromDate] = useState('');

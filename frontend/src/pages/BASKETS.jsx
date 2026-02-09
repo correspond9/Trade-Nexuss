@@ -1,39 +1,28 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiService } from '../services/apiService';
+import { useAuth } from '../contexts/AuthContext';
 
 // ---------- Baskets Tab ----------
 const BasketsTab = () => {
+  const { user } = useAuth();
   const [baskets, setBaskets] = useState([]);
-  const [user, setUser] = useState({ id: "admin-1", walletBalance: 250000 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
   const fetchData = useCallback(async () => {
     try {
-      setLoading(true);
-      setError('');
-      
       // Fetch baskets and user data in parallel
-      const [basketsResponse, userResponse] = await Promise.all([
-        apiService.get('/trading/basket-orders'),
-        apiService.get('/admin/users') // Use FastAPI admin users endpoint
+      const params = user?.id ? { user_id: user.id } : {};
+      const [basketsResponse] = await Promise.all([
+        apiService.get('/trading/basket-orders', params)
       ]);
       
       if (basketsResponse && basketsResponse.data) {
         setBaskets(basketsResponse.data);
       }
       
-      if (userResponse && userResponse.data && userResponse.data.length > 0) {
-        setUser(userResponse.data[0]); // Use first user for now
-      }
-      
     } catch (err) {
       console.error('Error fetching baskets data:', err);
       setError('Failed to load baskets');
-    } finally {
-      setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   // Fetch baskets and user data from API
   useEffect(() => {
@@ -55,7 +44,6 @@ const BasketsTab = () => {
     try {
       const basket = baskets.find(b => b.id === basketId);
       if (!basket) {
-        setError('Basket not found');
         return;
       }
 
@@ -75,13 +63,9 @@ const BasketsTab = () => {
       });
 
       if (response) {
-        setError('Basket order executed successfully!');
-        setTimeout(() => setError(''), 3000);
       }
     } catch (err) {
       console.error('Error executing basket:', err);
-      setError('Failed to execute basket order');
-      setTimeout(() => setError(''), 3000);
     }
   };
 
@@ -93,12 +77,8 @@ const BasketsTab = () => {
       // Update local state
       setBaskets((prev) => prev.filter((b) => b.id !== basketId));
       
-      setError('Basket deleted successfully!');
-      setTimeout(() => setError(''), 2000);
     } catch (err) {
       console.error('Error deleting basket:', err);
-      setError('Failed to delete basket');
-      setTimeout(() => setError(''), 2000);
     }
   };
 
@@ -285,8 +265,9 @@ const BasketsTab = () => {
       </div>
       <div style={mainCardStyle}>
         {baskets.map((basket) => {
+          const walletBalance = Number(user?.wallet_balance || user?.walletBalance || 0);
           const canExecute =
-            basket.requiredMargin <= user.walletBalance &&
+            basket.requiredMargin <= walletBalance &&
             basket.requiredMargin > 0;
 
           return (
@@ -302,7 +283,7 @@ const BasketsTab = () => {
                     </span>{" "}
                     | Wallet:{" "}
                     <span style={marginValueStyle}>
-                      {formatMoney(user.walletBalance)}
+                      {formatMoney(walletBalance)}
                     </span>
                   </div>
                   <button

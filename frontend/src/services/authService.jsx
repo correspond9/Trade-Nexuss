@@ -5,7 +5,7 @@ class AuthService {
     this.cache = new Map();
   }
 
-  async login(email, password) {
+  async login(mobile, password) {
     try {
       const response = await fetch(`${this.baseURL}/auth/login`, {
         method: 'POST',
@@ -13,7 +13,7 @@ class AuthService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          email: email,
+          mobile: mobile,
           password: password
         })
       });

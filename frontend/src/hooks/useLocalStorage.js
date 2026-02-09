@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 // Custom hook for localStorage with JSON serialization
 export const useLocalStorage = (key, initialValue) => {
   // Get from local storage then parse stored json or return initialValue
-  const readValue = () => {
+  const readValue = useCallback(() => {
     try {
       const item = window.localStorage.getItem(key);
       return item ? JSON.parse(item) : initialValue;
@@ -11,7 +11,7 @@ export const useLocalStorage = (key, initialValue) => {
       console.warn(`Error reading localStorage key "${key}":`, error);
       return initialValue;
     }
-  };
+  }, [initialValue, key]);
 
   const [storedValue, setStoredValue] = useState(readValue);
 
@@ -46,7 +46,7 @@ export const useLocalStorage = (key, initialValue) => {
     return () => {
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, []);
+  }, [readValue]);
 
   return [storedValue, setValue];
 };

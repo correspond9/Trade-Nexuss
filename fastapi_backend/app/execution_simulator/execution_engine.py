@@ -201,7 +201,12 @@ class ExecutionEngine:
         brokerage = brokerage_plan.flat_fee + (turnover * (brokerage_plan.percent_fee or 0.0))
         brokerage = min(brokerage, brokerage_plan.max_fee or brokerage)
 
-        required_margin = abs(fill_price * fill_qty) * (0.2 if order.product_type == "MIS" else 1.0)
+        multiplier = float(user.margin_multiplier or 5.0)
+        if multiplier <= 0:
+            multiplier = 5.0
+        required_margin = abs(fill_price * fill_qty)
+        if order.product_type == "MIS":
+            required_margin = required_margin / multiplier
         margin.used_margin += required_margin
         margin.available_margin -= required_margin
         margin.updated_at = datetime.utcnow()

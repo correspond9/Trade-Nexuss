@@ -3,8 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Activity, RefreshCw } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
-const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');
-
 const CORE_INSTRUMENTS = [
   { key: 'NIFTY', label: 'NIFTY 50', exchange: 'NSE', badge: 'bg-blue-100 text-blue-700' },
   { key: 'BANKNIFTY', label: 'BANKNIFTY', exchange: 'NSE', badge: 'bg-indigo-100 text-indigo-700' },
@@ -27,88 +25,89 @@ const LiveQuotes = () => {
   );
   const [lastUpdate, setLastUpdate] = useState(null);
   const [dataFlowStatus, setDataFlowStatus] = useState('checking');
+  const [expiryMap, setExpiryMap] = useState({});
 
   useEffect(() => {
-    let ws = null;
-    let reconnectTimeout = null;
-
-    const connectWebSocket = () => {
+    const loadExpiries = async () => {
       try {
-        // Connect to backend on port 8000, not the dev server
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const backendHost = window.location.hostname;
-        const wsUrl = `${protocol}//${backendHost}:8000/ws/prices`;
-        console.log('[LiveQuotes] WebSocket connecting to backend:', wsUrl);
-        
-        ws = new WebSocket(wsUrl);
-
-        ws.onopen = () => {
-          console.log('[LiveQuotes] WebSocket connected to:', wsUrl);
-          setDataFlowStatus('checking');
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const priceData = JSON.parse(event.data);
-            console.log('[LiveQuotes] Received prices:', priceData);
-
-            // Update quotes with new prices
-            setQuotes(prev => {
-              const updated = { ...prev };
-              CORE_INSTRUMENTS.forEach(({ key }) => {
-                if (priceData[key]) {
-                  updated[key] = {
-                    ...updated[key],
-                    price: priceData[key],
-                    status: 'success'
-                  };
-                } else {
-                  updated[key] = {
-                    ...updated[key],
-                    status: 'no_data'
-                  };
-                }
-              });
-              return updated;
-            });
-
-            // Check overall data flow status
-            const activePrices = Object.values(priceData).filter(p => p && typeof p === 'number' && p > 0);
-            setDataFlowStatus(activePrices.length > 0 ? 'active' : 'waiting');
-            setLastUpdate(new Date());
-          } catch (error) {
-            console.error('Error parsing WebSocket message:', error, 'Raw data:', event.data);
-          }
-        };
-
-        ws.onerror = (error) => {
-          console.error('[LiveQuotes] WebSocket error:', error);
-          setDataFlowStatus('error');
-        };
-
-        ws.onclose = () => {
-          console.log('[LiveQuotes] WebSocket disconnected, reconnecting in 2s...');
-          // Reconnect after 2 seconds
-          reconnectTimeout = setTimeout(connectWebSocket, 2000);
-        };
+        const results = await Promise.all(
+          CORE_INSTRUMENTS.map(async ({ key }) => {
+            try {
+              const response = await fetch(`${API_BASE}/options/available/expiries?underlying=${key}`);
+              if (!response.ok) {
+                return [key, null];
+              }
+              const data = await response.json();
+              const expiry = Array.isArray(data?.data) && data.data.length > 0 ? data.data[0] : null;
+              return [key, expiry];
+            } catch {
+              return [key, null];
+            }
+          })
+        );
+        const nextMap = results.reduce((acc, [key, expiry]) => {
+          acc[key] = expiry;
+          return acc;
+        }, {});
+        setExpiryMap(nextMap);
       } catch (error) {
-        console.error('[LiveQuotes] Error connecting WebSocket:', error);
-        setDataFlowStatus('error');
-        reconnectTimeout = setTimeout(connectWebSocket, 2000);
+        console.error('[LiveQuotes] Failed to load expiries:', error);
       }
     };
 
-    connectWebSocket();
+    loadExpiries();
+  }, []);
+
+  useEffect(() => {
+    let intervalId;
+    const fetchPrices = async () => {
+      try {
+        const entries = await Promise.all(
+          CORE_INSTRUMENTS.map(async ({ key }) => {
+            const expiry = expiryMap[key];
+            if (!expiry) {
+              return [key, null];
+            }
+            const response = await fetch(`${API_BASE}/options/live?underlying=${key}&expiry=${expiry}`);
+            if (!response.ok) {
+              return [key, null];
+            }
+            const payload = await response.json();
+            const price = payload?.underlying_ltp;
+            return [key, typeof price === 'number' ? price : null];
+          })
+        );
+
+        setQuotes(prev => {
+          const updated = { ...prev };
+          entries.forEach(([key, price]) => {
+            if (price && price > 0) {
+              updated[key] = { ...updated[key], price, status: 'success' };
+            } else {
+              updated[key] = { ...updated[key], status: 'no_data' };
+            }
+          });
+          return updated;
+        });
+
+        const activeCount = entries.filter(([, price]) => price && price > 0).length;
+        setDataFlowStatus(activeCount > 0 ? 'active' : 'waiting');
+        setLastUpdate(new Date());
+      } catch (error) {
+        console.error('[LiveQuotes] Price fetch error:', error);
+        setDataFlowStatus('error');
+      }
+    };
+
+    fetchPrices();
+    intervalId = setInterval(fetchPrices, 1000);
 
     return () => {
-      if (ws) {
-        ws.close();
-      }
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
+      if (intervalId) {
+        clearInterval(intervalId);
       }
     };
-  }, []);
+  }, [expiryMap]);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -199,11 +198,11 @@ const LiveQuotes = () => {
             </div>
             <div className="text-sm">
               <span className="text-gray-600">Update Frequency: </span>
-              <span className="font-semibold text-blue-600">Real-time (WebSocket)</span>
+              <span className="font-semibold text-blue-600">Polling (1s)</span>
             </div>
           </div>
           <div className="text-xs text-gray-500">
-            Endpoint: /ws/prices | Status: {dataFlowStatus}
+            Endpoint: /api/v2/options/live | Status: {dataFlowStatus}
           </div>
         </div>
       </div>

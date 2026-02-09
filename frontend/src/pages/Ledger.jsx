@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { useAppContext } from '../contexts/AppContext';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
-import { Search, Filter, Download, Calendar, TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, Receipt, FileText, Eye, RefreshCw } from 'lucide-react';
+import { Search, Download, TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, Receipt, FileText, Eye, RefreshCw } from 'lucide-react';
 
 const Ledger = () => {
   const { user } = useAuth();
@@ -15,20 +14,12 @@ const Ledger = () => {
   const [showDetails, setShowDetails] = useState(false);
   const [summary, setSummary] = useState(null);
 
-  useEffect(() => {
-    fetchTransactions();
-    fetchSummary();
-  }, [dateRange, filterType]);
-
-  useEffect(() => {
-    fetchSummary();
-  }, [transactions]);
-
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
     setLoading(true);
     try {
       const params = {};
-      if (user?.id) {
+      const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+      if (user?.id && !isAdmin) {
         params.user_id = user.id;
       }
       const response = await apiService.get('/admin/ledger', params);
@@ -71,12 +62,13 @@ const Ledger = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateRange, filterType, user]);
 
-  const fetchSummary = async () => {
+  const fetchSummary = useCallback(async () => {
     try {
       const params = {};
-      if (user?.id) {
+      const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+      if (user?.id && !isAdmin) {
         params.user_id = user.id;
       }
       const response = await apiService.get('/admin/ledger/summary', params);
@@ -92,7 +84,15 @@ const Ledger = () => {
     } catch (error) {
       console.error('Failed to fetch summary:', error);
     }
-  };
+  }, [transactions.length, user]);
+
+  useEffect(() => {
+    fetchTransactions();
+  }, [fetchTransactions]);
+
+  useEffect(() => {
+    fetchSummary();
+  }, [fetchSummary]);
 
   const filteredTransactions = transactions.filter(transaction =>
     transaction.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||

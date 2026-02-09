@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { apiService } from '../services/apiService';
 import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
+import { useAuth } from '../contexts/AuthContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
 
 const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
+  const { user } = useAuth();
   const [quantity, setQuantity] = useState(1);
   const [orderTypeSelection, setOrderTypeSelection] = useState('Normal');
   const [priceType, setPriceType] = useState('Market');
@@ -261,7 +263,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
     const loadBaskets = async () => {
       try {
         setBasketLoading(true);
-        const response = await apiService.get('/trading/basket-orders');
+        const response = await apiService.get('/trading/basket-orders', user?.id ? { user_id: user.id } : {});
         setBasketOptions(response?.data || []);
       } catch (error) {
         console.error('Failed to load baskets:', error);
@@ -271,7 +273,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
       }
     };
     loadBaskets();
-  }, [isOpen, isBasketOrder]);
+  }, [isOpen, isBasketOrder, user]);
 
   useEffect(() => {
     // Fetch margin when modal opens or inputs change
@@ -287,7 +289,15 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
     const symbol = String(data?.symbol || '').toUpperCase();
     const instrumentType = String(data?.instrumentType || '').toUpperCase();
     if (exchange.includes('MCX')) return 'MCX_COM';
-    if (instrumentType.includes('OPT') || symbol.includes(' CE') || symbol.includes(' PE')) return 'NSE_FNO';
+    const meta = parseOptionMeta(data);
+    if (
+      instrumentType.includes('OPT') ||
+      symbol.includes(' CE') ||
+      symbol.includes(' PE') ||
+      (meta?.optionType && meta?.strike != null)
+    ) {
+      return 'NSE_FNO';
+    }
     return 'NSE_EQ';
   };
 
@@ -337,6 +347,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
+            user_id: user?.id || null,
             scripts,
             include_positions: true,
             include_orders: true,
@@ -347,7 +358,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
         const hasMargin = typeof data?.margin === 'number';
         if (data?.success || hasMargin) {
           setMargin(hasMargin ? data.margin : null);
-          setMarginError(data?.source === 'MOCK' ? 'Live margin unavailable; using fallback.' : '');
+          setMarginError('');
           setAvailableMargin(typeof data?.availableMargin === 'number' ? data.availableMargin : null);
           return;
         }
@@ -359,6 +370,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          user_id: user?.id || null,
           symbol: orderData.symbol,
           exchange_segment: exchangeSegment,
           transaction_type: transactionType,
@@ -380,7 +392,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
       const hasMargin = typeof data?.margin === 'number';
       if (data?.success || hasMargin) {
         setMargin(hasMargin ? data.margin : null);
-        setMarginError(data?.source === 'MOCK' ? 'Live margin unavailable; using fallback.' : '');
+        setMarginError('');
         setAvailableMargin(typeof data?.availableMargin === 'number' ? data.availableMargin : null);
       } else {
         // Keep blank if server fails to fetch margin
@@ -433,10 +445,13 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
       ? Number(limitPrice || orderData?.ltp || 0)
       : 0;
 
-    // Check if sufficient margin is available
-    if (margin != null && availableMargin != null && margin > availableMargin) {
-      setMarginError('Insufficient margin available');
-      return;
+    const marginExceeded = margin != null && availableMargin != null && margin > availableMargin;
+    if (marginExceeded) {
+      const warning = 'Required margin exceeds available margin. Please adjust positions or pay-in for margin call.';
+      setMarginError(warning);
+      window.alert(warning);
+    } else {
+      setMarginError('');
     }
 
     try {
@@ -462,7 +477,10 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
           trailing_jump: parseFloat(trailingJump || 0)
         };
 
-        const response = await apiService.post('/trading/orders', superOrderPayload);
+        const response = await apiService.post('/trading/orders', {
+          user_id: user?.id || null,
+          ...superOrderPayload
+        });
         
         if (response) {
           console.log('Super order placed successfully:', response);
@@ -517,6 +535,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
           }
 
           const response = await apiService.post('/trading/basket-orders', {
+            user_id: user?.id || null,
             name: basketName,
             legs
           });
@@ -541,6 +560,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
               ? 0
               : Number(leg?.ltp ?? resolvedPrice);
             responses.push(await apiService.post('/trading/orders', {
+              user_id: user?.id || null,
               symbol: leg.symbol,
               security_id: leg.security_id || leg.id || null,
               exchange_segment: resolveExchangeSegment(leg),
@@ -562,6 +582,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
         }
 
         const response = await apiService.post('/trading/orders', {
+          user_id: user?.id || null,
           symbol: orderData.symbol,
           security_id: orderData.security_id || orderData.id || null,
           exchange_segment: exchangeSegment,
@@ -949,52 +970,7 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
                 )}
               </div>
 
-              {/* Depth */}
-              <div>
-                <div className="text-[11px] text-gray-600 mb-1">
-                  <span className="font-semibold text-gray-700">Best Bid/Ask:</span>{' '}
-                  <span>Bid {Number(depthData?.bid || orderData?.bid || orderData?.ltp || 0).toFixed(2)}</span>
-                  <span className="mx-1">|</span>
-                  <span>Ask {Number(depthData?.ask || orderData?.ask || orderData?.ltp || 0).toFixed(2)}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDepthOpen((prev) => !prev)}
-                  className="text-xs font-medium text-blue-600 hover:text-blue-700"
-                >
-                  {depthOpen ? 'Hide' : 'Show'} Top 5 Bid/Ask
-                </button>
-                {depthOpen && (
-                  <div className="mt-2 text-[11px] text-gray-600">
-                    {depthLoading && <div>Loading depth...</div>}
-                    {!depthLoading && (!depthData || (!depthData?.bids?.length && !depthData?.asks?.length)) && (
-                      <div>No depth available.</div>
-                    )}
-                    {!depthLoading && depthData && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <div className="font-semibold text-gray-700">Bids</div>
-                          {depthData.bids?.slice(0, 5).map((level, idx) => (
-                            <div key={`bid-${idx}`} className="flex justify-between">
-                              <span>{Number(level.price || 0).toFixed(2)}</span>
-                              <span>{Number(level.qty || 0).toFixed(0)}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-gray-700">Asks</div>
-                          {depthData.asks?.slice(0, 5).map((level, idx) => (
-                            <div key={`ask-${idx}`} className="flex justify-between">
-                              <span>{Number(level.price || 0).toFixed(2)}</span>
-                              <span>{Number(level.qty || 0).toFixed(0)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              {/* Depth removed from Order modal as requested */}
             </div>
           </div>
 

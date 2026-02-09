@@ -5,7 +5,6 @@ import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
 
 const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) => {
   const [underlyingPrice, setUnderlyingPrice] = useState(null);
-  const [strikeInterval, setStrikeInterval] = useState(null);
   const listRef = useRef(null);
   const didInitialScroll = useRef(false);
 
@@ -24,7 +23,6 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
     data: chainData,
     loading: chainLoading,
     error: chainError,
-    strikeCount,
     refresh: refreshChain,
     getATMStrike,
   } = useAuthoritativeOptionChain(symbol, expiry, {
@@ -32,11 +30,11 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
     refreshInterval: 1000, // 1 second real-time updates
   });
 
-  const getLotSize = () => {
+  const lotSize = React.useMemo(() => {
     const configured = getConfiguredLotSize(symbol);
     const fromChain = chainData?.lot_size;
     return fromChain && fromChain > 0 ? fromChain : configured;
-  };
+  }, [symbol, chainData?.lot_size]);
 
   // Fetch underlying price for display
   useEffect(() => {
@@ -60,14 +58,6 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
     }
   }, [symbol]);
 
-  // Extract strike interval from hook data
-  useEffect(() => {
-    if (chainData?.strike_interval) {
-      setStrikeInterval(chainData.strike_interval);
-      console.log(`📏 [OPTIONS] Strike Interval: ${chainData.strike_interval}`);
-    }
-  }, [chainData?.strike_interval]);
-
   // Convert authoritative chain data to strike format
   const strikes = React.useMemo(() => {
     if (!chainData || !chainData.strikes) {
@@ -75,7 +65,6 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
     }
 
     const atmStrike = getATMStrike();
-    const lotSize = getLotSize();
 
     return Object.entries(chainData.strikes)
       .map(([strikeStr, strikeData]) => {
@@ -101,7 +90,7 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
         };
       })
       .sort((a, b) => a.strike - b.strike);
-  }, [chainData, getATMStrike]);
+  }, [chainData, getATMStrike, lotSize]);
 
   const atmStrike = getATMStrike();
 
@@ -169,9 +158,9 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
               ATM: {getATMStrike()}
             </span>
           )}
-          {getLotSize() && (
+          {lotSize && (
             <span className="text-xs text-blue-600 font-medium">
-              Lot: {getLotSize()}
+              Lot: {lotSize}
             </span>
           )}
           {expiry && (

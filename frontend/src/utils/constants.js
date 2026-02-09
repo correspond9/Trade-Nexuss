@@ -1,7 +1,7 @@
 // Application constants
 
 export const APP_CONFIG = {
-  name: 'TradeStraddly',
+  name: 'Trading-Nexuss',
   version: '2.0.0',
   description: 'Professional Trading Platform',
 };

@@ -6,12 +6,7 @@ from app.storage.db import SessionLocal
 
 # ---------------- CONFIG ---------------- #
 
-SPAN_PERCENT_INDEX = 0.12
-SPAN_PERCENT_STOCK = 0.15
-EXPOSURE_PERCENT = 0.05
-
-PRICE_SHOCKS = [-0.05, -0.03, 0.03, 0.05]
-VOL_SHOCKS = [0.1, 0.2]
+EXPOSURE_PERCENT_DEFAULT = 0.05
 
 
 # ---------------- UTILS ---------------- #
@@ -204,30 +199,16 @@ def _get_lot_size(market_data, symbol, underlying, fallback_lot=1):
     data = _market_lookup(market_data, symbol, underlying)
     lot = data.get("lot_size")
     if not lot:
-        return fallback_lot
+        try:
+            from app.services.span_parameters_service import span_parameters_service
+            return span_parameters_service.get_lot_size(underlying or symbol, fallback=fallback_lot)
+        except Exception:
+            return fallback_lot
     return lot
 
 
 def calculate_futures_margin(portfolio, market_data):
-    total_margin = 0
-
-    for fut in portfolio["futures"]:
-        symbol = fut["symbol"]
-        underlying = fut["underlying"]
-        ltp = _get_ltp(market_data, symbol, underlying, fut["price"])
-        lot = _get_lot_size(market_data, symbol, underlying)
-
-        position_value = ltp * lot * abs(fut["quantity"])
-
-        if "NIFTY" in (underlying or symbol) or "BANK" in (underlying or symbol):
-            span_percent = SPAN_PERCENT_INDEX
-        else:
-            span_percent = SPAN_PERCENT_STOCK
-
-        margin = position_value * span_percent
-        total_margin += margin
-
-    return total_margin
+    return 0
 
 
 # ---------------- OPTION BUYING ---------------- #
@@ -236,8 +217,7 @@ def calculate_long_option_margin(portfolio, market_data):
     premium = 0
 
     for opt in portfolio["long_options"]:
-        lot = _get_lot_size(market_data, opt["symbol"], opt["underlying"])
-        premium += (opt["price"] or 0.0) * lot * abs(opt["quantity"])
+        premium += (opt["price"] or 0.0) * abs(opt["quantity"])
 
     return premium
 
@@ -246,62 +226,63 @@ def calculate_long_option_margin(portfolio, market_data):
 
 def calculate_short_option_margin(portfolio, market_data):
     margin = 0
-
     for opt in portfolio["short_options"]:
         symbol = opt["symbol"]
         underlying = opt["underlying"]
         underlying_price = _get_ltp(market_data, symbol, underlying, opt["price"])
-        lot = _get_lot_size(market_data, symbol, underlying)
-
-        risk_percent = 0.15
+        try:
+            from app.services.span_parameters_service import span_parameters_service
+            risk_percent = span_parameters_service.get_short_option_addon(underlying or symbol, fallback=0.15)
+        except Exception:
+            risk_percent = 0.15
         strike = opt["strike"] or 0.0
         if opt["option_type"] == "PE":
             otm = max(0.0, underlying_price - strike)
         else:
             otm = max(0.0, strike - underlying_price)
-
-        short_margin = (underlying_price * risk_percent * lot) - otm
-        margin += max(short_margin, underlying_price * 0.08 * lot)
-
+        qty = abs(opt["quantity"])
+        short_margin = (underlying_price * risk_percent * qty) - (otm * qty)
+        margin += max(short_margin, underlying_price * 0.08 * qty)
     return margin
 
 
 # ---------------- RISK ARRAY SIMULATION ---------------- #
 
 def simulate_portfolio_risk(portfolio, market_data):
-    worst_loss = 0
-
-    for price_move in PRICE_SHOCKS:
-        for vol_move in VOL_SHOCKS:
-            effective_move = price_move * (1 + vol_move)
-            pnl = 0
-
-            for fut in portfolio["futures"]:
-                symbol = fut["symbol"]
-                underlying = fut["underlying"]
-                ltp = _get_ltp(market_data, symbol, underlying, fut["price"])
-                shocked_price = ltp * (1 + effective_move)
-
-                lot = _get_lot_size(market_data, symbol, underlying)
-                pnl += (shocked_price - (fut["price"] or 0.0)) * fut["quantity"] * lot
-
-            for opt in portfolio["short_options"]:
-                symbol = opt["symbol"]
-                underlying = opt["underlying"]
-                ltp = _get_ltp(market_data, symbol, underlying, opt["price"])
-                shocked_price = ltp * (1 + effective_move)
-
-                strike = opt["strike"] or 0.0
-                if opt["option_type"] == "PE":
-                    intrinsic = max(0.0, strike - shocked_price)
-                else:
-                    intrinsic = max(0.0, shocked_price - strike)
-                lot = _get_lot_size(market_data, symbol, underlying)
-                pnl -= intrinsic * lot * abs(opt["quantity"])
-
-            worst_loss = min(worst_loss, pnl)
-
-    return abs(worst_loss)
+    try:
+        from app.services.span_parameters_service import span_parameters_service
+    except Exception:
+        return 0
+    arrays = []
+    lots = []
+    for fut in portfolio["futures"]:
+        symbol = fut["symbol"]
+        underlying = fut["underlying"]
+        expiry = fut.get("expiry")
+        arr = span_parameters_service.get_equity_risk_array("FUT", underlying or symbol, expiry, None, None)
+        if arr:
+            arrays.append(arr)
+            lots.append(max(1, int(abs(fut["quantity"]) // _get_lot_size(market_data, symbol, underlying, 1))))
+    for opt in portfolio["short_options"]:
+        symbol = opt["symbol"]
+        underlying = opt["underlying"]
+        expiry = opt.get("expiry")
+        strike = str(opt.get("strike")) if opt.get("strike") is not None else None
+        opt_type = opt.get("option_type")
+        arr = span_parameters_service.get_equity_risk_array("OPT", underlying or symbol, expiry, strike, opt_type)
+        if arr:
+            arrays.append(arr)
+            lots.append(max(1, int(abs(opt["quantity"]) // _get_lot_size(market_data, symbol, underlying, 1))))
+    if not arrays:
+        return 0
+    worst = 0
+    for i in range(16):
+        s = 0
+        for idx, arr in enumerate(arrays):
+            s += arr[i] * lots[idx]
+        if s > worst:
+            worst = s
+    return worst
 
 
 # ---------------- SPREAD BENEFIT ---------------- #
@@ -329,8 +310,12 @@ def calculate_exposure_margin(portfolio, market_data):
         symbol = fut["symbol"]
         underlying = fut["underlying"]
         ltp = _get_ltp(market_data, symbol, underlying, fut["price"])
-        lot = _get_lot_size(market_data, symbol, underlying)
-        exposure += ltp * lot * abs(fut["quantity"]) * EXPOSURE_PERCENT
+        try:
+            from app.services.nse_reports_service import nse_reports_service
+            percent = nse_reports_service.get_exposure_percent(underlying or symbol, default_percent=EXPOSURE_PERCENT_DEFAULT)
+        except Exception:
+            percent = EXPOSURE_PERCENT_DEFAULT
+        exposure += (ltp * abs(fut["quantity"]) * percent)
 
     return exposure
 
@@ -361,6 +346,12 @@ def calculate_span_margin_for_positions(positions, market_data):
         + exposure_margin
         - hedge_benefit
     )
+    total_lots = 0
+    for fut in portfolio["futures"]:
+        total_lots += max(1, int(abs(fut["quantity"]) // _get_lot_size(market_data, fut["symbol"], fut["underlying"], 1)))
+    for opt in portfolio["short_options"]:
+        total_lots += max(1, int(abs(opt["quantity"]) // _get_lot_size(market_data, opt["symbol"], opt["underlying"], 1)))
+    per_lot = total_margin / max(1, total_lots)
 
     return {
         "total_margin": max(total_margin, 0),
@@ -369,5 +360,6 @@ def calculate_span_margin_for_positions(positions, market_data):
         "short_option_margin": short_option_margin,
         "span_risk": span_risk,
         "exposure_margin": exposure_margin,
-        "hedge_benefit": hedge_benefit
+        "hedge_benefit": hedge_benefit,
+        "per_lot_margin": per_lot
     }

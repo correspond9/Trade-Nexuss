@@ -1,20 +1,17 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiService } from '../services/apiService';
+import { useAuth } from '../contexts/AuthContext';
 
 const PositionsTab = () => {
+  const { user } = useAuth();
   const [positions, setPositions] = useState([]);
   const [selectedOpenIds, setSelectedOpenIds] = useState(new Set());
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [activeUser] = useState({ id: "admin-1", firstName: "Super", walletBalance: 1000000 });
 
   const fetchPositions = useCallback(async () => {
     try {
-      setLoading(true);
-      setError('');
-
-      // NO MOCK DATA - REAL API ONLY
-      const positionsResponse = await apiService.get('/portfolio/positions');
+      const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+      const params = !isAdmin && user?.id ? { user_id: user.id } : {};
+      const positionsResponse = await apiService.get('/portfolio/positions', params);
       if (positionsResponse && positionsResponse.data) {
         const mapped = positionsResponse.data.map((p) => {
           const qty = Number(p.quantity ?? p.qty ?? 0);
@@ -37,14 +34,8 @@ const PositionsTab = () => {
       }
     } catch (err) {
       console.error('Error fetching positions:', err);
-      // In development, don't set error to prevent UI issues
-      if (!import.meta.env.DEV) {
-        setError('Failed to load positions');
-      }
-    } finally {
-      setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   // Fetch live positions from API
   useEffect(() => {

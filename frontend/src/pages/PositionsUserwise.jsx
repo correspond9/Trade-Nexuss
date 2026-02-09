@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
-import { ChevronDown, ChevronRight, TrendingUp, TrendingDown } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 const PositionsUserwise = () => {
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [userPositions, setUserPositions] = useState([]);
   const [expandedUsers, setExpandedUsers] = useState(new Set());

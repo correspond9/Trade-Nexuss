@@ -25,7 +25,6 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
   const {
     autoRefresh = true,
     refreshInterval = 1000, // 1 second default for realtime
-    pollStale = false, // Set to true to keep polling even when data is fresh
   } = options;
 
   // Construct API URL

@@ -13,12 +13,12 @@ export const useAppContext = () => {
 };
 
 export const AppProvider = ({ children }) => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [users, setUsers] = useState([]);
   const [orders, setOrders] = useState([]);
   const [baskets, setBaskets] = useState([]);
   const [positions, setPositions] = useState([]);
-  const [payouts, setPayouts] = useState([]);
+  const [payouts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   

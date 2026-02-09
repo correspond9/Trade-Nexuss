@@ -1,6 +1,5 @@
 // Custom hook for DhanHQ authentication settings
 import { useState, useEffect } from 'react';
-import { authService } from '../services/authService';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
 const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');

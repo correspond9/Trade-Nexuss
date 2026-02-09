@@ -46,7 +46,7 @@ const Header = () => {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <div className="flex items-center">
-            <Link to="/dashboard" className="flex items-center">
+            <Link to={(hasRole('ADMIN') || hasRole('SUPER_ADMIN')) ? '/dashboard' : '/options'} className="flex items-center">
               <img 
                 src="/logo.png" 
                 alt="straddly.com" 
@@ -79,7 +79,7 @@ const Header = () => {
                 {user?.firstName} {user?.lastName}
               </div>
               <div className="text-xs text-gray-500">
-                UserId: {user?.id}
+                Mobile: {user?.mobile || '-'}
               </div>
             </div>
             

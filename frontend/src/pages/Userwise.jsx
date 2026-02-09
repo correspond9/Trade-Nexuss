@@ -1,11 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAppContext } from '../contexts/AppContext';
-import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
-import { Search, Filter, Download, TrendingUp, TrendingDown, DollarSign, BarChart3, PieChart, Activity, Calendar, User, Target, Award } from 'lucide-react';
+import { Search, Download, TrendingUp, TrendingDown, DollarSign, BarChart3, Activity, User, Target } from 'lucide-react';
 
 const Userwise = () => {
-  const { user } = useAuth();
   const { users } = useAppContext();
   const [selectedUser, setSelectedUser] = useState(null);
   const [userStats, setUserStats] = useState(null);
@@ -14,13 +12,10 @@ const Userwise = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
 
-  useEffect(() => {
-    if (selectedUser) {
-      fetchUserStats();
+  const fetchUserStats = useCallback(async () => {
+    if (!selectedUser) {
+      return;
     }
-  }, [selectedUser, dateRange]);
-
-  const fetchUserStats = async () => {
     setLoading(true);
     try {
       const [ordersResponse, positionsResponse] = await Promise.all([
@@ -93,7 +88,13 @@ const Userwise = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedUser]);
+
+  useEffect(() => {
+    if (selectedUser) {
+      fetchUserStats();
+    }
+  }, [selectedUser, dateRange, fetchUserStats]);
 
   const filteredUsers = (users || []).filter(user =>
     user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||

@@ -286,22 +286,27 @@ async def search_active_subscriptions(
     subs = sub_mgr.list_active_subscriptions(tier=tier)
     results = []
 
-    for sub in subs:
-        haystack = " ".join(
-            str(part) for part in [
-                sub.get("token"),
-                sub.get("symbol"),
-                sub.get("expiry"),
-                sub.get("strike"),
-                sub.get("option_type"),
-                sub.get("symbol_canonical")
-            ] if part
-        ).upper()
+    def relevance(sub):
+        sym = (sub.get("symbol") or "").upper()
+        tok = (sub.get("token") or "").upper()
+        if sym == query:
+            return 0
+        if sym.startswith(query):
+            return 1
+        if re.search(rf"\\b{re.escape(query)}\\b", tok):
+            return 2
+        if query in sym:
+            return 3
+        return 99
 
-        if query in haystack:
-            results.append(sub)
-            if len(results) >= limit:
-                break
+    filtered = []
+    for sub in subs:
+        score = relevance(sub)
+        if score < 99:
+            filtered.append((score, sub))
+    filtered.sort(key=lambda x: x[0])
+    for _, sub in filtered[:limit]:
+        results.append(sub)
 
     return {
         "query": q,
@@ -402,15 +407,24 @@ async def search_instruments(
 ):
     """
     Return a list of underlying symbols matching query.
-    Includes F&O eligibility flag to guide UI.
+    Restricted to Tier-A/Tier-B eligible instruments.
     """
     query = q.upper().strip()
-    # Ensure registry loaded (startup does it; this is safe)
     if not REGISTRY.loaded:
         REGISTRY.load()
 
-    # Search over underlying symbol keys
-    underlyings = list(REGISTRY.by_underlying.keys())
+    allowed_indices = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
+    equities = set()
+    try:
+        for r in REGISTRY.get_equity_stocks_nse(limit=2000):
+            sym = (r.get("UNDERLYING_SYMBOL") or r.get("SYMBOL") or "").strip().upper()
+            if sym:
+                equities.add(sym)
+    except Exception:
+        pass
+    allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | equities
+    underlyings = [sym for sym in REGISTRY.by_underlying.keys() if sym.upper() in allowed_symbols]
+
     matched = []
     for sym in underlyings:
         if query in sym.upper():
@@ -434,6 +448,18 @@ async def get_instrument_expiries(symbol: str):
     """
     if not REGISTRY.loaded:
         REGISTRY.load()
+    allowed_indices = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
+    equities = set()
+    try:
+        for r in REGISTRY.get_equity_stocks_nse(limit=2000):
+            sym = (r.get("UNDERLYING_SYMBOL") or r.get("SYMBOL") or "").strip().upper()
+            if sym:
+                equities.add(sym)
+    except Exception:
+        pass
+    allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | equities
+    if symbol.upper() not in allowed_symbols:
+        raise HTTPException(status_code=404, detail="Symbol not allowed")
     expiries = REGISTRY.get_expiries_for_underlying(symbol.upper())
     return {
         "symbol": symbol.upper(),
@@ -469,6 +495,14 @@ async def search_stock_futures_current_next(
     # Candidate symbols = F&O stocks + known indices
     index_symbols = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
     candidates = sorted(set(REGISTRY.f_o_stocks) | index_symbols)
+    index_aliases = {
+        "NIFTY": {"NIFTY", "NIFTY50", "NIFTY 50"},
+        "SENSEX": {"SENSEX", "BSE SENSEX", "SENSEX30", "BSESN"},
+        "BANKNIFTY": {"BANKNIFTY"},
+        "FINNIFTY": {"FINNIFTY"},
+        "MIDCPNIFTY": {"MIDCPNIFTY"},
+        "BANKEX": {"BANKEX"}
+    }
 
     # Tokenize query and drop generic words
     tokens = [t for t in re.split(r"\s+", query) if t]
@@ -480,7 +514,10 @@ async def search_stock_futures_current_next(
             continue
         # Collect expiries that have FUTSTK/FUTIDX instruments only
         expiries = set()
-        records = REGISTRY.by_underlying.get(sym.upper(), [])
+        alias_set = index_aliases.get(sym.upper(), {sym.upper()})
+        records = []
+        for alias in alias_set:
+            records.extend(REGISTRY.by_underlying.get(alias, []))
         for row in records:
             instr = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
             if instr not in {"FUTSTK", "FUTIDX"}:
@@ -751,34 +788,45 @@ async def search_instruments(
     q: str = Query(..., min_length=1),
     limit: int = Query(20, ge=1, le=100)
 ):
-    """Search for instruments by symbol (for watchlist UI)"""
+    """Search for instruments by symbol (restricted to Tier-A/Tier-B universe)"""
     if len(q) < 1:
         return {"results": []}
-    
+    if not REGISTRY.loaded:
+        REGISTRY.load()
+    allowed_indices = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
+    equities = set()
+    try:
+        for r in REGISTRY.get_equity_stocks_nse(limit=2000):
+            sym = (r.get("UNDERLYING_SYMBOL") or r.get("SYMBOL") or "").strip().upper()
+            if sym:
+                equities.add(sym)
+    except Exception:
+        pass
+    allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | equities
     q_upper = q.upper()
     results = []
-    
-    # Search in registry
     for symbol, records in REGISTRY.by_symbol.items():
-        if q_upper in symbol:
+        if symbol.upper() not in allowed_symbols:
+            continue
+        if q_upper in symbol.upper():
             results.append({
                 "symbol": symbol,
                 "count": len(records),
                 "f_o_eligible": REGISTRY.is_f_o_eligible(symbol)
             })
-        
         if len(results) >= limit:
             break
-    
-    return {
-        "query": q,
-        "count": len(results),
-        "results": results
-    }
+    return {"query": q, "count": len(results), "results": results}
 
 @router.get("/instruments/{symbol}/expiries")
 async def get_expiries(symbol: str):
     """Get available expiries for a symbol"""
+    if not REGISTRY.loaded:
+        REGISTRY.load()
+    allowed_indices = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
+    allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices
+    if symbol.upper() not in allowed_symbols:
+        raise HTTPException(status_code=404, detail="Symbol not allowed")
     expiries = REGISTRY.get_expiries_for_symbol(symbol)
     
     return {

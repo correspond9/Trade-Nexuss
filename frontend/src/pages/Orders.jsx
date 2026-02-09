@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { apiService } from '../services/apiService';
+import { useAuth } from '../contexts/AuthContext';
 
 const randomInt = (min, max) =>
   Math.floor(Math.random() * (max - min + 1)) + min;
@@ -43,26 +44,25 @@ const enrichOrder = (o) => {
 
 // ------- Orders Tab -------
 const OrdersTab = () => {
+  const { user } = useAuth();
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [sortConfig, setSortConfig] = useState({
     key: "time",
     direction: "asc",
   });
   const [selectedOrderId, setSelectedOrderId] = useState(null);
 
-  const formatTime = (isoLike) => {
+  const formatTime = useCallback((isoLike) => {
     const date = new Date(isoLike || new Date().toISOString());
     return date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
-  };
+  }, []);
 
-  const formatDateTime = (isoLike) => {
+  const formatDateTime = useCallback((isoLike) => {
     const date = new Date(isoLike || new Date().toISOString());
     return `${date.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" })} ${date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}`;
-  };
+  }, []);
 
-  const mapOrder = (order) => {
+  const mapOrder = useCallback((order) => {
     const createdAt = order.created_at || order.createdAt || order.updated_at || new Date().toISOString();
     const updatedAt = order.updated_at || order.updatedAt || createdAt;
     const qty = Number(order.quantity ?? order.qty ?? 0);
@@ -90,14 +90,13 @@ const OrdersTab = () => {
       exchangeTime: formatDateTime(updatedAt),
       executionTime: formatDateTime(updatedAt)
     });
-  };
+  }, [formatDateTime, formatTime]);
 
   const fetchOrders = useCallback(async () => {
     try {
-      setLoading(true);
-      setError('');
-
-      const response = await apiService.get('/trading/orders');
+      const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+      const params = !isAdmin && user?.id ? { user_id: user.id } : {};
+      const response = await apiService.get('/trading/orders', params);
       if (response && response.data) {
         setOrders(response.data.map(mapOrder));
       } else {
@@ -105,11 +104,8 @@ const OrdersTab = () => {
       }
     } catch (err) {
       console.error('Error fetching orders:', err);
-      setError('Failed to load orders');
-    } finally {
-      setLoading(false);
     }
-  }, []);
+  }, [user, mapOrder]);
 
   // Fetch orders from API
   useEffect(() => {
@@ -294,7 +290,7 @@ const OrdersTab = () => {
     return <span style={{ ...base, backgroundImage: bg }}>{side}</span>;
   };
 
-  const orderTypeBadge = (productType) => ({
+  const orderTypeBadge = () => ({
     borderRadius: "999px",
     padding: "2px 10px",
     fontSize: "10px",

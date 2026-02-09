@@ -1,0 +1,14 @@
+{
+  "name": "straddly-reformatted",
+  "version": "1.0.0",
+  "description": "Better formatted version of Straddly project",
+  "main": "index.js",
+  "scripts": {
+    "start": "vite src",
+    "build": "vite build src",
+    "migrate": "node tools/migrate.js"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

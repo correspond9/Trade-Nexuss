@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiService } from '../services/apiService';
 import { useCache } from './useLocalStorage';
 
@@ -65,12 +65,14 @@ export const useApi = (endpoint, options = {}) => {
     }
   }, [endpoint, params, cache, cacheTTL, getCached, setCached, onSuccess, onError]);
 
+  const effectDeps = useMemo(() => [fetchData, immediate, ...dependencies], [fetchData, immediate, dependencies]);
+
   // Auto-fetch on mount and when dependencies change
   useEffect(() => {
     if (immediate) {
       fetchData();
     }
-  }, [fetchData, immediate, ...dependencies]);
+  }, effectDeps);
 
   const refetch = useCallback((newParams = {}) => {
     return fetchData({ ...params, ...newParams });
@@ -400,7 +402,7 @@ export const useInfiniteScroll = (endpoint, options = {}) => {
     } else if (data.length === 0) {
       loadMore();
     }
-  }, []);
+  }, [data.length, initialData, loadMore]);
 
   return {
     data,

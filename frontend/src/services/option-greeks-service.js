@@ -182,7 +182,6 @@ class OptionGreeksService {
       throw new Error(`Invalid month: ${month}`);
     }
 
-    const currentYear = new Date().getFullYear();
     const fullYear = parseInt(year) + (parseInt(year) > 50 ? 1900 : 2000);
     const expiryDate = new Date(fullYear, monthNum, parseInt(day));
     
@@ -293,6 +292,7 @@ class OptionGreeksService {
 
   async getUnderlyingPrice(symbol, exchange) {
     try {
+      void exchange;
       const dhanClient = createDhanApiClient();
       const response = await dhanClient.get(`/market-data/quotes/${symbol}`);
       return response.data.ltp || response.data.last_price;
@@ -304,6 +304,7 @@ class OptionGreeksService {
 
   async getOptionPrice(symbol, exchange) {
     try {
+      void exchange;
       const dhanClient = createDhanApiClient();
       const response = await dhanClient.get(`/market-data/quotes/${symbol}`);
       return response.data.ltp || response.data.last_price;

@@ -676,7 +676,9 @@ class ApiService {
         if (mock && (Array.isArray(mock) ? mock.length : mock.data)) {
           return mock;
         }
-      } catch {}
+      } catch (error) {
+        console.warn('Mock optionchain fallback failed:', error);
+      }
     }
     const cacheKey = `${endpoint}?${JSON.stringify(params)}`;
 

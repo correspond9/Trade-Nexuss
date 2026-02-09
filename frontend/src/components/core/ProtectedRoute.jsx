@@ -2,7 +2,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
-const ProtectedRoute = ({ children, requiredRole = null }) => {
+const ProtectedRoute = ({ children, requiredRole = null, requiredRoles = null }) => {
   const { isAuthenticated, loading, user } = useAuth();
   const location = useLocation();
 
@@ -21,7 +21,10 @@ const ProtectedRoute = ({ children, requiredRole = null }) => {
   }
 
   // Check role requirements
-  if (requiredRole && user?.role !== requiredRole) {
+  const role = user?.role || null;
+  const allowedByList = Array.isArray(requiredRoles) ? requiredRoles.includes(role) : true;
+  const allowedBySingle = requiredRole ? role === requiredRole : true;
+  if (!allowedByList || !allowedBySingle) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">

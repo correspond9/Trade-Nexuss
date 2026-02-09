@@ -8,19 +8,19 @@ from sqlalchemy.orm import Session
 
 from app.storage.db import SessionLocal
 from app.storage import models
+from app.users.passwords import hash_password
 from app.market.live_prices import get_prices
 from app.rms.kill_switch import blocked as kill_switch_blocked
 from app.execution_simulator import get_execution_engine
 from app.rms.span_margin_calculator import (
-    calculate_span_margin_for_positions,
     fetch_user_positions as fetch_fno_positions,
     position_from_order as span_position_from_order,
 )
 from app.rms.mcx_margin_calculator import (
-    calculate_mcx_margin_for_positions,
     fetch_mcx_positions,
     position_from_order as mcx_position_from_order,
 )
+from app.services.dhan_margin_service import dhan_margin_service
 
 router = APIRouter(tags=["mock-exchange"])
 EXEC_ENGINE = get_execution_engine()
@@ -56,6 +56,12 @@ def _get_or_create_default_plan(db: Session) -> models.BrokeragePlan:
 
 def _get_or_create_admin(db: Session) -> models.UserAccount:
     admin = db.query(models.UserAccount).filter(models.UserAccount.username == "admin").first()
+    if admin:
+        return admin
+    admin = db.query(models.UserAccount).filter(models.UserAccount.email == "admin@example.com").first()
+    if admin:
+        return admin
+    admin = db.query(models.UserAccount).filter(models.UserAccount.role == "SUPER_ADMIN").first()
     if admin:
         return admin
     plan = _get_or_create_default_plan(db)
@@ -208,7 +214,7 @@ def _build_market_data_for_positions(positions: List[dict]) -> dict:
         if underlying:
             if underlying not in market_data:
                 market_data[underlying] = {}
-            market_data[underlying].setdefault("ltp", _get_ltp(underlying, pos.get("price") or 0.0))
+            market_data[underlying].setdefault("ltp", _get_ltp(underlying, 0.0))
             market_data[underlying].setdefault("lot_size", lot_size)
 
     return market_data
@@ -222,75 +228,90 @@ def _local_margin_for_order(
     quantity: int,
     price: float,
 ) -> Optional[dict]:
-    if _is_mcx_segment(exchange_segment):
-        positions = fetch_mcx_positions(user_id)
-        positions.append(mcx_position_from_order(symbol, exchange_segment, transaction_type, quantity, price))
-        market_data = _build_market_data_for_positions(positions)
-        calc = calculate_mcx_margin_for_positions(positions, market_data)
-        return {
-            "margin": float(calc.get("total_margin") or 0.0),
-            "source": "LOCAL_MCX",
-            "raw": calc,
-        }
-
-    if _is_fno_segment(exchange_segment):
-        positions = fetch_fno_positions(user_id)
-        positions.append(span_position_from_order(symbol, exchange_segment, transaction_type, quantity, price))
-        market_data = _build_market_data_for_positions(positions)
-        calc = calculate_span_margin_for_positions(positions, market_data)
-        return {
-            "margin": float(calc.get("total_margin") or 0.0),
-            "source": "LOCAL_SPAN",
-            "raw": calc,
-        }
-
+    """Fetch margin from Dhan API - NO LOCAL CALCULATION"""
     return None
 
 
 def _local_margin_for_scripts(user_id: int, scripts: List["MarginScript"]) -> Optional[dict]:
-    fno_scripts = [s for s in scripts if _is_fno_segment(s.exchange_segment)]
-    mcx_scripts = [s for s in scripts if _is_mcx_segment(s.exchange_segment)]
-    if not fno_scripts and not mcx_scripts:
+    """Fetch margin from Dhan API - NO LOCAL CALCULATION"""
+    return None
+
+
+async def _dhan_margin_for_order(
+    user_id: int,
+    exchange_segment: Optional[str],
+    symbol: str,
+    transaction_type: str,
+    quantity: int,
+    price: float,
+    product_type: str,
+    security_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Fetch margin from Dhan API with proper rate limiting"""
+    try:
+        # Use the provided security_id or let Dhan API resolve it
+        margin_result = await dhan_margin_service.calculate_margin_single(
+            exchange_segment=exchange_segment or "NSE_EQ",
+            transaction_type=transaction_type or "BUY",
+            quantity=quantity,
+            product_type=product_type or "MIS",
+            security_id=security_id or symbol,
+            price=price
+        )
+        
+        if margin_result and "margin" in margin_result:
+            return {
+                "margin": float(margin_result["margin"]),
+                "source": "DHAN_API",
+                "raw": margin_result
+            }
+        return None
+    except Exception as e:
+        print(f"[MARGIN] Dhan API error: {e}")
         return None
 
-    total_margin = 0.0
-    raw = {}
 
-    if fno_scripts:
-        positions = fetch_fno_positions(user_id)
-        for script in fno_scripts:
-            positions.append(span_position_from_order(
-                script.symbol or "",
-                script.exchange_segment,
-                script.transaction_type,
-                script.quantity,
-                script.price or 0.0,
-            ))
-        market_data = _build_market_data_for_positions(positions)
-        calc = calculate_span_margin_for_positions(positions, market_data)
-        total_margin += float(calc.get("total_margin") or 0.0)
-        raw["span"] = calc
-
-    if mcx_scripts:
-        positions = fetch_mcx_positions(user_id)
-        for script in mcx_scripts:
-            positions.append(mcx_position_from_order(
-                script.symbol or "",
-                script.exchange_segment,
-                script.transaction_type,
-                script.quantity,
-                script.price or 0.0,
-            ))
-        market_data = _build_market_data_for_positions(positions)
-        calc = calculate_mcx_margin_for_positions(positions, market_data)
-        total_margin += float(calc.get("total_margin") or 0.0)
-        raw["mcx"] = calc
-
-    return {
-        "margin": total_margin,
-        "source": "LOCAL_SPAN_MCX",
-        "raw": raw,
-    }
+async def _dhan_margin_for_scripts(user_id: int, scripts: List["MarginScript"]) -> Optional[dict]:
+    """Fetch multi-script margin from Dhan API with proper rate limiting"""
+    try:
+        # Convert scripts to Dhan API format
+        dhan_scripts = []
+        for script in scripts:
+            dhan_script = {
+                "exchangeSegment": script.exchange_segment or "NSE_EQ",
+                "transactionType": script.transaction_type or "BUY",
+                "quantity": int(script.quantity or 0),
+                "productType": script.product_type or "MIS",
+                "securityId": script.security_id or script.symbol,
+                "price": float(script.price or 0.0),
+            }
+            if script.trigger_price is not None:
+                dhan_script["triggerPrice"] = float(script.trigger_price)
+            dhan_scripts.append(dhan_script)
+        
+        if not dhan_scripts:
+            return {
+                "margin": 0.0,
+                "source": "DHAN_API_EMPTY",
+                "raw": {}
+            }
+        
+        margin_result = await dhan_margin_service.calculate_margin_multi(
+            scripts=dhan_scripts,
+            include_positions=True,
+            include_orders=True
+        )
+        
+        if margin_result and "margin" in margin_result:
+            return {
+                "margin": float(margin_result["margin"]),
+                "source": "DHAN_API_MULTI",
+                "raw": margin_result
+            }
+        return None
+    except Exception as e:
+        print(f"[MARGIN] Dhan API multi-script error: {e}")
+        return None
 
 
 def _brokerage_for(db: Session, user: models.UserAccount, turnover: float) -> float:
@@ -305,9 +326,22 @@ def _brokerage_for(db: Session, user: models.UserAccount, turnover: float) -> fl
 
 def _margin_required(price: float, qty: int, product_type: str) -> float:
     notional = abs(price * qty)
-    if product_type == "MIS":
-        return notional * 0.2
     return notional * 1.0
+
+
+def _normalize_margin_multiplier(value: Optional[float]) -> float:
+    try:
+        coerced = float(value)
+    except (TypeError, ValueError):
+        return 5.0
+    return coerced if coerced > 0 else 5.0
+
+
+def _apply_margin_multiplier(required: float, user: models.UserAccount, product_type: Optional[str] = None) -> float:
+    if product_type and str(product_type).upper() != "MIS":
+        return required
+    multiplier = _normalize_margin_multiplier(getattr(user, "margin_multiplier", 5.0))
+    return required / multiplier
 
 
 def _segment_allowed(user: models.UserAccount, exchange_segment: str) -> bool:
@@ -470,20 +504,26 @@ class BasketAppendRequest(BaseModel):
 class UserRequest(BaseModel):
     username: str
     email: Optional[str] = None
+    mobile: Optional[str] = None
+    initial_password: Optional[str] = None
     role: str = "USER"
     status: str = "ACTIVE"
     allowed_segments: Optional[str] = "NSE,NFO,BSE,MCX"
     wallet_balance: float = 0.0
+    margin_multiplier: Optional[float] = 5.0
     brokerage_plan_id: Optional[int] = None
 
 
 class UserUpdateRequest(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
+    mobile: Optional[str] = None
+    initial_password: Optional[str] = None
     role: Optional[str] = None
     status: Optional[str] = None
     allowed_segments: Optional[str] = None
     wallet_balance: Optional[float] = None
+    margin_multiplier: Optional[float] = None
     brokerage_plan_id: Optional[int] = None
 
 
@@ -510,6 +550,10 @@ class BrokeragePlanRequest(BaseModel):
 
 class BasketExecuteRequest(BaseModel):
     basket_id: int
+
+
+class PnlSnapshotRequest(BaseModel):
+    user_id: Optional[int] = None
 
 
 class SquareOffRequest(BaseModel):
@@ -546,6 +590,7 @@ class MarginScript(BaseModel):
 
 
 class MultiMarginRequest(BaseModel):
+    user_id: Optional[int] = 1
     scripts: List[MarginScript]
     include_positions: bool = True
     include_orders: bool = True
@@ -622,9 +667,9 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
     )
     if local_margin and local_margin.get("margin") is not None:
         required = float(local_margin["margin"])
+    required = _apply_margin_multiplier(required, user, req.product_type)
     margin = _get_or_create_margin(db, user.id)
-    if margin.available_margin < required:
-        return _reject_order("INSUFFICIENT_MARGIN")
+    margin_exceeded = margin.available_margin < required
 
     order = models.MockOrder(
         user_id=user.id,
@@ -650,7 +695,10 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(order)
-    return {"data": _serialize(order)}
+    response = {"data": _serialize(order)}
+    if margin_exceeded:
+        response["warning"] = "MARGIN_EXCEEDED"
+    return response
 
 
 @router.post("/orders")
@@ -910,54 +958,44 @@ async def calculate_margin(req: MarginRequest, db: Session = Depends(get_db)):
         except Exception:
             pass
 
-    if security_id and exchange_segment:
-        try:
-            from app.services.dhan_margin_service import dhan_margin_service
-            dhan_response = await dhan_margin_service.calculate_margin_single(
-                exchange_segment=exchange_segment,
-                transaction_type=req.transaction_type or "BUY",
-                quantity=req.quantity,
-                product_type=req.product_type,
-                security_id=security_id,
-                price=price,
-                trigger_price=req.trigger_price,
-            )
-            if dhan_response:
-                total_margin = dhan_response.get("totalMargin")
-                if total_margin is None:
-                    total_margin = dhan_response.get("total_margin")
-                available_balance = dhan_response.get("availableBalance") or dhan_response.get("available_balance")
-                if total_margin is not None:
-                    return {
-                        "margin": float(total_margin),
-                        "availableMargin": float(available_balance) if available_balance is not None else margin.available_margin,
-                        "source": "DHAN",
-                        "raw": dhan_response,
-                    }
-        except Exception:
-            pass
-
-    local_margin = _local_margin_for_order(
+    symbol_for_margin = req.symbol or ""
+    if req.expiry and req.strike is not None and req.option_type:
+        parts = (symbol_for_margin or "").split()
+        if not parts or parts[-1].upper() not in {"CE", "PE"} or len(parts) < 3:
+            try:
+                opt_type = str(req.option_type).upper()
+                underlying = _extract_option_underlying(req.symbol or "")
+                expiry_norm = _normalize_expiry_iso(req.expiry)
+                strike_val = float(req.strike)
+                symbol_for_margin = f"{underlying} {expiry_norm or req.expiry} {strike_val} {opt_type}"
+            except Exception:
+                pass
+    # Fetch margin from Dhan API - NO LOCAL CALCULATION
+    dhan_margin = await _dhan_margin_for_order(
         user_id=user.id,
-        exchange_segment=req.exchange_segment,
-        symbol=req.symbol or "",
+        exchange_segment=exchange_segment or req.exchange_segment,
+        symbol=symbol_for_margin,
         transaction_type=req.transaction_type or "BUY",
         quantity=req.quantity,
         price=price,
+        product_type=req.product_type or "MIS",
+        security_id=security_id
     )
-    if local_margin:
+    
+    if dhan_margin:
+        required = _apply_margin_multiplier(float(dhan_margin.get("margin") or 0.0), user, req.product_type)
         return {
-            "margin": float(local_margin.get("margin") or 0.0),
+            "margin": required,
             "availableMargin": margin.available_margin,
-            "source": local_margin.get("source") or "LOCAL",
-            "raw": local_margin.get("raw"),
+            "source": dhan_margin.get("source") or "DHAN_API",
+            "raw": dhan_margin.get("raw"),
         }
 
-    required = _margin_required(price, req.quantity, req.product_type)
+    # Dhan API failed - no fallback to local calculation
     return {
-        "margin": required,
+        "margin": None,
         "availableMargin": margin.available_margin,
-        "source": "MOCK",
+        "source": "DHAN_API_FAILED",
     }
 
 
@@ -968,176 +1006,116 @@ async def calculate_margin_v2(req: MarginRequest, db: Session = Depends(get_db))
 
 @router.post("/margin/calculate-multi")
 async def calculate_margin_multi(req: MultiMarginRequest, db: Session = Depends(get_db)):
-    user = db.query(models.UserAccount).filter(models.UserAccount.id == 1).first()
-    if not user:
-        user = _get_or_create_admin(db)
-    margin = _get_or_create_margin(db, user.id)
-
-    try:
-        from app.services.dhan_margin_service import dhan_margin_service
-        from app.services.dhan_security_id_mapper import dhan_security_mapper
-
-        if not dhan_security_mapper.security_id_cache:
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = None
-            if loop is None:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            if not loop.is_running():
-                loop.run_until_complete(dhan_security_mapper.load_security_ids())
-
-        scripts = []
-        for script in req.scripts:
-            security_id = script.security_id
-            exchange_segment = script.exchange_segment
-            try:
-                int(str(security_id))
-            except (TypeError, ValueError):
-                security_id = None
-
-            if not security_id and script.expiry and script.strike is not None and script.option_type:
-                opt_type = str(script.option_type).upper()
-                underlying = _extract_option_underlying(script.symbol or "")
-                expiry_norm = _normalize_expiry_iso(script.expiry)
-                token_key = f"{opt_type}_{underlying}_{float(script.strike)}_{expiry_norm or script.expiry}"
-                mapped_id = dhan_security_mapper.get_security_id(token_key)
-                if not mapped_id and expiry_norm:
-                    mapped_id = dhan_security_mapper.get_security_id(
-                        f"{opt_type}_{underlying}_{float(script.strike)}_{script.expiry}"
-                    )
-                if mapped_id:
-                    security_id = str(mapped_id)
-                    option_data = dhan_security_mapper.get_option_data(token_key) or dhan_security_mapper.get_option_data(
-                        f"{opt_type}_{underlying}_{float(script.strike)}_{script.expiry}"
-                    )
-                    if option_data and not exchange_segment:
-                        exchange_segment = option_data.get("segment") or exchange_segment
-
-            if not security_id and script.expiry and script.strike is not None and script.option_type:
-                try:
-                    from app.market.instrument_master.registry import REGISTRY
-                    if not REGISTRY.loaded:
-                        REGISTRY.load()
-                    underlying = _extract_option_underlying(script.symbol or "")
-                    expiry_norm = _normalize_expiry_iso(script.expiry)
-                    for row in REGISTRY.get_by_symbol(underlying):
-                        row_expiry = _normalize_expiry_iso(row.get("SM_EXPIRY_DATE") or row.get("EXPIRY_DATE"))
-                        if expiry_norm and row_expiry != expiry_norm:
-                            continue
-                        row_option = (row.get("OPTION_TYPE") or "").upper()
-                        if row_option != opt_type:
-                            continue
-                        try:
-                            row_strike = float(row.get("STRIKE_PRICE"))
-                        except (TypeError, ValueError):
-                            continue
-                        if abs(row_strike - float(script.strike)) > 1e-6:
-                            continue
-                        row_sec_id = row.get("SECURITY_ID")
-                        if row_sec_id:
-                            security_id = str(row_sec_id).strip()
-                            if not exchange_segment:
-                                row_exch = (row.get("EXCH_ID") or "").strip().upper()
-                                if row_exch == "BSE":
-                                    exchange_segment = "BSE_FNO"
-                                elif row_exch == "NSE":
-                                    exchange_segment = "NSE_FNO"
-                            break
-                except Exception:
-                    pass
-
-            if not security_id:
-                continue
-
-            scripts.append({
-                "exchangeSegment": exchange_segment,
-                "transactionType": script.transaction_type,
-                "quantity": script.quantity,
-                "productType": script.product_type,
-                "securityId": security_id,
-                "price": script.price,
-                "triggerPrice": script.trigger_price,
-            })
-        dhan_response = await dhan_margin_service.calculate_margin_multi(
-            scripts=scripts,
-            include_positions=req.include_positions,
-            include_orders=req.include_orders,
-        )
-        if dhan_response:
-            total_margin = dhan_response.get("total_margin")
-            if total_margin is None:
-                total_margin = dhan_response.get("totalMargin")
-            return {
-                "margin": float(total_margin) if total_margin is not None else None,
-                "availableMargin": margin.available_margin,
-                "source": "DHAN",
-                "raw": dhan_response,
-            }
-    except Exception:
-        pass
-
-    local_margin = _local_margin_for_scripts(user.id, req.scripts)
-    if local_margin:
-        return {
-            "margin": float(local_margin.get("margin") or 0.0),
-            "availableMargin": margin.available_margin,
-            "source": local_margin.get("source") or "LOCAL",
-            "raw": local_margin.get("raw"),
-        }
-
-    required = 0.0
-    for script in req.scripts:
-        required += _margin_required(script.price or 0.0, script.quantity, script.product_type)
-
-    return {
-        "margin": required,
-        "availableMargin": margin.available_margin,
-        "source": "MOCK",
-    }
-
-
-@router.post("/margin/portfolio")
-def portfolio_margin(req: PortfolioMarginRequest, db: Session = Depends(get_db)):
     user = db.query(models.UserAccount).filter(models.UserAccount.id == (req.user_id or 1)).first()
     if not user:
         user = _get_or_create_admin(db)
     margin = _get_or_create_margin(db, user.id)
 
+    # Fetch margin from Dhan API - NO LOCAL CALCULATION
+    dhan_margin = await _dhan_margin_for_scripts(user.id, req.scripts)
+    
+    if dhan_margin:
+        product_types = {str(s.product_type or "MIS").upper() for s in req.scripts}
+        product_type = "MIS" if product_types == {"MIS"} else None
+        required = _apply_margin_multiplier(float(dhan_margin.get("margin") or 0.0), user, product_type)
+        return {
+            "margin": required,
+            "availableMargin": margin.available_margin,
+            "source": dhan_margin.get("source") or "DHAN_API",
+            "raw": dhan_margin.get("raw"),
+        }
+
+    # Dhan API failed - no fallback to local calculation
+    return {
+        "margin": None,
+        "availableMargin": margin.available_margin,
+        "source": "DHAN_API_FAILED",
+    }
+
+
+@router.get("/margin/account")
+def margin_account(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+    user = db.query(models.UserAccount).filter(models.UserAccount.id == (user_id or 1)).first()
+    if not user:
+        user = _get_or_create_admin(db)
+    margin = _get_or_create_margin(db, user.id)
+    return {"data": _serialize(margin)}
+
+
+@router.post("/margin/portfolio")
+async def portfolio_margin(req: PortfolioMarginRequest, db: Session = Depends(get_db)):
+    user = db.query(models.UserAccount).filter(models.UserAccount.id == (req.user_id or 1)).first()
+    if not user:
+        user = _get_or_create_admin(db)
+    margin = _get_or_create_margin(db, user.id)
+
+    # Convert portfolio positions to Dhan API format
     fno_positions = fetch_fno_positions(user.id)
     mcx_positions = fetch_mcx_positions(user.id)
-
-    fno_market_data = _build_market_data_for_positions(fno_positions)
-    mcx_market_data = _build_market_data_for_positions(mcx_positions)
-
-    span_calc = calculate_span_margin_for_positions(fno_positions, fno_market_data) if fno_positions else {
-        "total_margin": 0.0,
-        "futures_margin": 0.0,
-        "option_buy_margin": 0.0,
-        "short_option_margin": 0.0,
-        "span_risk": 0.0,
-        "exposure_margin": 0.0,
-        "hedge_benefit": 0.0,
-    }
-
-    mcx_calc = calculate_mcx_margin_for_positions(mcx_positions, mcx_market_data) if mcx_positions else {
-        "total_margin": 0.0,
-        "futures_margin": 0.0,
-        "long_option_margin": 0.0,
-        "short_option_margin": 0.0,
-        "span_risk": 0.0,
-        "exposure_margin": 0.0,
-    }
-
-    total_margin = float(span_calc.get("total_margin") or 0.0) + float(mcx_calc.get("total_margin") or 0.0)
-
+    
+    # Build scripts list for Dhan API
+    portfolio_scripts = []
+    
+    # Add FNO positions
+    for pos in fno_positions:
+        script = {
+            "exchangeSegment": pos["exchange_segment"] or "NSE_FNO",
+            "transactionType": "BUY" if pos["quantity"] > 0 else "SELL",
+            "quantity": abs(pos["quantity"]),
+            "productType": "MARGIN",  # Portfolio positions are typically NRML
+            "securityId": pos["symbol"],
+            "price": pos["price"],
+        }
+        portfolio_scripts.append(script)
+    
+    # Add MCX positions
+    for pos in mcx_positions:
+        script = {
+            "exchangeSegment": pos["exchange_segment"] or "MCX_COMM",
+            "transactionType": "BUY" if pos["quantity"] > 0 else "SELL",
+            "quantity": abs(pos["quantity"]),
+            "productType": "MARGIN",  # Portfolio positions are typically NRML
+            "securityId": pos["symbol"],
+            "price": pos["price"],
+        }
+        portfolio_scripts.append(script)
+    
+    if not portfolio_scripts:
+        return {
+            "margin": 0.0,
+            "availableMargin": margin.available_margin,
+            "source": "DHAN_API_EMPTY_PORTFOLIO",
+            "span": {"total_margin": 0.0},
+            "mcx": {"total_margin": 0.0},
+        }
+    
+    # Fetch portfolio margin from Dhan API
+    try:
+        margin_result = await dhan_margin_service.calculate_margin_multi(
+            scripts=portfolio_scripts,
+            include_positions=True,
+            include_orders=True
+        )
+        
+        if margin_result and "margin" in margin_result:
+            return {
+                "margin": float(margin_result["margin"]),
+                "availableMargin": margin.available_margin,
+                "source": "DHAN_API_PORTFOLIO",
+                "span": {"total_margin": float(margin_result.get("margin", 0.0))},
+                "mcx": {"total_margin": 0.0},  # Dhan API returns combined margin
+                "raw": margin_result,
+            }
+    except Exception as e:
+        print(f"[MARGIN] Portfolio Dhan API error: {e}")
+    
+    # Dhan API failed - no fallback to local calculation
     return {
-        "margin": total_margin,
+        "margin": None,
         "availableMargin": margin.available_margin,
-        "source": "LOCAL_PORTFOLIO",
-        "span": span_calc,
-        "mcx": mcx_calc,
+        "source": "DHAN_API_PORTFOLIO_FAILED",
+        "span": {"total_margin": 0.0},
+        "mcx": {"total_margin": 0.0},
     }
 
 
@@ -1148,7 +1126,8 @@ def wallet_payin(req: LedgerAdjustRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     _update_ledger(db, user, credit=req.credit, debit=0.0, entry_type="PAYIN", remarks=req.remarks or "Payin")
     margin = _get_or_create_margin(db, user.id)
-    margin.available_margin += req.credit
+    margin.available_margin += req.credit * _normalize_margin_multiplier(user.margin_multiplier)
+    margin.updated_at = datetime.utcnow()
     db.commit()
     return {"status": "ok"}
 
@@ -1160,7 +1139,8 @@ def wallet_payout(req: LedgerAdjustRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
     _update_ledger(db, user, credit=0.0, debit=req.debit, entry_type="PAYOUT", remarks=req.remarks or "Payout")
     margin = _get_or_create_margin(db, user.id)
-    margin.available_margin = max(0.0, margin.available_margin - req.debit)
+    margin.available_margin = max(0.0, margin.available_margin - (req.debit * _normalize_margin_multiplier(user.margin_multiplier)))
+    margin.updated_at = datetime.utcnow()
     db.commit()
     return {"status": "ok"}
 
@@ -1188,6 +1168,8 @@ def list_users(db: Session = Depends(get_db)):
 @router.post("/admin/users")
 def create_user(req: UserRequest, db: Session = Depends(get_db)):
     _get_or_create_admin(db)
+    if not req.mobile:
+        raise HTTPException(status_code=400, detail="Mobile number is required")
     plan_id = req.brokerage_plan_id
     if plan_id is None:
         plan = _get_or_create_default_plan(db)
@@ -1195,16 +1177,28 @@ def create_user(req: UserRequest, db: Session = Depends(get_db)):
     user = models.UserAccount(
         username=req.username,
         email=req.email,
+        mobile=req.mobile,
+        user_id=req.mobile,
         role=req.role,
         status=req.status,
         allowed_segments=req.allowed_segments,
         wallet_balance=req.wallet_balance,
+        margin_multiplier=_normalize_margin_multiplier(req.margin_multiplier),
         brokerage_plan_id=plan_id,
     )
+    if req.initial_password:
+        salt, digest = hash_password(req.initial_password)
+        user.password_salt = salt
+        user.password_hash = digest
+        user.require_password_reset = True
     db.add(user)
     db.commit()
     db.refresh(user)
-    margin = models.MarginAccount(user_id=user.id, available_margin=user.wallet_balance, used_margin=0.0)
+    margin = models.MarginAccount(
+        user_id=user.id,
+        available_margin=(user.wallet_balance or 0.0) * _normalize_margin_multiplier(user.margin_multiplier),
+        used_margin=0.0
+    )
     db.add(margin)
     db.commit()
     return {"data": _serialize(user)}
@@ -1215,10 +1209,16 @@ def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depends(get_
     user = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    margin = _get_or_create_margin(db, user.id)
+    previous_wallet = user.wallet_balance or 0.0
+    previous_multiplier = _normalize_margin_multiplier(user.margin_multiplier)
     if req.username is not None:
         user.username = req.username
     if req.email is not None:
         user.email = req.email
+    if req.mobile is not None:
+        user.mobile = req.mobile
+        user.user_id = req.mobile
     if req.role is not None:
         user.role = req.role
     if req.status is not None:
@@ -1227,11 +1227,39 @@ def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depends(get_
         user.allowed_segments = req.allowed_segments
     if req.wallet_balance is not None:
         user.wallet_balance = req.wallet_balance
+    if req.margin_multiplier is not None:
+        user.margin_multiplier = _normalize_margin_multiplier(req.margin_multiplier)
     if req.brokerage_plan_id is not None:
         user.brokerage_plan_id = req.brokerage_plan_id
+    if req.initial_password:
+        salt, digest = hash_password(req.initial_password)
+        user.password_salt = salt
+        user.password_hash = digest
+        user.require_password_reset = True
+    if req.wallet_balance is not None or req.margin_multiplier is not None:
+        updated_multiplier = _normalize_margin_multiplier(user.margin_multiplier)
+        if req.margin_multiplier is not None:
+            margin.available_margin = max(
+                0.0,
+                (user.wallet_balance or 0.0) * updated_multiplier - (margin.used_margin or 0.0)
+            )
+        elif req.wallet_balance is not None:
+            delta_wallet = (user.wallet_balance or 0.0) - previous_wallet
+            margin.available_margin = max(
+                0.0,
+                margin.available_margin + (delta_wallet * previous_multiplier)
+            )
+        margin.updated_at = datetime.utcnow()
     user.updated_at = datetime.utcnow()
     db.commit()
     return {"data": _serialize(user)}
+
+# List all brokerage plans
+@router.get("/admin/brokerage-plans")
+def list_brokerage_plans(db: Session = Depends(get_db)):
+    _get_or_create_default_plan(db)
+    plans = db.query(models.BrokeragePlan).all()
+    return {"data": [_serialize(p) for p in plans]}
 
 
 @router.delete("/admin/users/{user_id}")
@@ -1280,6 +1308,22 @@ def admin_set_brokerage_plan(user_id: int, req: BrokeragePlanRequest, db: Sessio
     return {"data": _serialize(user)}
 
 
+@router.post("/admin/margins/recalculate")
+def admin_recalculate_margins(db: Session = Depends(get_db)):
+    users = db.query(models.UserAccount).all()
+    updated = 0
+    for user in users:
+        margin = _get_or_create_margin(db, user.id)
+        multiplier = _normalize_margin_multiplier(user.margin_multiplier)
+        wallet = user.wallet_balance or 0.0
+        used = margin.used_margin or 0.0
+        margin.available_margin = max(0.0, (wallet * multiplier) - used)
+        margin.updated_at = datetime.utcnow()
+        updated += 1
+    db.commit()
+    return {"updated": updated}
+
+
 @router.post("/admin/ledger/adjust")
 def adjust_ledger(req: LedgerAdjustRequest, db: Session = Depends(get_db)):
     user = db.query(models.UserAccount).filter(models.UserAccount.id == req.user_id).first()
@@ -1308,6 +1352,41 @@ def ledger_summary(user_id: Optional[int] = None, db: Session = Depends(get_db))
     total_credit = sum(e.credit or 0.0 for e in entries)
     total_debit = sum(e.debit or 0.0 for e in entries)
     return {"data": {"total_credit": total_credit, "total_debit": total_debit}}
+
+
+@router.get("/admin/pnl/snapshots")
+def list_pnl_snapshots(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+    query = db.query(models.PnlSnapshot)
+    if user_id:
+        query = query.filter(models.PnlSnapshot.user_id == user_id)
+    snapshots = query.order_by(models.PnlSnapshot.created_at.desc()).all()
+    return {"data": [_serialize(s) for s in snapshots]}
+
+
+@router.post("/admin/pnl/snapshots")
+def record_pnl_snapshot(req: PnlSnapshotRequest, db: Session = Depends(get_db)):
+    _get_or_create_admin(db)
+    users = db.query(models.UserAccount).all()
+    target_ids = [req.user_id] if req.user_id else [u.id for u in users]
+    results = []
+    for uid in target_ids:
+        positions = db.query(models.MockPosition).filter(models.MockPosition.user_id == uid).all()
+        realized = sum((p.realized_pnl or 0.0) for p in positions)
+        mtm = 0.0
+        for p in positions:
+            ltp = _get_ltp(p.symbol, p.avg_price)
+            mtm += (ltp - (p.avg_price or 0.0)) * (p.quantity or 0)
+        total = realized + mtm
+        snapshot = models.PnlSnapshot(
+            user_id=uid,
+            realized_pnl=realized,
+            mtm=mtm,
+            total_pnl=total
+        )
+        db.add(snapshot)
+        results.append(snapshot)
+    db.commit()
+    return {"data": [_serialize(s) for s in results]}
 
 
 @router.get("/admin/payouts")

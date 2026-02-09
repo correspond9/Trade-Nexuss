@@ -44,14 +44,27 @@ def _ensure_user_accounts_columns():
             return
 
         additions = []
+        ensure_margin_multiplier = False
         if "password_salt" not in existing:
             additions.append("ALTER TABLE user_accounts ADD COLUMN password_salt VARCHAR")
         if "password_hash" not in existing:
             additions.append("ALTER TABLE user_accounts ADD COLUMN password_hash VARCHAR")
+        if "mobile" not in existing:
+            additions.append("ALTER TABLE user_accounts ADD COLUMN mobile VARCHAR")
+        if "user_id" not in existing:
+            additions.append("ALTER TABLE user_accounts ADD COLUMN user_id VARCHAR")
+        if "require_password_reset" not in existing:
+            additions.append("ALTER TABLE user_accounts ADD COLUMN require_password_reset BOOLEAN DEFAULT 0")
+        if "margin_multiplier" not in existing:
+            additions.append("ALTER TABLE user_accounts ADD COLUMN margin_multiplier FLOAT DEFAULT 1.0")
+            ensure_margin_multiplier = True
 
         for stmt in additions:
             conn.execute(text(stmt))
         if additions:
+            conn.commit()
+        if "margin_multiplier" in existing or ensure_margin_multiplier:
+            conn.execute(text("UPDATE user_accounts SET margin_multiplier = 1.0 WHERE margin_multiplier IS NULL"))
             conn.commit()
 
 

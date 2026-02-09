@@ -32,7 +32,7 @@ const StraddlyEmbed = ({ pageKey }) => {
   return (
     <div className="w-full h-screen bg-gray-50">
       <iframe
-        title={`Straddly - ${pageKey}`}
+        title={`Trading-Nexuss - ${pageKey}`}
         src={src}
         className="w-full h-full border-0"
         sandbox="allow-same-origin allow-scripts allow-forms allow-popups"

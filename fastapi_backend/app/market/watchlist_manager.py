@@ -35,7 +35,7 @@ class WatchlistManager:
         user_id: int,
         symbol: str,
         expiry: str,
-        instrument_type: str = "EQUITY",
+        instrument_type: str = "STOCK_OPTION",
         underlying_ltp: Optional[float] = None
     ) -> Dict:
         """
@@ -63,6 +63,32 @@ class WatchlistManager:
                         "success": False,
                         "message": f"{symbol} already in watchlist for {expiry}",
                         "error": "DUPLICATE"
+                    }
+                
+                # Enforce Tier-A/Tier-B-only universe
+                allowed_indices = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
+                equities = set()
+                try:
+                    for r in REGISTRY.get_equity_stocks_nse(limit=2000):
+                        sym = (r.get("UNDERLYING_SYMBOL") or r.get("SYMBOL") or "").strip().upper()
+                        if sym:
+                            equities.add(sym)
+                except Exception:
+                    pass
+                allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | equities
+                if symbol.upper() not in allowed_symbols:
+                    return {
+                        "success": False,
+                        "message": f"{symbol} not allowed in watchlist",
+                        "error": "SYMBOL_NOT_ALLOWED"
+                    }
+                
+                # Allow only EQUITY, STOCK_OPTION, INDEX_OPTION
+                if instrument_type not in ("EQUITY", "STOCK_OPTION", "INDEX_OPTION"):
+                    return {
+                        "success": False,
+                        "message": f"instrument_type {instrument_type} not allowed",
+                        "error": "INSTRUMENT_TYPE_NOT_ALLOWED"
                     }
                 
                 # Get added_order (for LRU eviction)
@@ -145,11 +171,29 @@ class WatchlistManager:
                         "strikes_subscribed": len(strikes) * 2  # CE + PE
                     }
                 
-                else:  # EQUITY
+                else:
+                    # EQUITY on-demand subscription (single token)
+                    token_eq = f"EQUITY_{symbol.upper()}"
+                    success, msg, ws_id = self.sub_mgr.subscribe(
+                        token=token_eq,
+                        symbol=symbol,
+                        expiry=None,
+                        strike=None,
+                        option_type=None,
+                        tier="TIER_A"
+                    )
+                    if not success:
+                        return {
+                            "success": False,
+                            "message": f"Failed to subscribe equity {symbol}",
+                            "error": "SUBSCRIPTION_FAILED"
+                        }
                     return {
                         "success": True,
-                        "message": f"Added {symbol} to watchlist",
-                        "instrument_type": "EQUITY"
+                        "message": f"Added {symbol} equity to watchlist",
+                        "instrument_type": "EQUITY",
+                        "token": token_eq,
+                        "ws_id": ws_id
                     }
             
             except Exception as e:

@@ -92,12 +92,16 @@ class UserAccount(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String, unique=True, nullable=False)
     email = Column(String, unique=True, nullable=True)
+    mobile = Column(String, nullable=True)
+    user_id = Column(String, unique=True, nullable=True)
     password_salt = Column(String, nullable=True)
     password_hash = Column(String, nullable=True)
+    require_password_reset = Column(Boolean, default=False)
     role = Column(String, default="USER")  # USER | ADMIN | SUPER_ADMIN
     status = Column(String, default="ACTIVE")  # ACTIVE | BLOCKED | INACTIVE
     allowed_segments = Column(String, default="NSE,NFO,BSE,MCX")
     wallet_balance = Column(Float, default=0.0)
+    margin_multiplier = Column(Float, default=5.0)
     brokerage_plan_id = Column(Integer, ForeignKey("brokerage_plans.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
@@ -188,6 +192,16 @@ class LedgerEntry(Base):
     debit = Column(Float, default=0.0)
     balance = Column(Float, default=0.0)
     remarks = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PnlSnapshot(Base):
+    __tablename__ = "pnl_snapshots"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("user_accounts.id"), nullable=False)
+    realized_pnl = Column(Float, default=0.0)
+    mtm = Column(Float, default=0.0)
+    total_pnl = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

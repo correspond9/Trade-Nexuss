@@ -1,7 +1,7 @@
 // Unified SuperAdmin Component - Settings + Monitoring in One View
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Settings, Eye, AlertCircle, TrendingUp } from 'lucide-react';
+import { Settings, Eye } from 'lucide-react';
 import { useAuthSettings } from '../hooks/useAuthSettings';
 import SystemMonitoring from '../components/SystemMonitoring';
 
@@ -10,21 +10,24 @@ const SuperAdmin = () => {
   const [marketConfig, setMarketConfig] = useState(null);
   const [mcError, setMcError] = useState(null);
   const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
+  const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');
   
   // Use custom hook for authentication settings
   const {
     localSettings,
     setLocalSettings,
     saved,
-    setSaved,
     loading,
-    setLoading,
     saveSettings,
     switchMode,
   } = useAuthSettings();
 
   // Error state for save operations
   const [saveError, setSaveError] = useState(null);
+  const [uploadMsg, setUploadMsg] = useState('');
+  const [exposureFile, setExposureFile] = useState(null);
+  const [equitySpanFile, setEquitySpanFile] = useState(null);
+  const [commoditySpanFile, setCommoditySpanFile] = useState(null);
 
   // Handle save with error handling
   const handleSave = async () => {
@@ -38,7 +41,7 @@ const SuperAdmin = () => {
     }
   };
 
-  const fetchMarketConfig = async () => {
+  const fetchMarketConfig = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/admin/market-config`);
       const data = await res.json();
@@ -47,7 +50,7 @@ const SuperAdmin = () => {
       setMcError('Failed to load market config');
       setTimeout(() => setMcError(null), 5000);
     }
-  };
+  }, [API_BASE]);
 
   const saveMarketConfig = async () => {
     try {
@@ -82,7 +85,7 @@ const SuperAdmin = () => {
 
   React.useEffect(() => {
     fetchMarketConfig();
-  }, []);
+  }, [fetchMarketConfig]);
 
   const timeInput = (value, onChange) => (
     <input
@@ -465,6 +468,116 @@ const SuperAdmin = () => {
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* NSE File Uploads */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-6 space-y-4">
+                <div className="flex items-center mb-2">
+                  <Settings className="w-5 h-5 text-blue-600 mr-2" />
+                  <h2 className="text-lg font-semibold text-gray-900">NSE Files Upload</h2>
+                </div>
+                {uploadMsg && (
+                  <div className="p-2 bg-green-50 border border-green-200 text-green-700 text-xs rounded">
+                    {uploadMsg}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="border rounded p-4 space-y-2">
+                    <div className="text-sm font-semibold">Equity Exposure CSV</div>
+                    <input type="file" accept=".csv,text/csv" onChange={(e) => setExposureFile(e.target.files?.[0] || null)} />
+                    <button
+                      className="px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+                      onClick={async () => {
+                        if (!exposureFile) return;
+                        const fd = new FormData();
+                        fd.append('file', exposureFile);
+                        const res = await fetch(`${ROOT_BASE}/admin/upload/equity-exposure`, {
+                          method: 'POST',
+                          headers: { 'X-USER': user?.username || '' },
+                          body: fd
+                        });
+                        const ok = res.ok;
+                        if (!ok) {
+                          try {
+                            const err = await res.json();
+                            setUploadMsg(`Upload failed: ${err?.detail || 'error'}`);
+                          } catch {
+                            setUploadMsg('Upload failed');
+                          }
+                        } else {
+                          setUploadMsg('Equity exposure uploaded');
+                        }
+                        setTimeout(() => setUploadMsg(''), 3000);
+                      }}
+                    >
+                      Upload Exposure
+                    </button>
+                  </div>
+                  <div className="border rounded p-4 space-y-2">
+                    <div className="text-sm font-semibold">Equity SPAN Zip</div>
+                    <input type="file" accept=".zip,application/zip" onChange={(e) => setEquitySpanFile(e.target.files?.[0] || null)} />
+                    <button
+                      className="px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+                      onClick={async () => {
+                        if (!equitySpanFile) return;
+                        const fd = new FormData();
+                        fd.append('file', equitySpanFile);
+                        const res = await fetch(`${ROOT_BASE}/admin/upload/equity-span`, {
+                          method: 'POST',
+                          headers: { 'X-USER': user?.username || '' },
+                          body: fd
+                        });
+                        const ok = res.ok;
+                        if (!ok) {
+                          try {
+                            const err = await res.json();
+                            setUploadMsg(`Upload failed: ${err?.detail || 'error'}`);
+                          } catch {
+                            setUploadMsg('Upload failed');
+                          }
+                        } else {
+                          setUploadMsg('Equity SPAN uploaded');
+                        }
+                        setTimeout(() => setUploadMsg(''), 3000);
+                      }}
+                    >
+                      Upload Equity SPAN
+                    </button>
+                  </div>
+                  <div className="border rounded p-4 space-y-2">
+                    <div className="text-sm font-semibold">Commodity SPAN Zip</div>
+                    <input type="file" accept=".zip,application/zip" onChange={(e) => setCommoditySpanFile(e.target.files?.[0] || null)} />
+                    <button
+                      className="px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+                      onClick={async () => {
+                        if (!commoditySpanFile) return;
+                        const fd = new FormData();
+                        fd.append('file', commoditySpanFile);
+                        const res = await fetch(`${ROOT_BASE}/admin/upload/commodity-span`, {
+                          method: 'POST',
+                          headers: { 'X-USER': user?.username || '' },
+                          body: fd
+                        });
+                        const ok = res.ok;
+                        if (!ok) {
+                          try {
+                            const err = await res.json();
+                            setUploadMsg(`Upload failed: ${err?.detail || 'error'}`);
+                          } catch {
+                            setUploadMsg('Upload failed');
+                          }
+                        } else {
+                          setUploadMsg('Commodity SPAN uploaded');
+                        }
+                        setTimeout(() => setUploadMsg(''), 3000);
+                      }}
+                    >
+                      Upload Commodity SPAN
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

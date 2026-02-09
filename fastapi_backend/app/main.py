@@ -27,6 +27,7 @@ from app.schedulers.expiry_refresh_scheduler import get_expiry_scheduler
 from app.schedulers.lot_size_refresh_scheduler import get_lot_size_scheduler
 from app.schedulers.market_aware_cache_scheduler import get_market_aware_cache_scheduler
 from app.schedulers.mock_exchange_scheduler import get_mock_exchange_scheduler
+from app.schedulers.nse_reports_scheduler import get_nse_reports_scheduler
 
 app = FastAPI(title="Data Server Backend")
 
@@ -138,6 +139,14 @@ async def startup():
         print("[STARTUP] ✅ Mock exchange scheduler started")
     except Exception as e:
         print(f"[STARTUP] ⚠️ Failed to start mock exchange scheduler: {e}")
+    
+    print("[STARTUP] Starting NSE reports scheduler (08:30 AM IST daily)...")
+    try:
+        nse_scheduler = get_nse_reports_scheduler()
+        await nse_scheduler.start()
+        print("[STARTUP] ✅ NSE reports scheduler started")
+    except Exception as e:
+        print(f"[STARTUP] ⚠️ Failed to start NSE reports scheduler: {e}")
     
     print("[STARTUP] Starting lifecycle hooks...")
     await on_start()

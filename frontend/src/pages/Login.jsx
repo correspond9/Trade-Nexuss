@@ -8,7 +8,7 @@ const Login = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    username: '',
+    mobile: '',
     password: ''
   });
   const [loading, setLoading] = useState(false);
@@ -26,11 +26,16 @@ const Login = () => {
     setError('');
     setLoading(true);
 
-    const result = await login(formData.username, formData.password);
+    const result = await login(formData.mobile, formData.password);
     
     if (result.success) {
-      // Redirect to dashboard using React Router
-      navigate('/dashboard');
+      const role = result.user?.role;
+      const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+      if (result.user?.require_password_reset) {
+        navigate('/profile');
+      } else {
+        navigate(isAdmin ? '/dashboard' : '/options');
+      }
     } else {
       setError(result.error || 'Login failed');
     }
@@ -59,19 +64,19 @@ const Login = () => {
             )}
 
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-gray-700">
-                Username
+              <label htmlFor="mobile" className="block text-sm font-medium text-gray-700">
+                Mobile Number
               </label>
               <div className="mt-1">
                 <input
-                  id="username"
-                  name="username"
-                  type="text"
+                  id="mobile"
+                  name="mobile"
+                  type="tel"
                   required
-                  value={formData.username}
+                  value={formData.mobile}
                   onChange={handleChange}
                   className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  placeholder="Enter your username"
+                  placeholder="Enter your mobile number"
                 />
               </div>
             </div>

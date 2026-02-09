@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
 import { TrendingUp, TrendingDown, RefreshCw, Filter, Calendar } from 'lucide-react';
 
 const PositionsNormal = () => {
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [positions, setPositions] = useState([]);
   const [sortBy, setSortBy] = useState('UserId(asc)');

@@ -1,12 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { useAppContext } from '../contexts/AppContext';
-import { useAuth } from '../contexts/AuthContext';
+import React, { useCallback, useEffect, useState } from 'react';
 import { apiService } from '../services/apiService';
-import { Search, Filter, Download, DollarSign, Clock, CheckCircle, XCircle, AlertCircle, User, Calendar, TrendingUp, TrendingDown, RefreshCw, Eye, CheckSquare, XSquare } from 'lucide-react';
+import { Search, Download, DollarSign, Clock, CheckCircle, XCircle, TrendingUp, TrendingDown, RefreshCw, Eye, CheckSquare, XSquare } from 'lucide-react';
 
 const Payouts = () => {
-  const { user } = useAuth();
-  const { users } = useAppContext();
   const [payouts, setPayouts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -17,15 +13,7 @@ const Payouts = () => {
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [summary, setSummary] = useState(null);
 
-  useEffect(() => {
-    fetchPayouts();
-  }, [dateRange, filterStatus]);
-
-  useEffect(() => {
-    fetchSummary();
-  }, [payouts]);
-
-  const fetchPayouts = async () => {
+  const fetchPayouts = useCallback(async () => {
     setLoading(true);
     try {
       const [payoutsResponse, usersResponse] = await Promise.all([
@@ -87,9 +75,9 @@ const Payouts = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateRange, filterStatus]);
 
-  const fetchSummary = async () => {
+  const fetchSummary = useCallback(async () => {
     try {
       const totalPayouts = payouts.reduce((sum, p) => sum + (p.amount || 0), 0);
       setSummary({
@@ -109,7 +97,15 @@ const Payouts = () => {
     } catch (error) {
       console.error('Failed to fetch summary:', error);
     }
-  };
+  }, [payouts]);
+
+  useEffect(() => {
+    fetchPayouts();
+  }, [fetchPayouts]);
+
+  useEffect(() => {
+    fetchSummary();
+  }, [fetchSummary]);
 
   const filteredPayouts = payouts.filter(payout =>
     payout.userName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -128,7 +124,7 @@ const Payouts = () => {
     fetchSummary();
   };
 
-  const processPayout = async (payoutId, action, notes = '') => {
+  const processPayout = async (payoutId, action) => {
     try {
       // In real implementation, this would call the API
       // await apiService.post(`/admin/payouts/${payoutId}/process`, { action, notes });

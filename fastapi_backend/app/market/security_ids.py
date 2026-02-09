@@ -24,10 +24,8 @@ _DEFAULT_INDEX_SECURITY_IDS: Dict[str, Dict[str, object]] = {
     "SENSEX": {"security_id": "51", "exchange": EXCHANGE_CODE_IDX},
 }
 
-# Always-on equities we care about irrespective of user watchlists
-_DEFAULT_EQUITY_SECURITY_IDS: Dict[str, Dict[str, object]] = {
-    "RELIANCE": {"security_id": "2885", "exchange": EXCHANGE_CODE_NSE},
-}
+# Always-on equities disabled to enforce Tier-A/Tier-B-only policy
+_DEFAULT_EQUITY_SECURITY_IDS: Dict[str, Dict[str, object]] = {}
 
 # MCX fallback IDs (used only if instrument master auto-resolution fails)
 # Updated to current month (Feb 2026) - Security ID from instrument master

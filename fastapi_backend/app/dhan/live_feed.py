@@ -27,7 +27,7 @@ try:
 except Exception:
     _DhanFeed = None
 
-from app.market.live_prices import update_price
+from app.market.live_prices import update_price, get_price
 from app.market.subscription_manager import SUBSCRIPTION_MGR, _resolve_security_metadata
 from app.market_orchestrator import get_orchestrator
 from app.market.security_ids import (
@@ -485,15 +485,25 @@ def _refresh_subscription_map(subscriptions: Dict[str, Dict[str, object]]):
     _security_id_subscription_map = subscriptions
 
 
+# Cache for expensive operations to avoid repeated calls
+_last_db_load_time = 0
+_last_db_load_ttl = 30  # seconds between DB loads
+_mapper_initialized = False
+
 def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
     """Return desired security targets keyed by security ID."""
     security_targets = {}
     subscription_map = {}
 
     def _ensure_mapper_loaded() -> None:
+        global _mapper_initialized
+        if _mapper_initialized:
+            return
+            
         try:
             from app.services.dhan_security_id_mapper import dhan_security_mapper
             if dhan_security_mapper.security_id_cache:
+                _mapper_initialized = True
                 return
 
             try:
@@ -510,13 +520,21 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
                 return
 
             loop.run_until_complete(dhan_security_mapper.load_security_ids())
+            _mapper_initialized = True
         except Exception:
-            return
+            pass
     
     # ✨ NEW: Include ALL Tier B subscriptions from subscription manager
     try:
-        # ✨ CRITICAL: Load subscriptions from database first
-        SUBSCRIPTION_MGR._load_from_database()
+        # ✨ CRITICAL: Load subscriptions from database first (with caching)
+        global _last_db_load_time
+        current_time = time.time()
+        if current_time - _last_db_load_time < _last_db_load_ttl:
+            # Use cached subscriptions - avoid expensive DB load
+            pass
+        else:
+            SUBSCRIPTION_MGR._load_from_database()
+            _last_db_load_time = current_time
         from app.services.dhan_security_id_mapper import dhan_security_mapper
         _ensure_mapper_loaded()
         
@@ -871,6 +889,9 @@ def on_message_callback(feed, message):
         ltp = _extract_ltp(message)
 
         if ltp is None or ltp == 0:
+            existing_price = get_price(symbol)
+            if existing_price and existing_price > 0:
+                return
             exchange_code = _subscribed_securities.get(sec_id_str, {}).get("exchange")
             last_close = _get_last_close_price(sec_id_str, exchange_code)
             if last_close is not None:
@@ -934,8 +955,14 @@ def sync_subscriptions_with_watchlist():
             desired_ids = set(desired_targets.keys())
             current_ids = set(_subscribed_securities.keys())
             
-            # Subscribe to new securities only when the feed is available
+            # Only sync if there are actual changes
             to_subscribe = desired_ids - current_ids
+            to_unsubscribe = current_ids - desired_ids
+            
+            if not to_subscribe and not to_unsubscribe:
+                return  # No changes - skip expensive operations
+            
+            # Subscribe to new securities only when feed is available
             if to_subscribe and _market_feed:
                 for sec_id in to_subscribe:
                     meta = desired_targets.get(sec_id)
@@ -965,7 +992,6 @@ def sync_subscriptions_with_watchlist():
                         print(f"[WARN] Failed to subscribe {sec_id}: {e}")
             
             # Unsubscribe anything that's no longer desired
-            to_unsubscribe = current_ids - desired_ids
             if to_unsubscribe and _market_feed:
                 for sec_id in to_unsubscribe:
                     sub_meta = _subscribed_securities.get(sec_id) or {}
@@ -1085,6 +1111,14 @@ def start_live_feed():
                 orchestrator.on_connected(1, _market_feed)  # Use WS-1 for the main feed
                 print("[WS-MGR] WebSocket connection marked as active")
                 
+                # Mark connection active in WS manager for admin visibility
+                try:
+                    from app.market.ws_manager import get_ws_manager
+                    ws_mgr = get_ws_manager()
+                    ws_mgr.connect(1, _market_feed)
+                except Exception:
+                    pass
+                
                 # Establish and maintain WebSocket connection once
                 _market_feed.run_forever()
 
@@ -1093,7 +1127,7 @@ def start_live_feed():
                     try:
                         # Phase 4: Periodically sync subscriptions with watchlist
                         sync_counter += 1
-                        if sync_counter >= 100:  # Sync every ~1 second (100 × 10ms)
+                        if sync_counter >= 10000:  # Sync every ~10 seconds (10000 × 1ms)
                             sync_subscriptions_with_watchlist()
                             sync_counter = 0
 
@@ -1102,11 +1136,17 @@ def start_live_feed():
                         if response:
                             on_message_callback(_market_feed, response)
 
-                        time.sleep(0.01)  # 10ms delay
+                        time.sleep(0.001)  # 1ms delay (reduced from 10ms for better latency)
 
                     except Exception as e:
                         print(f"[ERROR] Data fetch error: {e}")
                         print("[WARN] WebSocket connection lost, will reconnect with backoff...")
+                        try:
+                            from app.market.ws_manager import get_ws_manager
+                            ws_mgr = get_ws_manager()
+                            ws_mgr.disconnect(1, error=str(e))
+                        except Exception:
+                            pass
                         _record_connection_attempt(success=False)
                         time.sleep(1)
                         break
@@ -1116,12 +1156,24 @@ def start_live_feed():
                 print("[WARN] Connection rejected - likely due to rate limiting or credentials issue")
                 if "429" in str(e):
                     _trigger_cooldown("HTTP_429")
+                try:
+                    from app.market.ws_manager import get_ws_manager
+                    ws_mgr = get_ws_manager()
+                    ws_mgr.disconnect(1, error=str(e))
+                except Exception:
+                    pass
                 _record_connection_attempt(success=False)
                 time.sleep(5)
             except Exception as e:
                 print(f"[ERROR] Dhan feed crashed: {e}")
                 if "429" in str(e):
                     _trigger_cooldown("HTTP_429")
+                try:
+                    from app.market.ws_manager import get_ws_manager
+                    ws_mgr = get_ws_manager()
+                    ws_mgr.disconnect(1, error=str(e))
+                except Exception:
+                    pass
                 _record_connection_attempt(success=False)
                 time.sleep(5)
     
