@@ -251,12 +251,12 @@ class ExecutionEngine:
 
         qty = fill_qty if order.transaction_type == "BUY" else -fill_qty
         new_qty = position.quantity + qty
-        if position.quantity == 0 or (position.quantity > 0 and qty > 0) or (position.quantity < 0 and qty < 0):
-            total_qty = position.quantity + qty
-            if total_qty != 0:
-                position.avg_price = ((position.avg_price * position.quantity) + (fill_price * qty)) / total_qty
-            position.quantity = total_qty
-        else:
+        
+        # Check if this is a closing transaction (opposite direction)
+        is_closing = (position.quantity > 0 and qty < 0) or (position.quantity < 0 and qty > 0)
+        
+        if is_closing:
+            # This is a closing transaction - calculate closing quantity and PnL
             closing_qty = min(abs(position.quantity), abs(qty))
             pnl = (fill_price - position.avg_price) * closing_qty
             if position.quantity < 0:
@@ -267,7 +267,14 @@ class ExecutionEngine:
                 position.status = "CLOSED"
             else:
                 position.avg_price = fill_price
+        else:
+            # This is adding to position - update average price
+            total_qty = position.quantity + qty
+            if total_qty != 0:
+                position.avg_price = ((position.avg_price * position.quantity) + (fill_price * qty)) / total_qty
+            position.quantity = total_qty
         position.updated_at = ist_now()
+        db.commit()  # Commit position update immediately
 
     def process_new_order(self, db: Session, order: models.MockOrder) -> None:
         exchange = self._exchange_from_segment(order.exchange_segment)
