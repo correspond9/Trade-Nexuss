@@ -8,3 +8,4 @@ apscheduler
 aiohttp
 ruff
 mypy
+python-dotenv
