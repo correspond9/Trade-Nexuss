@@ -2,7 +2,6 @@ from fastapi import FastAPI
 import sys
 
 app = FastAPI(title="Trading Nexus API")
-app.include_router(market_v2_router, prefix="/api")
 
 
 # -----------------------------------------------------
