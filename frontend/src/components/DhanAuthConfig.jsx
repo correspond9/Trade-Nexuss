@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { authService } from '../services/authService';
+import { apiService } from '../services/apiService';
 
 const DhanAuthConfig = () => {
   const [currentMode, setCurrentMode] = useState(null);
@@ -32,13 +33,7 @@ const DhanAuthConfig = () => {
   const fetchCurrentMode = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:8000/api/v2/credentials/active', {
-        headers: authService.getAuthHeaders(),
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch auth mode');
-      
-      const result = await response.json();
+      const result = await apiService.get('/credentials/active');
       if (result.success) {
         setCurrentMode({
           auth_mode: result.data?.auth_mode || 'DAILY_TOKEN',
@@ -59,14 +54,9 @@ const DhanAuthConfig = () => {
   const fetchCredentials = async () => {
     try {
       // Fetch active credentials from backend (unified endpoint)
-      const response = await fetch('http://localhost:8000/api/v2/credentials/active', {
-        headers: authService.getAuthHeaders(),
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.data) {
-          const data = result.data;
+      const result = await apiService.get('/credentials/active');
+      if (result && result.success && result.data) {
+        const data = result.data;
           
           // Update form based on auth mode
           if (data.auth_mode === 'STATIC_IP') {
@@ -155,21 +145,7 @@ const DhanAuthConfig = () => {
         auth_mode: auth_mode
       };
 
-      const response = await fetch('http://localhost:8000/api/v2/credentials/save', {
-        method: 'POST',
-        headers: {
-          ...authService.getAuthHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Save failed');
-      }
-
-      const result = await response.json();
+      const result = await apiService.post('/credentials/save', payload);
       if (result.success) {
         await fetchCurrentMode();
         await fetchCredentials(); // Refresh credentials display
