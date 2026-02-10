@@ -8,8 +8,8 @@ from app.rest.auth import router as auth_router
 from app.rest.settings import router as settings_router
 from app.rest.ws import router as ws_router
 from app.commodity_engine.commodity_rest import router as commodity_router
-
-
+from app.trading.orders import router as orders_router
+from app.trading.positions import router as positions_router
 
 app = FastAPI(title="Trading Nexus API")
 
@@ -42,4 +42,5 @@ app.include_router(credentials_router)
 app.include_router(settings_router)
 app.include_router(ws_router)
 app.include_router(commodity_router)
-
+app.include_router(orders_router)
+app.include_router(positions_router)
