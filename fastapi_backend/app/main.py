@@ -7,7 +7,8 @@ from app.rest.credentials import router as credentials_router
 from app.rest.auth import router as auth_router
 from app.rest.settings import router as settings_router
 from app.rest.ws import router as ws_router
-from app.rest.commodity_rest import router as commodity_router
+from app.commodity_engine.commodity_rest import router as commodity_router
+
 
 
 app = FastAPI(title="Trading Nexus API")
