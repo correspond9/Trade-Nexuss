@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuthoritativeOptionChain } from '../hooks/useAuthoritativeOptionChain';
 import normalizeUnderlying from '../utils/underlying';
+import { apiService } from '../services/apiService';
 import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
 
 const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) => {
@@ -40,13 +41,9 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
   useEffect(() => {
     const fetchPrice = async () => {
       try {
-        const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
-        const response = await fetch(`${baseUrl}/market/underlying-ltp/${symbol}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data.ltp) {
-            setUnderlyingPrice(data.ltp);
-          }
+        const data = await apiService.get(`/market/underlying-ltp/${symbol}`);
+        if (data && (data.ltp || data.data?.ltp)) {
+          setUnderlyingPrice(data.ltp || data.data?.ltp);
         }
       } catch (err) {
         console.warn(`[OPTIONS] Could not fetch underlying price for ${symbol}:`, err);

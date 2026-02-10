@@ -4,6 +4,8 @@
  * Fetches once per day and uses cached data throughout the day
  */
 
+import { apiService } from './apiService';
+
 class MarketDataCache {
   constructor() {
     this.cache = new Map();
@@ -57,14 +59,7 @@ class MarketDataCache {
 
     // Fetch fresh data
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
-      const response = await fetch(`${baseUrl}/options/available/expiries?underlying=${encodeURIComponent(symbol)}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch expiries: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await apiService.get('/options/available/expiries', { underlying: symbol });
       
       // Process the data
       const weeklyExpiries = data.data || [];
@@ -117,44 +112,55 @@ class MarketDataCache {
       'BANKNIFTY': { lotSize: 25, strikeInterval: 100 },
       'SENSEX': { lotSize: 10, strikeInterval: 100 }
     };
-    
+
     // Return cached data if valid
     if (this.isCacheValid(cacheKey)) {
       return this.cache.get(cacheKey).data;
     }
 
-    // Fetch fresh data
+    // Fetch authoritative expiries first (central cache)
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
-      const response = await fetch(`${baseUrl}/instruments/${encodeURIComponent(symbol)}/expiries`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch instrument data: ${response.statusText}`);
+      // Use authoritative option-chain expiries endpoint
+      const expiriesData = await apiService.get('/options/available/expiries', { underlying: symbol });
+      let expiries = Array.isArray(expiriesData?.data) ? expiriesData.data : [];
+
+      // If expiries exist, fetch the option chain for the first expiry to obtain lot_size and strike interval
+      if (expiries && expiries.length > 0) {
+        const expiry = expiries[0];
+        const chainJson = await apiService.get('/options/live', { underlying: symbol, expiry });
+        const chainData = chainJson?.data || {};
+
+        const result = {
+          lotSize: chainData.lot_size || (fallbackData[symbol] || fallbackData['NIFTY']).lotSize,
+          strikeInterval: chainData.strike_interval || (fallbackData[symbol] || fallbackData['NIFTY']).strikeInterval,
+          hasOptions: true,
+          totalInstruments: (chainData.strikes && Object.keys(chainData.strikes).length) || expiries.length,
+          symbol: symbol
+        };
+
+        // Cache and return
+        this.cache.set(cacheKey, { data: result, timestamp: new Date().toISOString() });
+        this.saveCache();
+        return result;
       }
 
-      const data = await response.json();
-      
+      // No expiries or chain fetch failed - fall back to defaults
       const defaults = fallbackData[symbol] || fallbackData['NIFTY'];
       const result = {
         lotSize: defaults.lotSize,
         strikeInterval: defaults.strikeInterval,
-        hasOptions: (data.expiries || []).length > 0,
-        totalInstruments: (data.expiries || []).length,
+        hasOptions: expiries.length > 0,
+        totalInstruments: expiries.length,
         symbol: symbol
       };
 
-      // Cache the result
-      this.cache.set(cacheKey, {
-        data: result,
-        timestamp: new Date().toISOString()
-      });
+      this.cache.set(cacheKey, { data: result, timestamp: new Date().toISOString() });
       this.saveCache();
-
       return result;
-      
+
     } catch (error) {
       console.error('Error fetching instrument data:', error);
-      
+
       // Return fallback data based on symbol
       return {
         ...fallbackData[symbol] || fallbackData['NIFTY'],

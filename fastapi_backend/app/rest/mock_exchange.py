@@ -28,6 +28,10 @@ from app.rms.mcx_margin_calculator import (
     position_from_order as mcx_position_from_order,
 )
 from app.services.dhan_margin_service import dhan_margin_service
+from app.market.watchlist_manager import get_watchlist_manager
+from app.ems.market_config import market_config
+from app.market.live_prices import update_price
+from app.market.market_state import state as market_state
 
 router = APIRouter(tags=["mock-exchange"])
 EXEC_ENGINE = get_execution_engine()
@@ -617,6 +621,33 @@ def list_orders(user_id: Optional[int] = None, db: Session = Depends(get_db)):
         query = query.filter(models.MockOrder.user_id == user_id)
     orders = query.order_by(models.MockOrder.created_at.desc()).all()
     return {"data": [_serialize(o) for o in orders]}
+
+
+# ---------- Watchlist Endpoints (Tier A) ----------
+@router.post("/watchlist/add")
+def api_watchlist_add(payload: dict, db: Session = Depends(get_db)):
+    mgr = get_watchlist_manager()
+    user_id = int(payload.get("user_id", 1))
+    symbol = payload.get("symbol")
+    expiry = payload.get("expiry")
+    instrument_type = payload.get("instrument_type", "STOCK_OPTION")
+    underlying_ltp = payload.get("underlying_ltp")
+    return mgr.add_to_watchlist(user_id=user_id, symbol=symbol, expiry=expiry, instrument_type=instrument_type, underlying_ltp=underlying_ltp)
+
+
+@router.post("/watchlist/remove")
+def api_watchlist_remove(payload: dict, db: Session = Depends(get_db)):
+    mgr = get_watchlist_manager()
+    user_id = int(payload.get("user_id", 1))
+    symbol = payload.get("symbol")
+    expiry = payload.get("expiry")
+    return mgr.remove_from_watchlist(user_id=user_id, symbol=symbol, expiry=expiry)
+
+
+@router.get("/watchlist/{user_id}")
+def api_get_watchlist(user_id: int, db: Session = Depends(get_db)):
+    mgr = get_watchlist_manager()
+    return {"data": mgr.get_user_watchlist(user_id=user_id)}
 
 
 @router.get("/orders")
@@ -1452,3 +1483,43 @@ def adjust_margin(req: MarginAdjustRequest, db: Session = Depends(get_db)):
     margin.updated_at = ist_now()
     db.commit()
     return {"data": _serialize(margin)}
+
+
+@router.post("/admin/market/force")
+def admin_force_market(payload: dict, db: Session = Depends(get_db)):
+    """Force market open/close for an exchange. payload: {exchange: 'NSE', state: 'open'|'close'|'none'}"""
+    ex = payload.get("exchange")
+    state = payload.get("state")
+    if not ex or state not in {"open", "close", "none"}:
+        raise HTTPException(status_code=400, detail="exchange and valid state required")
+    market_config.set_force(ex, state)
+    return {"status": "ok", "exchange": ex, "state": state}
+
+
+@router.post("/admin/price/update")
+def admin_update_price(payload: dict, db: Session = Depends(get_db)):
+    """Update dashboard price for a symbol. payload: {symbol: 'NIFTY', price: 18000.5}"""
+    sym = payload.get("symbol")
+    price = payload.get("price")
+    try:
+        price_f = float(price)
+    except Exception:
+        raise HTTPException(status_code=400, detail="valid price required")
+    if not sym:
+        raise HTTPException(status_code=400, detail="symbol required")
+    update_price(sym, price_f)
+    return {"status": "ok", "symbol": sym, "price": price_f}
+
+
+@router.post("/admin/market/depth")
+def admin_set_depth(payload: dict, db: Session = Depends(get_db)):
+    """Set market depth for a symbol (admin test helper).
+    payload: {symbol: 'RELIANCE', depth: {'bids':[{'price':..,'qty':..}], 'asks':[{'price':..,'qty':..}]}}
+    """
+    sym = payload.get("symbol")
+    depth = payload.get("depth")
+    if not sym or not isinstance(depth, dict):
+        raise HTTPException(status_code=400, detail="symbol and depth required")
+    key = (sym or "").upper().strip()
+    market_state.setdefault("depth", {})[key] = depth
+    return {"status": "ok", "symbol": key, "depth": depth}

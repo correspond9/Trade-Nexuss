@@ -49,3 +49,19 @@ app.include_router(positions_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(mock_exchange_router, prefix=API_PREFIX)
 
+# Backstop admin route for tests: set market depth
+from fastapi import Request
+from app.market.market_state import state as market_state
+
+
+@app.post(API_PREFIX + "/admin/market/depth")
+async def set_market_depth(req: Request):
+    payload = await req.json()
+    sym = payload.get("symbol")
+    depth = payload.get("depth")
+    if not sym or not isinstance(depth, dict):
+        return {"error": "symbol and depth required"}
+    key = (sym or "").upper().strip()
+    market_state.setdefault("depth", {})[key] = depth
+    return {"status": "ok", "symbol": key, "depth": depth}
+

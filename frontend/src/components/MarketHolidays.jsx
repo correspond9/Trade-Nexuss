@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { authService } from '../services/authService';
+import { apiService } from '../services/apiService';
 
 const MarketHolidays = () => {
   const [holidays, setHolidays] = useState([]);
@@ -30,17 +31,11 @@ const MarketHolidays = () => {
   const fetchHolidays = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`http://127.0.0.1:5000/admin/api/holidays?year=${selectedYear}`, {
-        headers: authService.getAuthHeaders(),
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch data');
-      
-      const result = await response.json();
-      if (result.success) {
-        setHolidays(result.data);
+      const result = await apiService.get('/admin/holidays', { year: selectedYear });
+      if (result && result.success) {
+        setHolidays(result.data || []);
       } else {
-        setError(result.error || 'Failed to load data');
+        setError((result && result.error) || 'Failed to load data');
       }
     } catch (err) {
       setError('Failed to load market holidays');
@@ -54,27 +49,13 @@ const MarketHolidays = () => {
     e.preventDefault();
     
     try {
-      const response = await fetch('http://127.0.0.1:5000/admin/api/holidays', {
-        method: 'POST',
-        headers: {
-          ...authService.getAuthHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Operation failed');
-      }
-
-      const result = await response.json();
-      if (result.success) {
+      const result = await apiService.post('/admin/holidays', formData);
+      if (result && result.success) {
         await fetchHolidays();
         resetForm();
         alert(result.message);
       } else {
-        setError(result.error);
+        setError((result && result.error) || 'Operation failed');
       }
     } catch (err) {
       setError(err.message);
@@ -86,19 +67,12 @@ const MarketHolidays = () => {
     if (!confirm(`Are you sure you want to delete holiday: ${description}?`)) return;
 
     try {
-      const response = await fetch(`http://127.0.0.1:5000/admin/api/holidays/${id}`, {
-        method: 'DELETE',
-        headers: authService.getAuthHeaders(),
-      });
-
-      if (!response.ok) throw new Error('Failed to delete');
-
-      const result = await response.json();
-      if (result.success) {
+      const result = await apiService.delete(`/admin/holidays/${id}`);
+      if (result && result.success) {
         await fetchHolidays();
         alert(result.message);
       } else {
-        setError(result.error);
+        setError((result && result.error) || 'Failed to delete');
       }
     } catch (err) {
       setError(err.message);

@@ -98,31 +98,20 @@ const DhanAuthConfig = () => {
       
       // Note: Backend v2 doesn't have dedicated switch endpoint
       // Switching is done by saving new credentials with different auth_mode
-      setError('Switch mode by saving credentials in the target mode');
-      return;
-      
-      const response = await fetch('http://localhost:8000/api/v2/credentials/save', {
-        method: 'POST',
-        headers: {
-          ...authService.getAuthHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ reason: switchReason }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Switch failed');
-      }
-
-      const result = await response.json();
-      if (result.status === 'success') {
-        await fetchCurrentMode();
-        setShowSwitchForm(false);
-        setSwitchReason('');
-        alert(`Successfully switched to ${targetMode} mode`);
-      } else {
-        setError(result.message);
+      // Attempt switch via saving credentials endpoint (backend v2 uses save for mode changes)
+      try {
+        const payload = { reason: switchReason, auth_mode: targetMode };
+        const result = await apiService.post('/credentials/save', payload).catch((e) => { throw e; });
+        if (result && (result.success || result.status === 'success')) {
+          await fetchCurrentMode();
+          setShowSwitchForm(false);
+          setSwitchReason('');
+          alert(`Successfully switched to ${targetMode} mode`);
+        } else {
+          setError((result && (result.message || result.error)) || 'Switch failed');
+        }
+      } catch (err) {
+        setError(err.message || 'Switch failed');
       }
     } catch (err) {
       setError(err.message);

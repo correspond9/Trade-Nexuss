@@ -141,6 +141,23 @@ class ExecutionEngine:
                 "last_update_time": entry.get("timestamp"),
             }
 
+        # Fallback: use dashboard/live prices if available
+        try:
+            from app.market.live_prices import get_prices
+            prices = get_prices()
+            base = symbol_upper.split()[0]
+            p = prices.get(base)
+            if p is not None:
+                return {
+                    "best_bid": p,
+                    "best_ask": p,
+                    "bid_qty": None,
+                    "ask_qty": None,
+                    "last_update_time": None,
+                }
+        except Exception:
+            pass
+
         return {
             "best_bid": None,
             "best_ask": None,

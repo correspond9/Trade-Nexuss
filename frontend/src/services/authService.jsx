@@ -7,22 +7,12 @@ class AuthService {
 
   async login(mobile, password) {
     try {
-      const response = await fetch(`${this.baseURL}/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          mobile: mobile,
-          password: password
-        })
-      });
+      const { apiService } = await import('./apiService');
+      const data = await apiService.post('/auth/login', { mobile, password });
 
-      if (!response.ok) {
+      if (!data || !data.access_token && !data.token) {
         throw new Error('Login failed');
       }
-
-      const data = await response.json();
       const token = data.access_token || data.token;
       const user = data.user || data;
 
@@ -35,6 +25,13 @@ class AuthService {
       localStorage.setItem('user', JSON.stringify(user));
       localStorage.setItem('authToken', token);
       localStorage.setItem('authUser', JSON.stringify(user));
+
+      try {
+        const { apiService: svc } = await import('./apiService');
+        svc.setAuthToken(token);
+      } catch (e) {
+        // ignore
+      }
 
       return {
         success: true,
@@ -55,12 +52,8 @@ class AuthService {
     try {
       const token = localStorage.getItem('token');
       if (token) {
-        await fetch(`${this.baseURL}/auth/logout`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          }
-        });
+        const { apiService } = await import('./apiService');
+        await apiService.post('/auth/logout');
       }
     } catch (error) {
       console.error('Logout error:', error);
@@ -68,6 +61,10 @@ class AuthService {
       // Clear local storage
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      try {
+        const { apiService } = await import('./apiService');
+        apiService.setAuthToken(null);
+      } catch (e) {}
     }
   }
 

@@ -1,36 +1,13 @@
 // API service with caching and error handling
 class ApiService {
   constructor() {
-    // Ensure base URL comes from env and has no trailing slash
-    const rawBase = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
-    this.baseURL = String(rawBase).replace(/\/+$/, '');
+    this.baseURL = import.meta.env.VITE_API_URL || 'http://72.62.228.112:8010';
     this.cache = new Map();
     this.defaultHeaders = {
       'Content-Type': 'application/json',
     };
     this.useMockData = false;
     this.authToken = null;
-    // Monkey-patch global fetch to prepend baseURL for relative paths (e.g., fetch('/admin/...'))
-    try {
-      if (typeof window !== 'undefined' && window.fetch && !window.__API_SERVICE_FETCH_PATCHED__) {
-        const originalFetch = window.fetch.bind(window);
-        window.fetch = (input, init) => {
-          try {
-            if (typeof input === 'string' && input.startsWith('/')) {
-              input = `${this.baseURL}${input}`;
-            } else if (input && input.url && typeof input.url === 'string' && input.url.startsWith('/')) {
-              input = new Request(`${this.baseURL}${input.url}`, input);
-            }
-          } catch (e) {
-            // fall through to original fetch
-          }
-          return originalFetch(input, init);
-        };
-        window.__API_SERVICE_FETCH_PATCHED__ = true;
-      }
-    } catch (e) {
-      // ignore patch failures in non-browser environments
-    }
   }
 
   setAuthToken(token) {
@@ -652,12 +629,7 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    // Build full URL safely to avoid duplicate slashes or duplicate /api/v2 segments
-    const isAbsolute = /^https?:\/\//i.test(endpoint);
-    const fullUrl = isAbsolute
-      ? endpoint
-      : `${this.baseURL}/${String(endpoint).replace(/^\/+/, '')}`;
-
+    const url = `${this.baseURL}${endpoint}`;
     const headers = {
       ...this.defaultHeaders,
       ...this.getAuthHeaders(),
@@ -665,7 +637,7 @@ class ApiService {
     };
 
     try {
-      const response = await fetch(fullUrl, {
+      const response = await fetch(url, {
         ...options,
         headers,
       });

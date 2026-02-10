@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import normalizeUnderlying from '../utils/underlying';
+import { apiService } from '../services/apiService';
 import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
 import OrdersTab from './Orders';
 import BasketsTab from './BASKETS';
@@ -24,17 +25,8 @@ const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
     // Convert display name to symbol
     const symbol = normalizeUnderlying(selectedIndex);
     
-    const apiUrl = `${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2'}/options/available/expiries?underlying=${symbol}`;
-    console.log('[TRADE] Fetching expiries from authoritative API:', apiUrl);
-    
-    const response = await fetch(apiUrl);
-    
-    if (!response.ok) {
-      console.error('[TRADE] Authoritative API response not OK:', response.status, response.statusText);
-      throw new Error(`Authoritative API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
+    console.log('[TRADE] Fetching expiries from authoritative API for', symbol);
+    const data = await apiService.get('/options/available/expiries', { underlying: symbol });
     console.log('[TRADE] Authoritative API response:', data);
     
     const expiries = Array.isArray(data?.data) ? data.data : [];

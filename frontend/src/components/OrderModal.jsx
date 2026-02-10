@@ -228,21 +228,20 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
     const loadDepth = async () => {
       try {
         setDepthLoading(true);
-        const response = await fetch(
-          `${API_BASE}/market/option-depth?underlying=${encodeURIComponent(meta.underlying)}&expiry=${encodeURIComponent(meta.expiry)}&strike=${encodeURIComponent(meta.strike)}&option_type=${encodeURIComponent(meta.optionType)}`
-        );
-        if (!response.ok) {
-          setDepthData(null);
-          return;
-        }
-        const result = await response.json();
-        if (result?.status === 'success') {
+        const result = await apiService.get('/market/option-depth', {
+          underlying: meta.underlying,
+          expiry: meta.expiry,
+          strike: meta.strike,
+          option_type: meta.optionType
+        });
+        if (result && (result.success || result.data)) {
+          const d = result.data || result;
           setDepthData({
-            bids: result?.data?.bids || [],
-            asks: result?.data?.asks || [],
-            bid: result?.data?.bid ?? null,
-            ask: result?.data?.ask ?? null,
-            ltp: result?.data?.ltp ?? null,
+            bids: d?.bids || [],
+            asks: d?.asks || [],
+            bid: d?.bid ?? null,
+            ask: d?.ask ?? null,
+            ltp: d?.ltp ?? null,
           });
         } else {
           setDepthData(null);
@@ -341,20 +340,12 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
           };
         });
 
-        const response = await fetch(`${API_BASE}/margin/calculate-multi`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            user_id: user?.id || null,
-            scripts,
-            include_positions: true,
-            include_orders: true,
-          })
+        const data = await apiService.post('/margin/calculate-multi', {
+          user_id: user?.id || null,
+          scripts,
+          include_positions: true,
+          include_orders: true,
         });
-
-        const data = await response.json();
         const hasMargin = typeof data?.margin === 'number';
         if (data?.success || hasMargin) {
           setMargin(hasMargin ? data.margin : null);
@@ -364,30 +355,22 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
         }
       }
 
-      const response = await fetch(`${API_BASE}/margin/calculate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: user?.id || null,
-          symbol: orderData.symbol,
-          exchange_segment: exchangeSegment,
-          transaction_type: transactionType,
-          security_id: orderData.security_id || orderData.id || null,
-            expiry: optionMeta?.expiry || null,
-            strike: optionMeta?.strike ?? null,
-            option_type: optionMeta?.optionType || null,
-          quantity: effectiveQty,
-          orderType: currentOrderType,
-          priceType: priceType,
-          price: priceForMargin,
-          lotSize: effectiveLot,
-          product_type: productType
-        })
+      const data = await apiService.post('/margin/calculate', {
+        user_id: user?.id || null,
+        symbol: orderData.symbol,
+        exchange_segment: exchangeSegment,
+        transaction_type: transactionType,
+        security_id: orderData.security_id || orderData.id || null,
+        expiry: optionMeta?.expiry || null,
+        strike: optionMeta?.strike ?? null,
+        option_type: optionMeta?.optionType || null,
+        quantity: effectiveQty,
+        orderType: currentOrderType,
+        priceType: priceType,
+        price: priceForMargin,
+        lotSize: effectiveLot,
+        product_type: productType
       });
-      
-      const data = await response.json();
       
       const hasMargin = typeof data?.margin === 'number';
       if (data?.success || hasMargin) {

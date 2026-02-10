@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, TrendingUp, AlertCircle } from 'lucide-react';
 import LiveQuotes from './LiveQuotes';
+import { apiService } from '../services/apiService';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
+const API_BASE = apiService.baseURL;
 const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');
 
 const SystemMonitoring = () => {
@@ -16,12 +17,11 @@ const SystemMonitoring = () => {
   useEffect(() => {
     const fetchSystemStatus = async () => {
       try {
-        const [healthResponse, streamResponse] = await Promise.all([
-          fetch(`${ROOT_BASE}/health`),
-          fetch(`${API_BASE}/market/stream-status`)
+        const [healthData, streamData] = await Promise.all([
+          apiService.request(`${ROOT_BASE}/health`, { method: 'GET' }).catch(() => ({})),
+          apiService.get('/market/stream-status').catch(() => ({}))
         ]);
-        const data = await healthResponse.json();
-        const streamData = await streamResponse.json();
+        const data = healthData;
 
         const wsStatus = streamData?.equity_ws || data?.websocket_status || {};
         const mcxWsStatus = streamData?.mcx_ws || data?.mcx_websocket_status || {};
@@ -66,11 +66,13 @@ const SystemMonitoring = () => {
     const fetchNotifications = async () => {
       try {
         const authToken = localStorage.getItem('authToken');
-        const response = await fetch(`${ROOT_BASE}/admin/notifications?limit=10`, {
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
-        });
-        const data = await response.json();
-        setNotifications(data?.notifications || []);
+        try {
+          const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
+          const data = await apiService.request(`${ROOT_BASE}/admin/notifications?limit=10`, { method: 'GET', headers });
+          setNotifications(data?.notifications || []);
+        } catch (err) {
+          console.error('Error fetching admin notifications via apiService:', err);
+        }
       } catch (error) {
         console.error('❌ Error fetching admin notifications:', error);
       }
@@ -91,12 +93,9 @@ const SystemMonitoring = () => {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/market/stream-reconnect`, {
-        method: 'POST'
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.message || 'Failed to trigger reconnect');
+      const data = await apiService.post('/market/stream-reconnect');
+      if (!data || !data.success) {
+        throw new Error((data && data.message) || 'Failed to trigger reconnect');
       }
       setActionMessage('Reconnect triggered: cooldowns cleared and one attempt initiated');
       setTimeout(() => setActionMessage(null), 5000);

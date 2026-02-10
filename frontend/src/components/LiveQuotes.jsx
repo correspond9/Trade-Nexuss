@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Activity, RefreshCw } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
+import { apiService } from '../services/apiService';
 const CORE_INSTRUMENTS = [
   { key: 'NIFTY', label: 'NIFTY 50', exchange: 'NSE', badge: 'bg-blue-100 text-blue-700' },
   { key: 'BANKNIFTY', label: 'BANKNIFTY', exchange: 'NSE', badge: 'bg-indigo-100 text-indigo-700' },
@@ -33,11 +33,7 @@ const LiveQuotes = () => {
         const results = await Promise.all(
           CORE_INSTRUMENTS.map(async ({ key }) => {
             try {
-              const response = await fetch(`${API_BASE}/options/available/expiries?underlying=${key}`);
-              if (!response.ok) {
-                return [key, null];
-              }
-              const data = await response.json();
+              const data = await apiService.get('/options/available/expiries', { underlying: key });
               const expiry = Array.isArray(data?.data) && data.data.length > 0 ? data.data[0] : null;
               return [key, expiry];
             } catch {
@@ -68,12 +64,8 @@ const LiveQuotes = () => {
             if (!expiry) {
               return [key, null];
             }
-            const response = await fetch(`${API_BASE}/options/live?underlying=${key}&expiry=${expiry}`);
-            if (!response.ok) {
-              return [key, null];
-            }
-            const payload = await response.json();
-            const price = payload?.underlying_ltp;
+            const payload = await apiService.get('/options/live', { underlying: key, expiry });
+            const price = payload?.underlying_ltp || payload?.data?.underlying_ltp;
             return [key, typeof price === 'number' ? price : null];
           })
         );

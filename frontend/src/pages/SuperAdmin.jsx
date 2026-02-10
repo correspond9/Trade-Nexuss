@@ -1,6 +1,7 @@
 // Unified SuperAdmin Component - Settings + Monitoring in One View
 import React, { useCallback, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { apiService } from '../services/apiService';
 import { Settings, Eye } from 'lucide-react';
 import { useAuthSettings } from '../hooks/useAuthSettings';
 import SystemMonitoring from '../components/SystemMonitoring';
@@ -9,7 +10,7 @@ const SuperAdmin = () => {
   const { user } = useAuth();
   const [marketConfig, setMarketConfig] = useState(null);
   const [mcError, setMcError] = useState(null);
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
+  const API_BASE = apiService.baseURL;
   const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');
   
   // Use custom hook for authentication settings
@@ -43,24 +44,18 @@ const SuperAdmin = () => {
 
   const fetchMarketConfig = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/admin/market-config`);
-      const data = await res.json();
+      const data = await apiService.get('/admin/market-config');
       setMarketConfig(data?.data || null);
     } catch (e) {
       setMcError('Failed to load market config');
       setTimeout(() => setMcError(null), 5000);
     }
-  }, [API_BASE]);
+  }, []);
 
   const saveMarketConfig = async () => {
     try {
       const payload = { config: marketConfig };
-      const res = await fetch(`${API_BASE}/admin/market-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
+      const data = await apiService.post('/admin/market-config', payload);
       setMarketConfig(data?.data || marketConfig);
     } catch (e) {
       setMcError('Failed to save market config');
@@ -70,12 +65,7 @@ const SuperAdmin = () => {
 
   const setForce = async (exchange, state) => {
     try {
-      const res = await fetch(`${API_BASE}/admin/market-force`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exchange, state }),
-      });
-      const data = await res.json();
+      const data = await apiService.post('/admin/market-force', { exchange, state });
       setMarketConfig(data?.data || marketConfig);
     } catch (e) {
       setMcError('Failed to set force state');
@@ -493,21 +483,16 @@ const SuperAdmin = () => {
                         if (!exposureFile) return;
                         const fd = new FormData();
                         fd.append('file', exposureFile);
-                        const res = await fetch(`${ROOT_BASE}/admin/upload/equity-exposure`, {
-                          method: 'POST',
-                          headers: { 'X-USER': user?.username || '' },
-                          body: fd
-                        });
-                        const ok = res.ok;
-                        if (!ok) {
-                          try {
-                            const err = await res.json();
-                            setUploadMsg(`Upload failed: ${err?.detail || 'error'}`);
-                          } catch {
-                            setUploadMsg('Upload failed');
-                          }
-                        } else {
+                        try {
+                          await apiService.request(`${ROOT_BASE}/admin/upload/equity-exposure`, {
+                            method: 'POST',
+                            headers: { 'X-USER': user?.username || '' },
+                            body: fd
+                          });
                           setUploadMsg('Equity exposure uploaded');
+                        } catch (err) {
+                          const msg = (err && err.message) || 'Upload failed';
+                          setUploadMsg(`Upload failed: ${msg}`);
                         }
                         setTimeout(() => setUploadMsg(''), 3000);
                       }}
@@ -524,21 +509,16 @@ const SuperAdmin = () => {
                         if (!equitySpanFile) return;
                         const fd = new FormData();
                         fd.append('file', equitySpanFile);
-                        const res = await fetch(`${ROOT_BASE}/admin/upload/equity-span`, {
-                          method: 'POST',
-                          headers: { 'X-USER': user?.username || '' },
-                          body: fd
-                        });
-                        const ok = res.ok;
-                        if (!ok) {
-                          try {
-                            const err = await res.json();
-                            setUploadMsg(`Upload failed: ${err?.detail || 'error'}`);
-                          } catch {
-                            setUploadMsg('Upload failed');
-                          }
-                        } else {
+                        try {
+                          await apiService.request(`${ROOT_BASE}/admin/upload/equity-span`, {
+                            method: 'POST',
+                            headers: { 'X-USER': user?.username || '' },
+                            body: fd
+                          });
                           setUploadMsg('Equity SPAN uploaded');
+                        } catch (err) {
+                          const msg = (err && err.message) || 'Upload failed';
+                          setUploadMsg(`Upload failed: ${msg}`);
                         }
                         setTimeout(() => setUploadMsg(''), 3000);
                       }}
@@ -555,21 +535,16 @@ const SuperAdmin = () => {
                         if (!commoditySpanFile) return;
                         const fd = new FormData();
                         fd.append('file', commoditySpanFile);
-                        const res = await fetch(`${ROOT_BASE}/admin/upload/commodity-span`, {
-                          method: 'POST',
-                          headers: { 'X-USER': user?.username || '' },
-                          body: fd
-                        });
-                        const ok = res.ok;
-                        if (!ok) {
-                          try {
-                            const err = await res.json();
-                            setUploadMsg(`Upload failed: ${err?.detail || 'error'}`);
-                          } catch {
-                            setUploadMsg('Upload failed');
-                          }
-                        } else {
+                        try {
+                          await apiService.request(`${ROOT_BASE}/admin/upload/commodity-span`, {
+                            method: 'POST',
+                            headers: { 'X-USER': user?.username || '' },
+                            body: fd
+                          });
                           setUploadMsg('Commodity SPAN uploaded');
+                        } catch (err) {
+                          const msg = (err && err.message) || 'Upload failed';
+                          setUploadMsg(`Upload failed: ${msg}`);
                         }
                         setTimeout(() => setUploadMsg(''), 3000);
                       }}

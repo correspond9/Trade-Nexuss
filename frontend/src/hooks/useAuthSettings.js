@@ -1,7 +1,8 @@
 // Custom hook for DhanHQ authentication settings
 import { useState, useEffect } from 'react';
+import { apiService } from '../services/apiService';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
+const API_BASE = apiService.baseURL;
 const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');
 const CREDENTIALS_BASE = `${API_BASE}/credentials`;
 
@@ -23,28 +24,10 @@ export const useAuthSettings = () => {
 
   // Load settings from backend
   const loadSavedSettings = async () => {
-    const fallbackBases = [
-      `${CREDENTIALS_BASE}/active`,
-      `${ROOT_BASE}/api/v2/credentials/active`,
-      'http://localhost:8000/api/v2/credentials/active',
-      'http://127.0.0.1:8000/api/v2/credentials/active'
-    ];
-
-    for (const url of fallbackBases) {
       try {
-        const response = await fetch(url, {
-          headers: { 'Content-Type': 'application/json' },
-        });
-
-        if (!response.ok) {
-          console.warn('🔐 Credentials fetch failed:', url, response.status);
-          continue;
-        }
-
-        const result = await response.json();
+        const result = await apiService.get('/credentials/active');
         const data = result?.data || {};
         if (data?.client_id || data?.access_token || data?.daily_token) {
-          console.log('🔐 Credentials loaded from:', url);
           return {
             authMode: data.auth_mode || 'DAILY_TOKEN',
             clientId: data.client_id || '',
@@ -61,10 +44,43 @@ export const useAuthSettings = () => {
             }
           };
         }
-      } catch (error) {
-        console.error('Error loading settings from:', url, error);
+      } catch (e) {
+        console.warn('Failed to load credentials via apiService, falling back to legacy URLs', e);
       }
-    }
+
+      // Fallback old locations
+      const fallbackBases = [
+        `${ROOT_BASE}/api/v2/credentials/active`,
+        'http://localhost:8000/api/v2/credentials/active',
+        'http://127.0.0.1:8000/api/v2/credentials/active'
+      ];
+
+      for (const url of fallbackBases) {
+        try {
+          const result = await apiService.request(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } }).catch(() => null);
+          if (!result) continue;
+          const data = result?.data || {};
+          if (data?.client_id || data?.access_token || data?.daily_token) {
+            return {
+              authMode: data.auth_mode || 'DAILY_TOKEN',
+              clientId: data.client_id || '',
+              accessToken: data.access_token || '',
+              apiKey: data.api_key || '',
+              clientSecret: data.secret_api || '',
+              connected: false,
+              lastAuthTime: null,
+              authStatus: 'disconnected',
+              wsUrl: 'wss://api-feed.dhan.co?version=2&token=...&clientId=...&authType=2',
+              _cachedCredentials: {
+                DAILY_TOKEN: data,
+                STATIC_IP: null
+              }
+            };
+          }
+        } catch (error) {
+          console.error('Error loading settings from fallback url:', url, error);
+        }
+      }
 
     return {
       authMode: 'DAILY_TOKEN',
@@ -112,15 +128,9 @@ export const useAuthSettings = () => {
         auth_mode: localSettings.authMode
       };
 
-      const response = await fetch(`${CREDENTIALS_BASE}/save`, {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Failed to save credentials');
+      const response = await apiService.post('/credentials/save', payload);
+      if (!response || (response && response.error)) {
+        throw new Error((response && response.error) || 'Failed to save credentials');
       }
 
       const refreshed = await loadSavedSettings();
@@ -142,17 +152,10 @@ export const useAuthSettings = () => {
   const switchMode = async (newMode) => {
     try {
       const authHeaders = { 'Content-Type': 'application/json' };
-      const response = await fetch(`${CREDENTIALS_BASE}/switch-mode`, {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({ auth_mode: newMode })
-      });
-
-      if (response.ok) {
+      const res = await apiService.post('/credentials/switch-mode', { auth_mode: newMode });
+      if (res && !res.error) {
         const refreshed = await loadSavedSettings();
-        if (refreshed) {
-          setLocalSettings(refreshed);
-        }
+        if (refreshed) setLocalSettings(refreshed);
       } else {
         setLocalSettings(prev => ({ ...prev, authMode: newMode }));
       }

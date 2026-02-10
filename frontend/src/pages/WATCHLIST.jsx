@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { apiService } from '../services/apiService';
 import { RefreshCw } from 'lucide-react';
 
 // HUMAN-READABLE INSTRUMENT DISPLAY FORMATTING
@@ -63,21 +64,15 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   const [depthCache, setDepthCache] = useState({});
   const [depthLoading, setDepthLoading] = useState({});
 
-  const getBaseUrl = useCallback(() => import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2', []);
-
   const getUnderlyingLtp = useCallback(async (symbol) => {
     try {
-      const ltpUrl = `${getBaseUrl()}/market/underlying-ltp/${symbol}`;
-      const ltpResponse = await fetch(ltpUrl);
-      if (ltpResponse.ok) {
-        const ltpData = await ltpResponse.json();
-        return ltpData.ltp || ltpData.data?.ltp || null;
-      }
+      const res = await apiService.get(`/market/underlying-ltp/${symbol}`);
+      return res?.ltp || res?.data?.ltp || null;
     } catch (err) {
       console.warn('[WATCHLIST] Failed to fetch underlying LTP:', err);
     }
     return null;
-  }, [getBaseUrl]);
+  }, []);
 
   const isIndexSymbol = (symbol) => {
     const indexSet = new Set(['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'MIDCPNIFTY', 'BANKEX']);
@@ -86,10 +81,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
   const fetchFutureQuote = useCallback(async (symbol, expiry, exchange = 'NSE') => {
     try {
-      const url = `${getBaseUrl()}/futures/quote?exchange=${encodeURIComponent(exchange)}&symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`;
-      const response = await fetch(url);
-      if (!response.ok) return null;
-      const payload = await response.json();
+      const payload = await apiService.get('/futures/quote', { exchange, symbol, expiry });
       return payload?.data || null;
     } catch {
       return null;
@@ -165,15 +157,9 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
           underlying_ltp: underlyingLtp
         };
 
-        const response = await fetch(`${getBaseUrl()}/watchlist/add`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(data?.detail || 'Failed to add to watchlist');
+        const result = await apiService.post('/watchlist/add', payload);
+        if (!result || !result.success) {
+          throw new Error((result && result.detail) || 'Failed to add to watchlist');
         }
 
         let enriched = instrument;
@@ -232,11 +218,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
         expiry: foundItem?.expiry || ''
       };
 
-      await fetch(`${getBaseUrl()}/watchlist/remove`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      await apiService.post('/watchlist/remove', payload);
       
       // Update local state
       setWatchlists(prev => ({
@@ -266,11 +248,9 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   const fetchOptionStrikeSuggestions = useCallback(async (searchText) => {
     try {
       const underlying = extractUnderlyingFromQuery(searchText);
-      const base = `${getBaseUrl()}/options/strikes/search?q=${encodeURIComponent(searchText)}&limit=20`;
-      const url = underlying ? `${base}&underlying=${encodeURIComponent(underlying)}` : base;
-      const response = await fetch(url);
-      if (!response.ok) return [];
-      const data = await response.json();
+      const endpoint = `/options/strikes/search?q=${encodeURIComponent(searchText)}&limit=20${underlying ? `&underlying=${encodeURIComponent(underlying)}` : ''}`;
+      const data = await apiService.get(endpoint).catch(() => null);
+      if (!data) return [];
       return (data.results || []).map((row) => {
         const instrument = {
           symbol: row.symbol,
@@ -304,10 +284,8 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
   const fetchOptionDepth = useCallback(async (symbol, expiry, strike, optionType) => {
     try {
-      const url = `${getBaseUrl()}/market/option-depth?underlying=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}&strike=${encodeURIComponent(strike)}&option_type=${encodeURIComponent(optionType)}`;
-      const response = await fetch(url);
-      if (!response.ok) return null;
-      const data = await response.json();
+      const endpoint = `/market/option-depth?underlying=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}&strike=${encodeURIComponent(strike)}&option_type=${encodeURIComponent(optionType)}`;
+      const data = await apiService.get(endpoint).catch(() => null);
       return data?.data || null;
     } catch {
       return null;
@@ -333,10 +311,9 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
   const fetchTierBSuggestions = useCallback(async (searchText) => {
     try {
-      const url = `${getBaseUrl()}/subscriptions/search?q=${encodeURIComponent(searchText)}&tier=TIER_B&limit=20`;
-      const response = await fetch(url);
-      if (!response.ok) return [];
-      const data = await response.json();
+      const endpoint = `/subscriptions/search?q=${encodeURIComponent(searchText)}&tier=TIER_B&limit=20`;
+      const data = await apiService.get(endpoint).catch(() => null);
+      if (!data) return [];
       return (data.results || []).map((sub) => {
         const instrument = {
           symbol: sub.symbol,
@@ -370,10 +347,9 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
   const fetchTierASubscriptionSuggestions = useCallback(async (searchText) => {
     try {
-      const url = `${getBaseUrl()}/subscriptions/search?q=${encodeURIComponent(searchText)}&tier=TIER_A&limit=20`;
-      const response = await fetch(url);
-      if (!response.ok) return [];
-      const data = await response.json();
+      const endpoint = `/subscriptions/search?q=${encodeURIComponent(searchText)}&tier=TIER_A&limit=20`;
+      const data = await apiService.get(endpoint).catch(() => null);
+      if (!data) return [];
       return (data.results || []).map((sub) => {
         const instrument = {
           symbol: sub.symbol,
@@ -407,10 +383,9 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
   const fetchFuturesSuggestions = useCallback(async (searchText) => {
     try {
-      const url = `${getBaseUrl()}/instruments/futures/search?q=${encodeURIComponent(searchText)}&limit=20`;
-      const response = await fetch(url);
-      if (!response.ok) return [];
-      const data = await response.json();
+      const endpoint = `/instruments/futures/search?q=${encodeURIComponent(searchText)}&limit=20`;
+      const data = await apiService.get(endpoint).catch(() => null);
+      if (!data) return [];
       return (data.results || []).map((fut) => {
         const instrument = {
           symbol: fut.symbol,
@@ -525,9 +500,8 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     const load = async () => {
       try {
         if (!user?.id) return;
-        const res = await fetch(`${getBaseUrl()}/watchlist/${user.id}`);
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await apiService.get(`/watchlist/${user.id}`).catch(() => null);
+        if (!data) return;
         const entries = data.watchlist || [];
         const mapped = await Promise.all(entries.map(async (e) => {
           const instrument = {

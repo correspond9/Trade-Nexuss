@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import OrderModal from '../components/OrderModal';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
+import { apiService } from '../services/apiService';
 
 const MCX_OPTIONS = [
   { key: 'CRUDEOIL', label: 'CRUDEOIL' },
@@ -113,9 +112,7 @@ const Commodities = () => {
 
   const loadExpiries = async (symbol) => {
     try {
-      const resp = await fetch(`${API_BASE}/commodities/expiries?underlying=${symbol}`);
-      if (!resp.ok) throw new Error('expiry fetch failed');
-      const data = await resp.json();
+      const data = await apiService.get('/commodities/expiries', { underlying: symbol });
       const list = Array.isArray(data?.data) ? data.data : [];
       return list.slice(0, 2);
     } catch (err) {
@@ -125,9 +122,7 @@ const Commodities = () => {
 
   const loadChain = async (symbol, expiry) => {
     try {
-      const resp = await fetch(`${API_BASE}/commodities/options?underlying=${symbol}&expiry=${expiry}`);
-      if (!resp.ok) throw new Error('chain fetch failed');
-      const data = await resp.json();
+      const data = await apiService.get('/commodities/options', { underlying: symbol, expiry });
       return data?.data || null;
     } catch (err) {
       return null;
@@ -136,9 +131,7 @@ const Commodities = () => {
 
   const loadFutures = async (tab) => {
     try {
-      const resp = await fetch(`${API_BASE}/commodities/futures?tab=${tab}`);
-      if (!resp.ok) throw new Error('futures fetch failed');
-      const data = await resp.json();
+      const data = await apiService.get('/commodities/futures', { tab });
       const list = Array.isArray(data?.data) ? data.data : [];
       const bySymbol = new Map(list.map((row) => [row.symbol, row]));
       const rows = MCX_FUTURES.map((symbol) => bySymbol.get(symbol) || { symbol, expiry: '—', ltp: null });

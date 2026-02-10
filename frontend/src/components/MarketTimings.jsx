@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { authService } from '../services/authService';
+import { apiService } from '../services/apiService';
 
 const MarketTimings = () => {
   const [timings, setTimings] = useState([]);
@@ -30,20 +31,14 @@ const MarketTimings = () => {
   const fetchTimings = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://127.0.0.1:5000/admin/api/timings', {
-        headers: authService.getAuthHeaders(),
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch data');
-      
-      const result = await response.json();
-      if (result.success) {
+      const result = await apiService.get('/admin/timings');
+      if (result && result.success) {
         setTimings(result.data || []);
         setTodayTimings(result.today_timings || []);
         setExchanges(result.exchanges || []);
         setToday(result.today || '');
       } else {
-        setError(result.error || 'Failed to load data');
+        setError((result && result.error) || 'Failed to load data');
       }
     } catch (err) {
       setError('Failed to load market timings');
@@ -55,27 +50,13 @@ const MarketTimings = () => {
 
   const handleUpdate = async (exchange) => {
     try {
-      const response = await fetch(`http://127.0.0.1:5000/admin/api/timings/${exchange}`, {
-        method: 'PUT',
-        headers: {
-          ...authService.getAuthHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Update failed');
-      }
-
-      const result = await response.json();
-      if (result.success) {
+      const result = await apiService.put(`/admin/timings/${exchange}`, formData);
+      if (result && result.success) {
         await fetchTimings();
         resetEditForm();
         alert(result.message);
       } else {
-        setError(result.error);
+        setError((result && result.error) || 'Update failed');
       }
     } catch (err) {
       setError(err.message);
@@ -90,25 +71,11 @@ const MarketTimings = () => {
     }
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/admin/api/timings/check', {
-        method: 'POST',
-        headers: {
-          ...authService.getAuthHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ date: checkDate }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Check failed');
-      }
-
-      const result = await response.json();
-      if (result.success) {
-        setCheckResults(result.data.timings || []);
+      const result = await apiService.post('/admin/timings/check', { date: checkDate });
+      if (result && result.success) {
+        setCheckResults((result.data && result.data.timings) || []);
       } else {
-        setError(result.error);
+        setError((result && result.error) || 'Check failed');
       }
     } catch (err) {
       setError(err.message);

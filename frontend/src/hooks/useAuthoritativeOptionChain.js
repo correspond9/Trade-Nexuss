@@ -13,6 +13,8 @@ import { useState, useEffect, useCallback } from 'react';
  * - Error handling without fallback pricing
  * - Loading states and metadata
  */
+import { apiService } from '../services/apiService';
+
 export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) => {
   // State management
   const [data, setData] = useState(null);
@@ -29,8 +31,7 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
 
   // Construct API URL
   const apiUrl = useCallback(() => {
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
-    return `${baseUrl}/options/live?underlying=${underlying}&expiry=${expiry}`;
+    return `/options/live?underlying=${underlying}&expiry=${expiry}`;
   }, [underlying, expiry]);
 
   // Fetch function
@@ -44,19 +45,11 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       setLoading(true);
       setError(null);
 
-      const url = apiUrl();
-      console.log('[useAuthoritativeOptionChain] Fetching from:', url);
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error('CACHE_MISS');
-        }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      console.log('[useAuthoritativeOptionChain] Fetching from authoritative API', underlying, expiry);
+      const result = await apiService.get('/options/live', { underlying, expiry });
+      if (!result) {
+        throw new Error('CACHE_MISS');
       }
-
-      const result = await response.json();
 
       if (result.status !== 'success') {
         throw new Error(result.detail || 'API returned non-success status');
@@ -142,21 +135,8 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
   // Helper: Get available expiries for underlying
   const getAvailableExpiries = useCallback(async (underlyingSymbol) => {
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
-      const url = `${baseUrl}/options/available/expiries?underlying=${underlyingSymbol}`;
-      
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      if (result.status === 'success') {
-        return result.data || [];
-      }
-      
+      const result = await apiService.get('/options/available/expiries', { underlying: underlyingSymbol });
+      if (result && result.status === 'success') return result.data || [];
       return [];
 
     } catch (err) {
@@ -168,21 +148,8 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
   // Helper: Get available underlyings
   const getAvailableUnderlyings = useCallback(async () => {
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
-      const url = `${baseUrl}/options/available/underlyings`;
-      
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      if (result.status === 'success') {
-        return result.data || [];
-      }
-      
+      const result = await apiService.get('/options/available/underlyings');
+      if (result && result.status === 'success') return result.data || [];
       return [];
 
     } catch (err) {

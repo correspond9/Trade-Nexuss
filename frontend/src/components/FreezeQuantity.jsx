@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { authService } from '../services/authService';
+import { apiService } from '../services/apiService';
 
 const FreezeQuantity = () => {
   const [freezeData, setFreezeData] = useState([]);
@@ -26,17 +27,11 @@ const FreezeQuantity = () => {
   const fetchFreezeData = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://127.0.0.1:5000/admin/api/freeze', {
-        headers: authService.getAuthHeaders(),
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch data');
-      
-      const result = await response.json();
-      if (result.success) {
-        setFreezeData(result.data);
+      const result = await apiService.get('/admin/freeze');
+      if (result && result.success) {
+        setFreezeData(result.data || []);
       } else {
-        setError(result.error || 'Failed to load data');
+        setError((result && result.error) || 'Failed to load data');
       }
     } catch (err) {
       setError('Failed to load freeze quantities');
@@ -50,33 +45,16 @@ const FreezeQuantity = () => {
     e.preventDefault();
     
     try {
-      const url = editingItem 
-        ? `http://127.0.0.1:5000/admin/api/freeze/${editingItem.id}`
-        : 'http://127.0.0.1:5000/admin/api/freeze';
-      
-      const method = editingItem ? 'PUT' : 'POST';
-      
-      const response = await fetch(url, {
-        method,
-        headers: {
-          ...authService.getAuthHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
+      const result = editingItem
+        ? await apiService.put(`/admin/freeze/${editingItem.id}`, formData)
+        : await apiService.post('/admin/freeze', formData);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Operation failed');
-      }
-
-      const result = await response.json();
-      if (result.success) {
+      if (result && result.success) {
         await fetchFreezeData();
         resetForm();
         alert(result.message);
       } else {
-        setError(result.error);
+        setError((result && result.error) || 'Operation failed');
       }
     } catch (err) {
       setError(err.message);
@@ -98,19 +76,12 @@ const FreezeQuantity = () => {
     if (!confirm('Are you sure you want to delete this freeze quantity?')) return;
 
     try {
-      const response = await fetch(`http://127.0.0.1:5000/admin/api/freeze/${id}`, {
-        method: 'DELETE',
-        headers: authService.getAuthHeaders(),
-      });
-
-      if (!response.ok) throw new Error('Failed to delete');
-
-      const result = await response.json();
-      if (result.success) {
+      const result = await apiService.delete(`/admin/freeze/${id}`);
+      if (result && result.success) {
         await fetchFreezeData();
         alert(result.message);
       } else {
-        setError(result.error);
+        setError((result && result.error) || 'Failed to delete');
       }
     } catch (err) {
       setError(err.message);
