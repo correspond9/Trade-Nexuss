@@ -1,54 +1,58 @@
-# ==================================================
-# FastAPI Application Entry Point
-# ==================================================
-
 from fastapi import FastAPI
-import logging
+import sys
 
-# Routers
-from app.rest.market_api_v2 import router as market_router
+app = FastAPI(title="Trading Nexus API")
 
-# Optional DB utilities (safe startup)
-from app.storage.migrations import init_db
-from app.storage.auto_credentials import auto_load_credentials
-from app.storage.settings_manager import restore_settings_to_database
-
-# --------------------------------------------------
-# App Initialization
-# --------------------------------------------------
-
-app = FastAPI(
-    title="Trading Nexus API",
-    version="1.0.0"
-)
-
-logger = logging.getLogger(__name__)
-
-# --------------------------------------------------
-# Safe Startup Hook (DB must NOT block boot)
-# --------------------------------------------------
-
-@app.on_event("startup")
-async def startup_event():
-    try:
-        logger.info("Starting optional database initialization...")
-        init_db()
-        auto_load_credentials()
-        restore_settings_to_database()
-        logger.info("Database initialization completed.")
-    except Exception as e:
-        logger.error(f"Database startup skipped: {e}")
-
-# --------------------------------------------------
-# Routes
-# --------------------------------------------------
-
-app.include_router(market_router)
-
-# --------------------------------------------------
-# Health Check
-# --------------------------------------------------
+# -----------------------------------------------------
+# BASIC HEALTH ROUTES (always load)
+# -----------------------------------------------------
 
 @app.get("/")
 def root():
-    return {"status": "backend running"}
+    return {"message": "Trading Nexus API running"}
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+@app.get("/test")
+def test():
+    return {"test": "working"}
+
+
+# -----------------------------------------------------
+# ROUTER LOADING (SAFE MODE)
+# -----------------------------------------------------
+
+def load_router(import_path, router_name="router", prefix=""):
+    try:
+        module = __import__(import_path, fromlist=[router_name])
+        router = getattr(module, router_name)
+        app.include_router(router, prefix=prefix)
+        print(f"[ROUTER] Loaded: {import_path}", file=sys.stdout)
+    except Exception as e:
+        print(f"[ROUTER] FAILED: {import_path}", file=sys.stdout)
+        print(e, file=sys.stdout)
+
+
+# -----------------------------------------------------
+# API ROUTERS
+# -----------------------------------------------------
+
+# MARKET API
+load_router("app.rest.market_api_v2")
+
+# FUTURE ROUTERS — add as project grows
+# load_router("app.rest.broker")
+# load_router("app.rest.orders")
+# load_router("app.rest.auth")
+# load_router("app.rest.websocket")
+
+
+# -----------------------------------------------------
+# STARTUP CONFIRMATION
+# -----------------------------------------------------
+
+@app.on_event("startup")
+async def startup_event():
+    print("[STARTUP] Trading Nexus API boot complete", file=sys.stdout)
