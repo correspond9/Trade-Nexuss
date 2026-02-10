@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # This stays exactly as you have it on GitHub
   backend:
     build:
       context: .
@@ -9,13 +8,14 @@ services:
     ports:
       - "8010:8000"
     volumes:
-      # WE ADD THIS: This protects your positions, Dhan info, and login
+      # SAFE 1: This protects your database (Dhan keys, positions, login)
       - trading-db-data:/app/database
+      # SAFE 2: This protects your activity logs so they aren't wiped
+      - trading-logs:/app/logs
     environment:
       - DATABASE_URL=sqlite:////app/database/broker.db
     restart: always
 
-  # Keep this if you are unsure, it won't hurt anything
   db:
     image: postgres:15-alpine
     volumes:
@@ -25,7 +25,7 @@ services:
       - POSTGRES_PASSWORD=app
       - POSTGRES_DB=app
 
-# WE ADD THIS AT THE VERY BOTTOM
 volumes:
   trading-db-data:
+  trading-logs:
   postgres_data:
