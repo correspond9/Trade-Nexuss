@@ -31,3 +31,4 @@ def test():
 
 # Attach market router
 app.include_router(market_router)
+app.include_router(auth_router)
