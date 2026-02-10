@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.rest.market_api_v2 import router as market_router
 from app.rest.credentials import router as credentials_router
 from app.rest.auth import router as auth_router
+from app.rest.settings import router as settings_router
 
 app = FastAPI(title="Trading Nexus API")
 
@@ -34,3 +35,5 @@ def test():
 app.include_router(market_router)
 app.include_router(auth_router)
 app.include_router(credentials_router)
+app.include_router(settings_router)
+
