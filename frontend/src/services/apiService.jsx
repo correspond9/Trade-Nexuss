@@ -1,7 +1,7 @@
 // API service with caching and error handling
 class ApiService {
   constructor() {
-    this.baseURL = import.meta.env.VITE_API_URL || 'http://72.62.228.112:8010';
+    this.baseURL = import.meta.env.VITE_API_URL || 'http://72.62.228.112:801010/api/v2';
     this.cache = new Map();
     this.defaultHeaders = {
       'Content-Type': 'application/json',
