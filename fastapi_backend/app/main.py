@@ -1,12 +1,30 @@
 from fastapi import FastAPI
-import sys
+from fastapi.middleware.cors import CORSMiddleware
+
+# import routers
+from app.rest.market_api_v2 import router as market_router
+from app.rest.credentials import router as credentials_router
+from app.rest.auth import router as auth_router
+from app.rest.settings import router as settings_router
+from app.rest.ws import router as ws_router
+from app.commodity_engine.commodity_rest import router as commodity_router
+from app.trading.positions import router as positions_router
+from app.trading.orders import router as orders_router
+from app.trading.positions import router as positions_router
+
 
 app = FastAPI(title="Trading Nexus API")
 
-# -----------------------------------------------------
-# BASIC HEALTH ROUTES (always load)
-# -----------------------------------------------------
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
+# Base routes
 @app.get("/")
 def root():
     return {"message": "Trading Nexus API running"}
@@ -17,42 +35,16 @@ def health():
 
 @app.get("/test")
 def test():
-    return {"test": "working"}
+    return {"message": "test route active"}
 
+# Attach market router
+app.include_router(market_router)
+app.include_router(auth_router)
+app.include_router(credentials_router)
+app.include_router(settings_router)
+app.include_router(ws_router)
+app.include_router(commodity_router)
+app.include_router(positions_router)
+app.include_router(orders_router)
+app.include_router(positions_router)
 
-# -----------------------------------------------------
-# ROUTER LOADING (SAFE MODE)
-# -----------------------------------------------------
-
-def load_router(import_path, router_name="router", prefix=""):
-    try:
-        module = __import__(import_path, fromlist=[router_name])
-        router = getattr(module, router_name)
-        app.include_router(router, prefix=prefix)
-        print(f"[ROUTER] Loaded: {import_path}", file=sys.stdout)
-    except Exception as e:
-        print(f"[ROUTER] FAILED: {import_path}", file=sys.stdout)
-        print(e, file=sys.stdout)
-
-
-# -----------------------------------------------------
-# API ROUTERS
-# -----------------------------------------------------
-
-# MARKET API
-load_router("app.rest.market_api_v2")
-
-# FUTURE ROUTERS — add as project grows
-# load_router("app.rest.broker")
-# load_router("app.rest.orders")
-# load_router("app.rest.auth")
-# load_router("app.rest.websocket")
-
-
-# -----------------------------------------------------
-# STARTUP CONFIRMATION
-# -----------------------------------------------------
-
-@app.on_event("startup")
-async def startup_event():
-    print("[STARTUP] Trading Nexus API boot complete", file=sys.stdout)

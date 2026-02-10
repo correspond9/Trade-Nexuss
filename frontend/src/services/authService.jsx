@@ -1,7 +1,7 @@
 // Simple Authentication Service
 class AuthService {
   constructor() {
-    this.baseURL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v2';
+    this.baseURL = import.meta.env.VITE_API_URL || 'http://72.62.228.112:8010';
     this.cache = new Map();
   }
 
