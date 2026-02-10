@@ -1,12 +1,11 @@
 {
-  "name": "tradewithstraddly-frontend",
+  "name": "Financio",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "set HOME=%USERPROFILE% && vite",
+    "dev": "vite",
     "build": "vite build",
-    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -19,6 +18,7 @@
     "vite": "^7.2.6"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0"
     "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
