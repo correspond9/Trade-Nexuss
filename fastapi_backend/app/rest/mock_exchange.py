@@ -1,22 +1,15 @@
 from datetime import datetime, timedelta
-
-# IST timezone offset (UTC+5:30)
-IST_OFFSET = timedelta(hours=5, minutes=30)
-
-def ist_now():
-    """Get current IST time"""
-    return datetime.utcnow() + IST_OFFSET
 import asyncio
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.storage.db import SessionLocal
 from app.storage import models
 from app.users.passwords import hash_password
-from app.market.live_prices import get_prices
+from app.market.live_prices import get_prices, update_price
 from app.rms.kill_switch import blocked as kill_switch_blocked
 from app.execution_simulator import get_execution_engine
 from app.rms.span_margin_calculator import (
@@ -30,8 +23,13 @@ from app.rms.mcx_margin_calculator import (
 from app.services.dhan_margin_service import dhan_margin_service
 from app.market.watchlist_manager import get_watchlist_manager
 from app.ems.market_config import market_config
-from app.market.live_prices import update_price
 from app.market.market_state import state as market_state
+from app.oms.order_ids import generate as generate_order_id
+
+
+# IST timezone offset (UTC+5:30)
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
 
 router = APIRouter(tags=["mock-exchange"])
 EXEC_ENGINE = get_execution_engine()
@@ -45,6 +43,16 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# Optional current user resolver: returns active UserAccount or None when no X-USER header
+def optional_current_user(x_user: str = Header(None), db: Session = Depends(get_db)):
+    if not x_user:
+        return None
+    user = db.query(models.UserAccount).filter(models.UserAccount.username == x_user).first()
+    if not user or user.status != "ACTIVE":
+        return None
+    return user
 
 
 def _serialize(model_obj):
@@ -518,6 +526,87 @@ class UserRequest(BaseModel):
     mobile: Optional[str] = None
     initial_password: Optional[str] = None
     role: str = "USER"
+
+
+def _place_order_core(req: OrderRequest, db: Session, user: models.UserAccount):
+    def _reject_order(reason: str):
+        order = models.MockOrder(
+            order_ref=generate_order_id(),
+            user_id=user.id,
+            symbol=req.symbol,
+            security_id=req.security_id,
+            exchange_segment=req.exchange_segment,
+            transaction_type=req.transaction_type,
+            quantity=req.quantity,
+            order_type=req.order_type,
+            product_type=req.product_type,
+            price=req.price or 0.0,
+            trigger_price=req.trigger_price,
+            is_super=bool(req.is_super),
+            target_price=req.target_price,
+            stop_loss_price=req.stop_loss_price,
+            trailing_jump=req.trailing_jump,
+            status="REJECTED",
+            remarks=reason,
+        )
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        return {"data": _serialize(order)}
+
+    if user.status != "ACTIVE" or kill_switch_blocked(user):
+        return _reject_order("USER_BLOCKED")
+
+    if not _segment_allowed(user, req.exchange_segment):
+        return _reject_order("SEGMENT_RESTRICTED")
+
+    snapshot = EXEC_ENGINE._snapshot_for_order(req.symbol, req.exchange_segment)
+    decision_price = snapshot.get("best_ask") if req.transaction_type == "BUY" else snapshot.get("best_bid")
+    exec_price = decision_price or (req.price or 0.0)
+    required = _margin_required(exec_price, req.quantity, req.product_type)
+    local_margin = _local_margin_for_order(
+        user_id=user.id,
+        exchange_segment=req.exchange_segment,
+        symbol=req.symbol,
+        transaction_type=req.transaction_type,
+        quantity=req.quantity,
+        price=exec_price,
+    )
+    if local_margin and local_margin.get("margin") is not None:
+        required = float(local_margin["margin"])
+    required = _apply_margin_multiplier(required, user, req.product_type)
+    margin = _get_or_create_margin(db, user.id)
+    margin_exceeded = margin.available_margin < required
+
+    order = models.MockOrder(
+        order_ref=generate_order_id(),
+        user_id=user.id,
+        symbol=req.symbol,
+        security_id=req.security_id,
+        exchange_segment=req.exchange_segment,
+        transaction_type=req.transaction_type,
+        quantity=req.quantity,
+        order_type=req.order_type,
+        product_type=req.product_type,
+        price=req.price or 0.0,
+        trigger_price=req.trigger_price,
+        is_super=bool(req.is_super),
+        target_price=req.target_price,
+        stop_loss_price=req.stop_loss_price,
+        trailing_jump=req.trailing_jump,
+        status="PENDING",
+    )
+    db.add(order)
+    db.flush()
+
+    EXEC_ENGINE.process_new_order(db, order)
+
+    db.commit()
+    db.refresh(order)
+    response = {"data": _serialize(order)}
+    if margin_exceeded:
+        response["warning"] = "MARGIN_EXCEEDED"
+    return response
     status: str = "ACTIVE"
     allowed_segments: Optional[str] = "NSE,NFO,BSE,MCX"
     wallet_balance: float = 0.0
@@ -656,13 +745,41 @@ def list_orders_legacy(user_id: Optional[int] = None, db: Session = Depends(get_
 
 
 @router.post("/trading/orders")
-def place_order(req: OrderRequest, db: Session = Depends(get_db)):
-    user = db.query(models.UserAccount).filter(models.UserAccount.id == (req.user_id or 1)).first()
+async def place_order(
+    req: OrderRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.UserAccount] = Depends(optional_current_user),
+):
+    # Inspect raw JSON to detect forbidden credential-like fields
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    SENSITIVE_KEYS = {
+        'api_key','apiKey','api_secret','apiSecret','secret_api','secret',
+        'client_id','clientId','access_token','accessToken','auth_token','authToken',
+        'daily_token','dailyToken'
+    }
+
+    # shallow check of top-level keys to avoid accidental leakage
+    if any(k in SENSITIVE_KEYS for k in (payload.keys() if isinstance(payload, dict) else [])):
+        raise HTTPException(status_code=400, detail="Credential-like fields are forbidden in order payload")
+
+    # If a current user is present, enforce user_id matches
+    if current_user is not None:
+        if req.user_id and int(req.user_id) != int(current_user.id):
+            raise HTTPException(status_code=403, detail="user_id does not match authenticated user")
+        user = current_user
+    else:
+        user = db.query(models.UserAccount).filter(models.UserAccount.id == (req.user_id or 1)).first()
     if not user:
         user = _get_or_create_admin(db)
 
     def _reject_order(reason: str):
         order = models.MockOrder(
+            order_ref=generate_order_id(),
             user_id=user.id,
             symbol=req.symbol,
             security_id=req.security_id,
@@ -710,6 +827,7 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
     margin_exceeded = margin.available_margin < required
 
     order = models.MockOrder(
+        order_ref=generate_order_id(),
         user_id=user.id,
         symbol=req.symbol,
         security_id=req.security_id,
@@ -822,6 +940,7 @@ def close_position(position_id: int, req: SquareOffRequest, db: Session = Depend
         snapshot["best_ask"] = ltp * 1.001
 
     order = models.MockOrder(
+        order_ref=generate_order_id(),
         user_id=pos.user_id,
         symbol=pos.symbol,
         exchange_segment=pos.exchange_segment,
@@ -938,7 +1057,11 @@ def execute_basket(req: BasketExecuteRequest, db: Session = Depends(get_db)):
             product_type=leg.product_type,
             price=leg.price,
         )
-        results.append(place_order(order_req, db))
+        # Resolve user for basket and call core placement synchronously
+        basket_user = db.query(models.UserAccount).filter(models.UserAccount.id == basket.user_id).first()
+        if not basket_user:
+            basket_user = _get_or_create_admin(db)
+        results.append(_place_order_core(order_req, db, basket_user))
     basket.status = "EXECUTED"
     basket.updated_at = ist_now()
     db.commit()

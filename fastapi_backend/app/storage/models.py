@@ -126,6 +126,8 @@ class MarginAccount(Base):
 class MockOrder(Base):
     __tablename__ = "mock_orders"
     id = Column(Integer, primary_key=True)
+    # Alphanumeric order reference similar to exchange order id (14 chars)
+    order_ref = Column(String, unique=True, nullable=True)
     user_id = Column(Integer, ForeignKey("user_accounts.id"), nullable=False)
     symbol = Column(String, nullable=False)
     security_id = Column(String, nullable=True)

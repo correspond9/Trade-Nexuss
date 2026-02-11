@@ -50,6 +50,34 @@ class ApiService {
     return this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {};
   }
 
+  // Remove credential-like fields from outgoing JSON bodies to avoid accidental leakage
+  sanitizeBody(obj) {
+    const SENSITIVE_KEYS = new Set([
+      'api_key','apiKey','api_secret','apiSecret','secret_api','secret',
+      'client_id','clientId','access_token','accessToken','auth_token','authToken',
+      'daily_token','dailyToken'
+    ]);
+
+    const _recurse = (val) => {
+      if (val == null) return val;
+      if (typeof val !== 'object') return val;
+      if (typeof FormData !== 'undefined' && val instanceof FormData) return val;
+      if (Array.isArray(val)) return val.map(_recurse);
+      const out = {};
+      Object.keys(val).forEach((k) => {
+        if (SENSITIVE_KEYS.has(k)) return; // skip sensitive key
+        out[k] = _recurse(val[k]);
+      });
+      return out;
+    };
+
+    try {
+      return _recurse(obj);
+    } catch (e) {
+      return obj;
+    }
+  }
+
   // Helper function to generate dynamic expiry dates based on symbol type
   generateExpiryDates(symbol = 'NIFTY') {
     const now = new Date();
@@ -767,16 +795,24 @@ class ApiService {
   }
 
   async post(endpoint, data = {}) {
+    const safe = this.sanitizeBody(data);
+    const body = (typeof FormData !== 'undefined' && safe instanceof FormData) || typeof safe === 'string'
+      ? safe
+      : JSON.stringify(safe);
     return this.request(endpoint, {
       method: 'POST',
-      body: JSON.stringify(data),
+      body,
     });
   }
 
   async put(endpoint, data = {}) {
+    const safe = this.sanitizeBody(data);
+    const body = (typeof FormData !== 'undefined' && safe instanceof FormData) || typeof safe === 'string'
+      ? safe
+      : JSON.stringify(safe);
     return this.request(endpoint, {
       method: 'PUT',
-      body: JSON.stringify(data),
+      body,
     });
   }
 
@@ -787,9 +823,13 @@ class ApiService {
   }
 
   async patch(endpoint, data = {}) {
+    const safe = this.sanitizeBody(data);
+    const body = (typeof FormData !== 'undefined' && safe instanceof FormData) || typeof safe === 'string'
+      ? safe
+      : JSON.stringify(safe);
     return this.request(endpoint, {
       method: 'PATCH',
-      body: JSON.stringify(data),
+      body,
     });
   }
 

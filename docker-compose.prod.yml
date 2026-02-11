@@ -5,6 +5,12 @@ services:
     build: .
     ports:
       - "8010:8000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tradingbackend.rule=Host(`api.tradingnexus.pro`)"
+      - "traefik.http.routers.tradingbackend.entrypoints=http,https"
+      - "traefik.http.routers.tradingbackend.tls=true"
+      - "traefik.http.services.tradingbackend.loadbalancer.server.port=8000"
     environment:
       - API_HOST=0.0.0.0
       - API_PORT=8000
