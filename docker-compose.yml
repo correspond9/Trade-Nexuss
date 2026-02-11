@@ -15,7 +15,13 @@ services:
     environment:
       - DATABASE_URL=sqlite:////app/database/broker.db
     restart: always
-
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`api.tradingnexus.pro`)"
+      - "traefik.http.routers.backend.entrypoints=http,https"
+      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+      
   db:
     image: postgres:15-alpine
     volumes:
