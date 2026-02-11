@@ -26,10 +26,16 @@ log.setLevel(logging.DEBUG)
 
 app = FastAPI(title="Trading Nexus API")
 
-# CORS
+# CORS: restrict to known frontend origins to allow credentials safely
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://tradingnexus.pro",
+        "https://www.tradingnexus.pro",
+        "https://app.tradingnexus.pro",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
