@@ -8,7 +8,10 @@ class AuthService {
   async login(mobile, password) {
     try {
       const { apiService } = await import('./apiService');
-      const data = await apiService.post('/auth/login', { mobile, password });
+      // Construct a minimal, sanitized payload to avoid sending any accidental admin/Dhan fields
+      const payload = { password };
+      if (mobile) payload.mobile = String(mobile).trim();
+      const data = await apiService.post('/auth/login', payload);
 
       if (!data || !data.access_token && !data.token) {
         throw new Error('Login failed');

@@ -10,6 +10,15 @@ class ApiService {
     };
     this.useMockData = false;
     this.authToken = null;
+    // Initialize auth token from localStorage if present (supports reloads)
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const stored = localStorage.getItem('authToken') || localStorage.getItem('token');
+        if (stored) this.authToken = stored;
+      }
+    } catch (e) {
+      // ignore if localStorage not available
+    }
     // Monkey-patch global fetch to prepend baseURL for relative paths (e.g., fetch('/admin/...'))
     try {
       if (typeof window !== 'undefined' && window.fetch && !window.__API_SERVICE_FETCH_PATCHED__) {

@@ -26,7 +26,8 @@ const Login = () => {
     setError('');
     setLoading(true);
 
-    const result = await login(formData.mobile, formData.password);
+    const mobileTrimmed = (formData.mobile || '').toString().trim();
+    const result = await login(mobileTrimmed, formData.password);
     
     if (result.success) {
       const role = result.user?.role;
