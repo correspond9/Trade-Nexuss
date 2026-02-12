@@ -30,7 +30,12 @@ services:
           cpus: '0.5'
           memory: 256M
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test:
+      -CMD
+      -python
+      - -c
+      -"mport urllib.request;
+      urlib.request.urlopen(http:??127.0.0.1:8---/health').read()"
       interval: 30s
       timeout: 10s
       retries: 3
