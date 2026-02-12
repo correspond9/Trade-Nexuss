@@ -323,11 +323,23 @@ class AuthoritativeOptionChainService:
         whenever the system is restarted or markets change status.
         """
         try:
+            import os
+            offline = (os.getenv("DISABLE_DHAN_WS") or os.getenv("BACKEND_OFFLINE") or os.getenv("DISABLE_MARKET_STREAMS") or "").strip().lower() in ("1", "true", "yes", "on")
             from app.market.closing_prices import get_closing_prices
             
             logger.info("🚀 Starting market-aware cache population...")
+            if offline:
+                logger.info("🛡️ Offline flag active - populating from closing prices only")
+                closing_prices_data = get_closing_prices()
+                if closing_prices_data:
+                    self.populate_with_closing_prices_sync(closing_prices_data)
+                    stats = self.get_cache_statistics()
+                    logger.info(f"✅ Cache populated in offline mode: underlyings={stats.get('total_underlyings',0)} expiries={stats.get('total_expiries',0)}")
+                    return True
+                logger.warning("⚠️ No closing prices available in offline mode")
+                return True
             
-            # ✨ NEW: Load security IDs from official DhanHQ CSV
+            # ✨ Load security IDs from official DhanHQ CSV
             logger.info("📋 Loading DhanHQ security IDs from official CSV...")
             await self.security_mapper.load_security_ids()
             

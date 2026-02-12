@@ -125,6 +125,9 @@ app.include_router(option_chain_router, prefix=API_PREFIX + "/options")
 app.include_router(admin_router, prefix=API_PREFIX)
 from app.rest.option_chain_compat import router as option_chain_compat_router
 app.include_router(option_chain_compat_router, prefix=API_PREFIX)
+# Backward compatibility for older frontend calls (v1)
+app.include_router(credentials_router, prefix="/api/v1")
+app.include_router(settings_router, prefix="/api/v1")
 
 # Backstop admin route for tests: set market depth
 from app.market.market_state import state as market_state

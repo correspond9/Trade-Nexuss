@@ -325,6 +325,8 @@ async def on_start():
     print("\n" + "="*70)
     print("[STARTUP] Initializing Broking Terminal V2 Backend")
     print("="*70)
+    import os
+    offline_flag = (os.getenv("DISABLE_DHAN_WS") or os.getenv("BACKEND_OFFLINE") or os.getenv("DISABLE_MARKET_STREAMS") or "").strip().lower() in ("1", "true", "yes", "on")
     
     # Load instrument master
     print("[STARTUP] Loading instrument master...")
@@ -370,7 +372,10 @@ async def on_start():
     # Load Tier B chains (Phase 3) before starting the feed so default
     # subscriptions already exist when we compute initial targets.
     print("[STARTUP] Loading Tier B pre-loaded chains...")
-    await load_tier_b_chains()
+    if not offline_flag:
+        await load_tier_b_chains()
+    else:
+        print("[STARTUP] Skipping Tier B pre-load (offline flag active)")
     
     # Start market data streams after Tier B is registered
     print("[STARTUP] Starting market data streams...")
