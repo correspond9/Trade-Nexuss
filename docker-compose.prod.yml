@@ -34,7 +34,7 @@ services:
       -CMD
       -python
       - -c
-      -"mport urllib.request;
+      -"import urllib.request;
       urlib.request.urlopen(http:??127.0.0.1:8---/health').read()"
       interval: 30s
       timeout: 10s
