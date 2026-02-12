@@ -126,6 +126,26 @@ def dhanhq_status():
         logger.exception("Failed to inspect dhanhq module: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@router.get("/market/live-feed-status")
+def live_feed_status():
+    """Return equity live feed internal status (connection attempts, cooldown)."""
+    try:
+        from app.dhan.live_feed import get_live_feed_status
+        return {"status": "success", "data": get_live_feed_status()}
+    except Exception as e:
+        logger.exception("Failed to fetch live feed status: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/commodities/ws-status")
+def commodities_ws_status():
+    """Return MCX WebSocket manager status."""
+    try:
+        from app.commodity_engine.commodity_ws_manager import commodity_ws_manager
+        return {"status": "success", "data": commodity_ws_manager.get_status()}
+    except Exception as e:
+        logger.exception("Failed to fetch commodities ws status: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @router.get("/market/stream-status")
 def market_stream_status():

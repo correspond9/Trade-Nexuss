@@ -1,7 +1,7 @@
 import logging
 import traceback
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.storage import db as storage_db
 
@@ -26,7 +26,12 @@ logging.basicConfig(
 log = logging.getLogger("trading_nexus")
 log.setLevel(logging.DEBUG)
 
-app = FastAPI(title="Trading Nexus API")
+app = FastAPI(
+    title="Trading Nexus API",
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    redoc_url=None
+)
 
 # Register lifecycle hooks (startup/shutdown) to initialize market caches and streams
 from app.lifecycle import hooks as lifecycle_hooks
@@ -85,6 +90,10 @@ def health_deep():
 @app.get("/test")
 def test():
     return {"message": "test route active"}
+
+@app.get("/docs", include_in_schema=False)
+def docs_redirect():
+    return RedirectResponse(url="/api/docs")
 
 
 # Middleware: log requests and catch+log unhandled exceptions with full traceback
