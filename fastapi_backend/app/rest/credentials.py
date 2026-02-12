@@ -50,14 +50,10 @@ def get_active_credentials():
             "success": True,
             "message": f"Active credentials for {row.auth_mode or 'DAILY_TOKEN'}",
             "data": {
-                "client_id": row.client_id,
+                "client_id_prefix": (row.client_id or "")[:8],
                 "auth_mode": row.auth_mode or "DAILY_TOKEN",
                 "has_token": bool(row.auth_token),
                 "last_updated": row.last_updated.isoformat() if row.last_updated else None,
-                "access_token": row.auth_token,
-                "api_key": row.api_key,
-                "secret_api": row.api_secret,
-                "daily_token": row.daily_token,
             }
         }
     finally:
@@ -160,7 +156,7 @@ def get_static_ip_credentials():
         row = _get_credential_by_mode(db, "STATIC_IP") or _get_active_credential(db)
         if not row:
             return {"success": True, "data": None}
-        return {"success": True, "data": {"client_id": row.client_id or ""}}
+        return {"success": True, "data": {"client_id_prefix": (row.client_id or "")[:8]}}
     finally:
         db.close()
 
@@ -204,8 +200,7 @@ def get_creds():
         if not row:
             return {}
         return {
-            "client_id": row.client_id,
-            "auth_token": row.auth_token,
+            "client_id_prefix": (row.client_id or "")[:8],
             "token_len": len(row.auth_token or ""),
         }
     finally:

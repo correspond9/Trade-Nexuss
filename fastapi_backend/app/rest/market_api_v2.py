@@ -8,6 +8,7 @@ from datetime import datetime, date
 from typing import Optional
 import logging
 from app.market_orchestrator import get_orchestrator
+import os
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -62,6 +63,67 @@ def underlying_ltp(underlying: str):
         raise
     except Exception as e:
         logger.exception("Failed to fetch underlying LTP: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/diagnostics/env")
+def env_status():
+    def g(k: str) -> str:
+        return (os.getenv(k) or "").strip()
+    return {
+        "status": "success",
+        "data": {
+            "ENVIRONMENT": g("ENVIRONMENT"),
+            "DISABLE_DHAN_WS": g("DISABLE_DHAN_WS"),
+            "BACKEND_OFFLINE": g("BACKEND_OFFLINE"),
+            "DISABLE_MARKET_STREAMS": g("DISABLE_MARKET_STREAMS"),
+            "DISABLE_V1_COMPAT": g("DISABLE_V1_COMPAT"),
+        }
+    }
+
+@router.get("/diagnostics/credentials")
+def credentials_status():
+    try:
+        from app.storage.db import SessionLocal
+        from app.storage.models import DhanCredential
+        db = SessionLocal()
+        try:
+            row = db.query(DhanCredential).filter(DhanCredential.is_default == True).first() or db.query(DhanCredential).first()
+            if not row:
+                return {"status": "success", "data": {"has_credentials": False}}
+            tok = (row.daily_token or row.auth_token or "").strip()
+            return {
+                "status": "success",
+                "data": {
+                    "has_credentials": True,
+                    "client_id_prefix": (row.client_id or "")[:8],
+                    "auth_mode": row.auth_mode or "",
+                    "has_token": bool(tok),
+                    "last_updated": row.last_updated.isoformat() if row.last_updated else "",
+                }
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.exception("Failed to fetch credentials status: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/diagnostics/dhanhq")
+def dhanhq_status():
+    try:
+        ok = False
+        feed_names = []
+        try:
+            import importlib
+            m = importlib.import_module("dhanhq.marketfeed")
+            for name in ("DhanFeed", "MarketFeed", "MarketFeedV2", "DhanMarketFeed", "MarketFeedWS"):
+                if hasattr(m, name):
+                    feed_names.append(name)
+            ok = True
+        except Exception:
+            ok = False
+        return {"status": "success", "data": {"import_ok": ok, "feed_classes": feed_names}}
+    except Exception as e:
+        logger.exception("Failed to inspect dhanhq module: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
