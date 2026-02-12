@@ -15,6 +15,7 @@ from app.rest.mock_exchange import router as mock_exchange_router
 from app.commodity_engine.commodity_rest import router as commodity_router
 from app.trading.positions import router as positions_router
 from app.trading.orders import router as orders_router
+from app.routers.authoritative_option_chain import router as option_chain_router
 
 # Configure logging to ensure tracebacks appear in container logs
 logging.basicConfig(
@@ -25,6 +26,12 @@ log = logging.getLogger("trading_nexus")
 log.setLevel(logging.DEBUG)
 
 app = FastAPI(title="Trading Nexus API")
+
+# Register lifecycle hooks (startup/shutdown) to initialize market caches and streams
+from app.lifecycle import hooks as lifecycle_hooks
+
+app.add_event_handler("startup", lifecycle_hooks.on_start)
+app.add_event_handler("shutdown", lifecycle_hooks.on_stop)
 
 # CORS: restrict to known frontend origins to allow credentials safely
 app.add_middleware(
@@ -113,6 +120,7 @@ app.include_router(commodity_router, prefix=API_PREFIX)
 app.include_router(positions_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(mock_exchange_router, prefix=API_PREFIX)
+app.include_router(option_chain_router, prefix=API_PREFIX)
 
 # Backstop admin route for tests: set market depth
 from app.market.market_state import state as market_state

@@ -45,3 +45,20 @@ def health():
 @router.get("/test")
 def test():
     return {"message": "Market API running"}
+
+
+@router.get("/market/underlying-ltp/{underlying}")
+def underlying_ltp(underlying: str):
+    """Return LTP for an underlying symbol from live prices cache."""
+    try:
+        from app.market.live_prices import get_price
+        sym = (underlying or "").upper()
+        price = get_price(sym)
+        if price is None:
+            raise HTTPException(status_code=404, detail=f"LTP not available for {sym}")
+        return {"status": "success", "underlying": sym, "ltp": price}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to fetch underlying LTP: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
