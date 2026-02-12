@@ -4,6 +4,8 @@ from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.market.instrument_master.loader import MASTER
 from app.market_orchestrator import get_orchestrator
+from app.storage.settings_manager import restore_settings_to_database
+from app.storage.auto_credentials import auto_load_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +330,14 @@ async def on_start():
     print("[STARTUP] Loading instrument master...")
     MASTER.load()
     print("[STARTUP] ✓ Instrument master loaded")
+    try:
+        restore_settings_to_database()
+    except Exception:
+        pass
+    try:
+        auto_load_credentials()
+    except Exception:
+        pass
     
     # Initialize managers (they auto-initialize on import)
     print("[STARTUP] Initializing subscription managers...")

@@ -153,6 +153,29 @@ def get_modes():
     finally:
         db.close()
 
+@router.get("/credentials/dhan/static-ip")
+def get_static_ip_credentials():
+    db = SessionLocal()
+    try:
+        row = _get_credential_by_mode(db, "STATIC_IP") or _get_active_credential(db)
+        if not row:
+            return {"success": True, "data": None}
+        return {"success": True, "data": {"client_id": row.client_id or ""}}
+    finally:
+        db.close()
+
+@router.get("/credentials/dhan/daily-token")
+def get_daily_token_credentials():
+    db = SessionLocal()
+    try:
+        row = _get_credential_by_mode(db, "DAILY_TOKEN") or _get_active_credential(db)
+        if not row:
+            return {"success": True, "data": None}
+        expiry = row.last_updated.isoformat() if row.last_updated else ""
+        return {"success": True, "data": {"expiry_time": expiry}}
+    finally:
+        db.close()
+
 
 @router.delete("/credentials/clear")
 def clear_credentials():
