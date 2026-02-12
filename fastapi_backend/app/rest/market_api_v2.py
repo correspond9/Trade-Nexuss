@@ -146,6 +146,63 @@ def commodities_ws_status():
         logger.exception("Failed to fetch commodities ws status: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@router.post("/admin/dhan/reset-cooldown")
+def admin_reset_cooldown():
+    try:
+        from app.dhan.live_feed import reset_cooldown, get_live_feed_status
+        reset_cooldown()
+        return {"status": "success", "data": get_live_feed_status()}
+    except Exception as e:
+        logger.exception("Failed to reset cooldown: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/admin/dhan/restart-streams")
+def admin_restart_streams():
+    try:
+        orch = get_orchestrator()
+        try:
+            orch.start_streams_sync()
+        except Exception:
+            pass
+        return {"status": "success", "data": orch.get_status()}
+    except Exception as e:
+        logger.exception("Failed to restart streams: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/admin/dhan/test-quote")
+def admin_test_quote():
+    try:
+        from app.storage.db import SessionLocal
+        from app.storage.models import DhanCredential
+        from dhanhq import dhanhq as DhanHQClient
+        db = SessionLocal()
+        try:
+            row = db.query(DhanCredential).filter(DhanCredential.is_default == True).first() or db.query(DhanCredential).first()
+            if not row:
+                raise HTTPException(status_code=400, detail="No credentials")
+            token = (row.auth_token or row.daily_token or "").strip()
+            if not row.client_id or not token:
+                raise HTTPException(status_code=400, detail="Invalid credentials")
+            client = None
+            try:
+                client = DhanHQClient(row.client_id, token)
+            except TypeError:
+                try:
+                    client = DhanHQClient(row.client_id)
+                except TypeError:
+                    client = DhanHQClient(token)
+            payload = {"IDX_I": [13]}
+            data = client.quote_data(payload)
+            ok = bool(data)
+            return {"status": "success", "data": {"ok": ok, "payload": payload, "keys": list((data or {}).keys())}}
+        finally:
+            db.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Test quote failed: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @router.get("/market/stream-status")
 def market_stream_status():
