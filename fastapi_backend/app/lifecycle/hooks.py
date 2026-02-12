@@ -326,7 +326,10 @@ async def on_start():
     print("[STARTUP] Initializing Broking Terminal V2 Backend")
     print("="*70)
     import os
+    env = (os.getenv("ENVIRONMENT") or "").strip().lower()
     offline_flag = (os.getenv("DISABLE_DHAN_WS") or os.getenv("BACKEND_OFFLINE") or os.getenv("DISABLE_MARKET_STREAMS") or "").strip().lower() in ("1", "true", "yes", "on")
+    if env == "production":
+        offline_flag = False
     
     # Load instrument master
     print("[STARTUP] Loading instrument master...")
