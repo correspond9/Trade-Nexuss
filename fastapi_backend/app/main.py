@@ -16,6 +16,7 @@ from app.commodity_engine.commodity_rest import router as commodity_router
 from app.trading.positions import router as positions_router
 from app.trading.orders import router as orders_router
 from app.routers.authoritative_option_chain import router as option_chain_router
+from app.admin.admin_panel import router as admin_router
 
 # Configure logging to ensure tracebacks appear in container logs
 logging.basicConfig(
@@ -120,7 +121,10 @@ app.include_router(commodity_router, prefix=API_PREFIX)
 app.include_router(positions_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(mock_exchange_router, prefix=API_PREFIX)
-app.include_router(option_chain_router, prefix=API_PREFIX)
+app.include_router(option_chain_router, prefix=API_PREFIX + "/options")
+app.include_router(admin_router, prefix=API_PREFIX)
+from app.rest.option_chain_compat import router as option_chain_compat_router
+app.include_router(option_chain_compat_router, prefix=API_PREFIX)
 
 # Backstop admin route for tests: set market depth
 from app.market.market_state import state as market_state
