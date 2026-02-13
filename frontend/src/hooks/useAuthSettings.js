@@ -137,6 +137,13 @@ export const useAuthSettings = () => {
         throw new Error((response && response.error) || 'Failed to save credentials');
       }
 
+      // Clear cached credentials to ensure we fetch latest values
+      try {
+        apiService.clearCacheEntry('/credentials/active', {});
+      } catch (e) {
+        // ignore if cache clear not available
+      }
+
       const refreshed = await loadSavedSettings();
       if (refreshed) {
         setLocalSettings(refreshed);
@@ -158,6 +165,12 @@ export const useAuthSettings = () => {
       const authHeaders = { 'Content-Type': 'application/json' };
       const res = await apiService.post('/credentials/switch-mode', { auth_mode: newMode });
       if (res && !res.error) {
+        // Clear cached credentials so loadSavedSettings fetches fresh data
+        try {
+          apiService.clearCacheEntry('/credentials/active', {});
+        } catch (e) {
+          // ignore
+        }
         const refreshed = await loadSavedSettings();
         if (refreshed) setLocalSettings(refreshed);
       } else {
