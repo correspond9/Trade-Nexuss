@@ -22,6 +22,7 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
   const [error, setError] = useState(null);
   const [timestamp, setTimestamp] = useState(null);
   const [cacheStats, setCacheStats] = useState(null);
+  const [retryCount, setRetryCount] = useState(0); // Add retry counter
   
   // Options with defaults
   const {
@@ -41,12 +42,19 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       return null;
     }
 
+    // Prevent infinite loops if error persists
+    if (retryCount > 3) {
+      console.warn('[useAuthoritativeOptionChain] Max retries reached, pausing auto-refresh');
+      return null;
+    }
+
     try {
       setLoading(true);
       setError(null);
 
       console.log('[useAuthoritativeOptionChain] Fetching from authoritative API', underlying, expiry);
       const result = await apiService.get('/options/live', { underlying, expiry });
+      
       if (!result) {
         throw new Error('CACHE_MISS');
       }
@@ -54,6 +62,9 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       if (result.status !== 'success') {
         throw new Error(result.detail || 'API returned non-success status');
       }
+
+      // Reset retry count on success
+      setRetryCount(0);
 
       // Extract data
       const chainData = result.data;
@@ -73,16 +84,20 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       console.error('[useAuthoritativeOptionChain] ❌', errorMsg);
       setError(errorMsg);
       setData(null);
+      
+      // Increment retry count
+      setRetryCount(prev => prev + 1);
+      
       return null;
 
     } finally {
       setLoading(false);
     }
-  }, [underlying, expiry, apiUrl]);
+  }, [underlying, expiry, apiUrl, retryCount]);
 
   // Auto-refresh effect
   useEffect(() => {
-    if (!autoRefresh || !underlying || !expiry) {
+    if (!autoRefresh || !underlying || !expiry || retryCount > 3) {
       return;
     }
 
@@ -96,11 +111,12 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
 
     return () => clearInterval(interval);
 
-  }, [underlying, expiry, autoRefresh, refreshInterval, fetchChain]);
+  }, [underlying, expiry, autoRefresh, refreshInterval, fetchChain, retryCount]);
 
   // Manual refresh function
   const refresh = useCallback(() => {
     console.log('[useAuthoritativeOptionChain] Manual refresh triggered');
+    setRetryCount(0); // Reset retries on manual action
     return fetchChain();
   }, [fetchChain]);
 

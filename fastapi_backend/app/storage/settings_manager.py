@@ -60,8 +60,9 @@ def save_settings(force: bool = False) -> bool:
                 "auth_mode": cred.auth_mode or "DAILY_TOKEN",
                 "api_key": cred.api_key or "",
                 "api_secret": cred.api_secret or "",
-                # DO NOT save auth_token or daily_token - those are temporary
-                "notes": "This is a backup of working settings. Daily token must be entered fresh each day.",
+                # Save token as well if configured (useful for production)
+                "daily_token": cred.daily_token or cred.auth_token or "",
+                "notes": "This backup now includes the token for auto-restore in production.",
                 "locked": SETTINGS_LOCK_FILE.exists() or force,
             }
             
@@ -141,7 +142,12 @@ def restore_settings_to_database() -> bool:
             cred.auth_mode = settings.get("auth_mode", "DAILY_TOKEN")
             cred.api_key = settings.get("api_key", "")
             cred.api_secret = settings.get("api_secret", "")
-            # auth_token and daily_token are left as-is (must be entered fresh)
+            # Restore tokens as well
+            saved_token = settings.get("daily_token") or settings.get("auth_token") or ""
+            if saved_token:
+                cred.daily_token = saved_token
+                cred.auth_token = saved_token
+                print(f"[SETTINGS] ✓ Auto-restored saved token (len={len(saved_token)})")
             
             db.commit()
             

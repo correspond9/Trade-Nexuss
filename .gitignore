@@ -56,10 +56,16 @@ env/
 logs/
 backend.log
 
-# Database (commented out to allow broker.db)
-# *.db
-# *.sqlite
-# *.sqlite3
+# Database
+*.db
+*.sqlite
+*.sqlite3
+fastapi_backend/database/broker.db
+
+# Settings
+fastapi_backend/config/settings.json
+fastapi_backend/config/settings.backup.json
+fastapi_backend/config/.settings_locked
 
 # Node.js (for frontend)
 node_modules/

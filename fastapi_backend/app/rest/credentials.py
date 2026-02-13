@@ -60,12 +60,15 @@ def get_active_credentials():
         db.close()
 
 
+from app.storage.settings_manager import save_settings
+
 @router.post("/credentials/save")
 def save_credentials(c: CredSaveIn):
     db = SessionLocal()
     try:
         mode = _normalize_mode(c.auth_mode)
-
+        # ... (rest of logic)
+        
         row = _get_credential_by_mode(db, mode)
         if not row:
             row = DhanCredential(auth_mode=mode)
@@ -83,6 +86,9 @@ def save_credentials(c: CredSaveIn):
         row.is_default = True
 
         db.commit()
+
+        # Persist to disk for auto-restore
+        save_settings(force=True)
 
         # Start market data streams immediately after credentials are saved
         get_orchestrator().start_streams_sync()

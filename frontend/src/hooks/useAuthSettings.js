@@ -24,31 +24,35 @@ export const useAuthSettings = () => {
 
   // Load settings from backend
   const loadSavedSettings = async () => {
-      try {
-        const result = await apiService.get('/credentials/active');
-        const data = result?.data || {};
-        if (data?.client_id || data?.access_token || data?.daily_token) {
-          return {
-            authMode: data.auth_mode || 'DAILY_TOKEN',
-            clientId: data.client_id || '',
-            accessToken: data.access_token || '',
-            apiKey: data.api_key || '',
-            clientSecret: data.secret_api || '',
-            connected: false,
-            lastAuthTime: null,
-            authStatus: 'disconnected',
-            wsUrl: 'wss://api-feed.dhan.co?version=2&token=...&clientId=...&authType=2',
-            _cachedCredentials: {
-              DAILY_TOKEN: data,
-              STATIC_IP: null
-            }
-          };
-        }
-      } catch (e) {
-        console.warn('Failed to load credentials via apiService, falling back to legacy URLs', e);
+    // Try primary backend endpoint
+    try {
+      const result = await apiService.get('/credentials/active');
+      const data = result?.data || {};
+      
+      // Check if we have valid credentials
+      if (data?.client_id_prefix || data?.has_token) {
+        return {
+          authMode: data.auth_mode || 'DAILY_TOKEN',
+          clientId: data.client_id_prefix ? `${data.client_id_prefix}****` : '',
+          accessToken: data.has_token ? '****************' : '', // Masked token placeholder
+          apiKey: '',
+          clientSecret: '',
+          connected: data.has_token,
+          lastAuthTime: data.last_updated,
+          authStatus: data.has_token ? 'connected' : 'disconnected',
+          wsUrl: 'wss://api-feed.dhan.co?version=2&token=...&clientId=...&authType=2',
+          _cachedCredentials: {
+            DAILY_TOKEN: data,
+            STATIC_IP: null
+          }
+        };
       }
+    } catch (e) {
+      console.warn('Failed to load credentials via apiService, falling back to legacy URLs', e);
+    }
 
-      // Fallback old locations
+    // Fallback logic ...
+
       const fallbackBases = [
         `${ROOT_BASE}/api/v2/credentials/active`,
         'http://localhost:8000/api/v2/credentials/active',

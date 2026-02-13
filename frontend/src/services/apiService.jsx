@@ -51,7 +51,17 @@ class ApiService {
   }
 
   // Remove credential-like fields from outgoing JSON bodies to avoid accidental leakage
-  sanitizeBody(obj) {
+  // EXCEPTION: Allow credentials to be sent to /credentials/save
+  sanitizeBody(obj, url) {
+    // If the URL is for saving credentials, DO NOT sanitize
+    if (url && url.includes('/credentials/save')) {
+      console.log('Allowing credential save payload:', obj);
+      return obj;
+    }
+    if (url && url.includes('/auth/login')) {
+      return obj;
+    }
+
     const SENSITIVE_KEYS = new Set([
       'api_key','apiKey','api_secret','apiSecret','secret_api','secret',
       'client_id','clientId','access_token','accessToken','auth_token','authToken',
@@ -689,22 +699,25 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    // Build full URL safely to avoid duplicate slashes or duplicate /api/v2 segments
-    const isAbsolute = /^https?:\/\//i.test(endpoint);
-    const fullUrl = isAbsolute
-      ? endpoint
-      : `${this.baseURL}/${String(endpoint).replace(/^\/+/, '')}`;
-
+    const url = endpoint.startsWith('http') ? endpoint : `${this.baseURL}${endpoint}`;
     const headers = {
-      ...this.defaultHeaders,
+      'Content-Type': 'application/json',
       ...this.getAuthHeaders(),
       ...options.headers,
     };
 
+    let body = options.body;
+    if (body && typeof body === 'object' && !(body instanceof FormData)) {
+      // Pass the endpoint URL to sanitizeBody so exceptions can be made
+      // Fix: Use the relative endpoint for checking exceptions, not the full URL if possible
+      body = JSON.stringify(this.sanitizeBody(body, endpoint));
+    }
+
     try {
-      const response = await fetch(fullUrl, {
+      const response = await fetch(url, {
         ...options,
         headers,
+        body,
       });
 
       // Handle 401 Unauthorized
@@ -795,7 +808,7 @@ class ApiService {
   }
 
   async post(endpoint, data = {}) {
-    const safe = this.sanitizeBody(data);
+    const safe = this.sanitizeBody(data, endpoint);
     const body = (typeof FormData !== 'undefined' && safe instanceof FormData) || typeof safe === 'string'
       ? safe
       : JSON.stringify(safe);
@@ -806,7 +819,7 @@ class ApiService {
   }
 
   async put(endpoint, data = {}) {
-    const safe = this.sanitizeBody(data);
+    const safe = this.sanitizeBody(data, endpoint);
     const body = (typeof FormData !== 'undefined' && safe instanceof FormData) || typeof safe === 'string'
       ? safe
       : JSON.stringify(safe);
@@ -823,7 +836,7 @@ class ApiService {
   }
 
   async patch(endpoint, data = {}) {
-    const safe = this.sanitizeBody(data);
+    const safe = this.sanitizeBody(data, endpoint);
     const body = (typeof FormData !== 'undefined' && safe instanceof FormData) || typeof safe === 'string'
       ? safe
       : JSON.stringify(safe);

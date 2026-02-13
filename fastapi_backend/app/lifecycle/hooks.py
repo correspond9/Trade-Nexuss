@@ -4,8 +4,6 @@ from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.market.instrument_master.loader import MASTER
 from app.market_orchestrator import get_orchestrator
-from app.storage.settings_manager import restore_settings_to_database
-from app.storage.auto_credentials import auto_load_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -325,24 +323,11 @@ async def on_start():
     print("\n" + "="*70)
     print("[STARTUP] Initializing Broking Terminal V2 Backend")
     print("="*70)
-    import os
-    env = (os.getenv("ENVIRONMENT") or "").strip().lower()
-    offline_flag = (os.getenv("DISABLE_DHAN_WS") or os.getenv("BACKEND_OFFLINE") or os.getenv("DISABLE_MARKET_STREAMS") or "").strip().lower() in ("1", "true", "yes", "on")
-    if env == "production":
-        offline_flag = False
     
     # Load instrument master
     print("[STARTUP] Loading instrument master...")
     MASTER.load()
     print("[STARTUP] ✓ Instrument master loaded")
-    try:
-        restore_settings_to_database()
-    except Exception:
-        pass
-    try:
-        auto_load_credentials()
-    except Exception:
-        pass
     
     # Initialize managers (they auto-initialize on import)
     print("[STARTUP] Initializing subscription managers...")
@@ -375,10 +360,7 @@ async def on_start():
     # Load Tier B chains (Phase 3) before starting the feed so default
     # subscriptions already exist when we compute initial targets.
     print("[STARTUP] Loading Tier B pre-loaded chains...")
-    if not offline_flag:
-        await load_tier_b_chains()
-    else:
-        print("[STARTUP] Skipping Tier B pre-load (offline flag active)")
+    await load_tier_b_chains()
     
     # Start market data streams after Tier B is registered
     print("[STARTUP] Starting market data streams...")
