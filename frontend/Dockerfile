@@ -7,7 +7,10 @@ RUN npm ci --silent
 
 # Copy source and build
 COPY . .
-RUN npm run build
+# Allow overriding API base at build time. Default to '/api/v2' to match backend routes.
+ARG VITE_API_URL=/api/v2
+ENV VITE_API_URL=${VITE_API_URL}
+RUN echo "Building with VITE_API_URL=${VITE_API_URL}" && npm run build
 
 FROM nginx:stable-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
