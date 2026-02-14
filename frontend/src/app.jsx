@@ -23,6 +23,7 @@ const Options = React.lazy(() => import('./pages/OPTIONS'));
 const Watchlist = React.lazy(() => import('./pages/WATCHLIST'));
 const StraddlyEmbed = React.lazy(() => import('./pages/StraddlyEmbed'));
 const Commodities = React.lazy(() => import('./pages/Commodities'));
+const ThemeAdmin = React.lazy(() => import('./pages/ThemeAdmin'));
 
 // Wrapper component for Watchlist to provide required props
 const WatchlistWrapper = () => {
@@ -133,6 +134,15 @@ const App = () => {
                 } />
               </Route>
               
+              <Route path="/theme-admin" element={
+                <ProtectedRoute requiredRoles={['ADMIN', 'SUPER_ADMIN']}>
+                  <Layout>
+                    <React.Suspense fallback={<LoadingSpinner />}>
+                      <ThemeAdmin />
+                    </React.Suspense>
+                  </Layout>
+                </ProtectedRoute>
+              } />
               <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
                 <Route index element={<HomeRedirect />} />
                 <Route path="dashboard" element={
