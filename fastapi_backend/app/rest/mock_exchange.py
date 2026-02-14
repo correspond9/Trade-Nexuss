@@ -1,22 +1,17 @@
 from datetime import datetime, timedelta
-
-# IST timezone offset (UTC+5:30)
-IST_OFFSET = timedelta(hours=5, minutes=30)
-
-def ist_now():
-    """Get current IST time"""
-    return datetime.utcnow() + IST_OFFSET
 import asyncio
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.storage.db import SessionLocal
+from app.users.auth import get_current_user
+from app.users.permissions import require_role
 from app.storage import models
 from app.users.passwords import hash_password
-from app.market.live_prices import get_prices
+from app.market.live_prices import get_prices, update_price
 from app.rms.kill_switch import blocked as kill_switch_blocked
 from app.execution_simulator import get_execution_engine
 from app.rms.span_margin_calculator import (
@@ -30,8 +25,13 @@ from app.rms.mcx_margin_calculator import (
 from app.services.dhan_margin_service import dhan_margin_service
 from app.market.watchlist_manager import get_watchlist_manager
 from app.ems.market_config import market_config
-from app.market.live_prices import update_price
 from app.market.market_state import state as market_state
+from app.oms.order_ids import generate as generate_order_id
+
+
+# IST timezone offset (UTC+5:30)
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
 
 router = APIRouter(tags=["mock-exchange"])
 EXEC_ENGINE = get_execution_engine()
@@ -45,6 +45,16 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# Optional current user resolver: returns active UserAccount or None when no X-USER header
+def optional_current_user(x_user: str = Header(None), db: Session = Depends(get_db)):
+    if not x_user:
+        return None
+    user = db.query(models.UserAccount).filter(models.UserAccount.username == x_user).first()
+    if not user or user.status != "ACTIVE":
+        return None
+    return user
 
 
 def _serialize(model_obj):
@@ -523,8 +533,82 @@ class UserRequest(BaseModel):
     wallet_balance: float = 0.0
     margin_multiplier: Optional[float] = 5.0
     brokerage_plan_id: Optional[int] = None
+def _place_order_core(req: OrderRequest, db: Session, user: models.UserAccount):
+    def _reject_order(reason: str):
+        order = models.MockOrder(
+            order_ref=generate_order_id(),
+            user_id=user.id,
+            symbol=req.symbol,
+            security_id=req.security_id,
+            exchange_segment=req.exchange_segment,
+            transaction_type=req.transaction_type,
+            quantity=req.quantity,
+            order_type=req.order_type,
+            product_type=req.product_type,
+            price=req.price or 0.0,
+            trigger_price=req.trigger_price,
+            is_super=bool(req.is_super),
+            target_price=req.target_price,
+            stop_loss_price=req.stop_loss_price,
+            trailing_jump=req.trailing_jump,
+            status="REJECTED",
+            remarks=reason,
+        )
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        return {"data": _serialize(order)}
 
+    if user.status != "ACTIVE" or kill_switch_blocked(user):
+        return _reject_order("USER_BLOCKED")
 
+    if not _segment_allowed(user, req.exchange_segment):
+        return _reject_order("SEGMENT_RESTRICTED")
+
+    snapshot = EXEC_ENGINE._snapshot_for_order(req.symbol, req.exchange_segment)
+    decision_price = snapshot.get("best_ask") if req.transaction_type == "BUY" else snapshot.get("best_bid")
+    exec_price = decision_price or (req.price or 0.0)
+    required = _margin_required(exec_price, req.quantity, req.product_type)
+    local_margin = _local_margin_for_order(
+        user_id=user.id,
+        exchange_segment=req.exchange_segment,
+        symbol=req.symbol,
+        transaction_type=req.transaction_type,
+        quantity=req.quantity,
+        price=exec_price,
+    )
+    if local_margin and local_margin.get("margin") is not None:
+        required = float(local_margin["margin"])
+    required = _apply_margin_multiplier(required, user, req.product_type)
+    margin = _get_or_create_margin(db, user.id)
+    margin_exceeded = margin.available_margin < required
+
+    order = models.MockOrder(
+        order_ref=generate_order_id(),
+        user_id=user.id,
+        symbol=req.symbol,
+        security_id=req.security_id,
+        exchange_segment=req.exchange_segment,
+        transaction_type=req.transaction_type,
+        quantity=req.quantity,
+        order_type=req.order_type,
+        product_type=req.product_type,
+        price=req.price or 0.0,
+        trigger_price=req.trigger_price,
+        is_super=bool(req.is_super),
+        target_price=req.target_price,
+        stop_loss_price=req.stop_loss_price,
+        trailing_jump=req.trailing_jump,
+        status="PENDING",
+    )
+    db.add(order)
+    db.flush()
+
+    EXEC_ENGINE.process_new_order(db, order)
+
+    db.commit()
+    db.refresh(order)
+    response = {"data": _serialize(order)}
 class UserUpdateRequest(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
@@ -536,6 +620,26 @@ class UserUpdateRequest(BaseModel):
     wallet_balance: Optional[float] = None
     margin_multiplier: Optional[float] = None
     brokerage_plan_id: Optional[int] = None
+
+
+class BackdatePositionRequest(BaseModel):
+    # Identify target account
+    mobile: Optional[str] = None
+    user_id: Optional[int] = None
+    username: Optional[str] = None
+
+    # Position details
+    symbol: str
+    quantity: int
+    avg_price: float = Field(..., alias="avg_price")
+    exchange_segment: Optional[str] = "NSE_EQ"
+    product_type: Optional[str] = "MIS"
+
+    # When provided, set position created_at to this datetime (ISO format accepted)
+    created_at: Optional[datetime] = None
+
+    # If an existing position for (user,symbol,product_type) exists, merge by default
+    merge: bool = True
 
 
 class LedgerAdjustRequest(BaseModel):
@@ -656,13 +760,41 @@ def list_orders_legacy(user_id: Optional[int] = None, db: Session = Depends(get_
 
 
 @router.post("/trading/orders")
-def place_order(req: OrderRequest, db: Session = Depends(get_db)):
-    user = db.query(models.UserAccount).filter(models.UserAccount.id == (req.user_id or 1)).first()
+async def place_order(
+    req: OrderRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.UserAccount] = Depends(optional_current_user),
+):
+    # Inspect raw JSON to detect forbidden credential-like fields
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    SENSITIVE_KEYS = {
+        'api_key','apiKey','api_secret','apiSecret','secret_api','secret',
+        'client_id','clientId','access_token','accessToken','auth_token','authToken',
+        'daily_token','dailyToken'
+    }
+
+    # shallow check of top-level keys to avoid accidental leakage
+    if any(k in SENSITIVE_KEYS for k in (payload.keys() if isinstance(payload, dict) else [])):
+        raise HTTPException(status_code=400, detail="Credential-like fields are forbidden in order payload")
+
+    # If a current user is present, enforce user_id matches
+    if current_user is not None:
+        if req.user_id and int(req.user_id) != int(current_user.id):
+            raise HTTPException(status_code=403, detail="user_id does not match authenticated user")
+        user = current_user
+    else:
+        user = db.query(models.UserAccount).filter(models.UserAccount.id == (req.user_id or 1)).first()
     if not user:
         user = _get_or_create_admin(db)
 
     def _reject_order(reason: str):
         order = models.MockOrder(
+            order_ref=generate_order_id(),
             user_id=user.id,
             symbol=req.symbol,
             security_id=req.security_id,
@@ -710,6 +842,7 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
     margin_exceeded = margin.available_margin < required
 
     order = models.MockOrder(
+        order_ref=generate_order_id(),
         user_id=user.id,
         symbol=req.symbol,
         security_id=req.security_id,
@@ -822,6 +955,7 @@ def close_position(position_id: int, req: SquareOffRequest, db: Session = Depend
         snapshot["best_ask"] = ltp * 1.001
 
     order = models.MockOrder(
+        order_ref=generate_order_id(),
         user_id=pos.user_id,
         symbol=pos.symbol,
         exchange_segment=pos.exchange_segment,
@@ -938,7 +1072,11 @@ def execute_basket(req: BasketExecuteRequest, db: Session = Depends(get_db)):
             product_type=leg.product_type,
             price=leg.price,
         )
-        results.append(place_order(order_req, db))
+        # Resolve user for basket and call core placement synchronously
+        basket_user = db.query(models.UserAccount).filter(models.UserAccount.id == basket.user_id).first()
+        if not basket_user:
+            basket_user = _get_or_create_admin(db)
+        results.append(_place_order_core(order_req, db, basket_user))
     basket.status = "EXECUTED"
     basket.updated_at = ist_now()
     db.commit()
@@ -1043,16 +1181,21 @@ async def calculate_margin(req: MarginRequest, db: Session = Depends(get_db)):
             except Exception:
                 pass
     # Fetch margin from Dhan API - NO LOCAL CALCULATION
-    dhan_margin = await _dhan_margin_for_order(
-        user_id=user.id,
-        exchange_segment=exchange_segment or req.exchange_segment,
-        symbol=symbol_for_margin,
-        transaction_type=req.transaction_type or "BUY",
-        quantity=req.quantity,
-        price=price,
-        product_type=req.product_type or "MIS",
-        security_id=security_id
-    )
+    dhan_margin = None
+    try:
+        dhan_margin = await _dhan_margin_for_order(
+            user_id=user.id,
+            exchange_segment=exchange_segment or req.exchange_segment,
+            symbol=symbol_for_margin,
+            transaction_type=req.transaction_type or "BUY",
+            quantity=req.quantity,
+            price=price,
+            product_type=req.product_type or "MIS",
+            security_id=security_id
+        )
+    except Exception as e:
+        print(f"[MARGIN] Critical error in margin calculation: {e}")
+        dhan_margin = None
     
     if dhan_margin:
         required = _apply_margin_multiplier(float(dhan_margin.get("margin") or 0.0), user, req.product_type)
@@ -1231,15 +1374,24 @@ def delete_basket(basket_id: int, db: Session = Depends(get_db)):
 # ---------- Admin Endpoints ----------
 
 @router.get("/admin/users")
-def list_users(db: Session = Depends(get_db)):
+def list_users(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
     _get_or_create_admin(db)
-    users = db.query(models.UserAccount).all()
+    if user.role == "SUPER_ADMIN":
+        users = db.query(models.UserAccount).all()
+    else:
+        # ADMIN: hide SUPER_ADMIN accounts
+        users = db.query(models.UserAccount).filter(models.UserAccount.role != "SUPER_ADMIN").all()
     return {"data": [_serialize(u) for u in users]}
 
 
 @router.post("/admin/users")
-def create_user(req: UserRequest, db: Session = Depends(get_db)):
+def create_user(req: UserRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
     _get_or_create_admin(db)
+    # ADMIN cannot create SUPER_ADMIN
+    if user.role == "ADMIN" and (req.role or "USER") == "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="Insufficient permissions to create SUPER_ADMIN user")
     if not req.mobile:
         raise HTTPException(status_code=400, detail="Mobile number is required")
     plan_id = req.brokerage_plan_id
@@ -1277,11 +1429,18 @@ def create_user(req: UserRequest, db: Session = Depends(get_db)):
 
 
 @router.put("/admin/users/{user_id}")
-def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depends(get_db)):
-    user = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
-    if not user:
+def update_user(user_id: int, req: UserUpdateRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
+    if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    margin = _get_or_create_margin(db, user.id)
+    # ADMIN restrictions: cannot modify SUPER_ADMIN or other ADMIN accounts
+    if user.role == "ADMIN":
+        if target.role == "SUPER_ADMIN":
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if target.role == "ADMIN" and target.id != user.id:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to modify other ADMIN accounts")
+    margin = _get_or_create_margin(db, target.id)
     previous_wallet = user.wallet_balance or 0.0
     previous_multiplier = _normalize_margin_multiplier(user.margin_multiplier)
     if req.username is not None:
@@ -1322,9 +1481,9 @@ def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depends(get_
                 margin.available_margin + (delta_wallet * previous_multiplier)
             )
         margin.updated_at = ist_now()
-    user.updated_at = ist_now()
+    target.updated_at = ist_now()
     db.commit()
-    return {"data": _serialize(user)}
+    return {"data": _serialize(target)}
 
 # List all brokerage plans
 @router.get("/admin/brokerage-plans")
@@ -1335,23 +1494,111 @@ def list_brokerage_plans(db: Session = Depends(get_db)):
 
 
 @router.delete("/admin/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
-    if not user:
+def delete_user(user_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
+    if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    user.status = "BLOCKED"
-    user.updated_at = ist_now()
+    # ADMIN cannot block ADMIN or SUPER_ADMIN (except themselves)
+    if user.role == "ADMIN":
+        if target.role == "SUPER_ADMIN":
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if target.role == "ADMIN" and target.id != user.id:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to block other ADMIN accounts")
+    target.status = "BLOCKED"
+    target.updated_at = ist_now()
     db.commit()
     return {"status": "blocked"}
 
 
 @router.get("/admin/users/{user_id}/positions")
-def admin_user_positions(user_id: int, db: Session = Depends(get_db)):
+def admin_user_positions(user_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.role == "ADMIN" and target.role == "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     return list_positions(user_id=user_id, db=db)
 
 
+@router.post("/admin/positions/backdate")
+def admin_backdate_position(req: BackdatePositionRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    # Only SUPER_ADMIN can create back-dated positions
+    require_role(user, ["SUPER_ADMIN"])
+
+    # Resolve target user
+    target = None
+    if req.user_id is not None:
+        target = db.query(models.UserAccount).filter(models.UserAccount.id == req.user_id).first()
+    elif req.mobile:
+        target = db.query(models.UserAccount).filter(models.UserAccount.mobile == req.mobile).first()
+    elif req.username:
+        target = db.query(models.UserAccount).filter(models.UserAccount.username == req.username).first()
+    else:
+        raise HTTPException(status_code=400, detail="Provide mobile or user_id or username")
+
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Prevent ADMIN-level restrictions here — only SUPER_ADMIN allowed by require_role
+
+    # Check for existing position
+    existing = db.query(models.MockPosition).filter(
+        models.MockPosition.user_id == target.id,
+        models.MockPosition.symbol == req.symbol,
+        models.MockPosition.product_type == req.product_type,
+    ).first()
+
+    created_at = req.created_at or models.ist_now()
+
+    if existing:
+        if not req.merge:
+            raise HTTPException(status_code=409, detail="Position already exists; set merge=true to combine")
+        # Merge quantities and recompute average price
+        total_qty = (existing.quantity or 0) + req.quantity
+        if total_qty == 0:
+            new_avg = req.avg_price
+        else:
+            new_avg = ((existing.avg_price or 0.0) * (existing.quantity or 0) + req.avg_price * req.quantity) / total_qty
+        existing.quantity = total_qty
+        existing.avg_price = new_avg
+        existing.updated_at = created_at
+        # Optionally backdate created_at if requested
+        existing.created_at = created_at
+        db.commit()
+        db.refresh(existing)
+        return {"data": _serialize(existing)}
+
+    pos = models.MockPosition(
+        user_id=target.id,
+        symbol=req.symbol,
+        exchange_segment=req.exchange_segment,
+        product_type=req.product_type,
+        quantity=req.quantity,
+        avg_price=req.avg_price,
+        status="OPEN",
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    db.add(pos)
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    db.refresh(pos)
+    return {"data": _serialize(pos)}
+
+
 @router.post("/admin/users/{user_id}/positions/{position_id}/squareoff")
-def admin_squareoff(user_id: int, position_id: int, req: SquareOffRequest, db: Session = Depends(get_db)):
+def admin_squareoff(user_id: int, position_id: int, req: SquareOffRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.role == "ADMIN" and target.role == "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     pos = db.query(models.MockPosition).filter(models.MockPosition.id == position_id, models.MockPosition.user_id == user_id).first()
     if not pos:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -1359,29 +1606,36 @@ def admin_squareoff(user_id: int, position_id: int, req: SquareOffRequest, db: S
 
 
 @router.post("/admin/users/{user_id}/restrict")
-def admin_restrict_user(user_id: int, req: RestrictRequest, db: Session = Depends(get_db)):
-    user = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
-    if not user:
+def admin_restrict_user(user_id: int, req: RestrictRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
+    if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    user.allowed_segments = req.allowed_segments
-    user.updated_at = ist_now()
+    if user.role == "ADMIN" and target.role in ["ADMIN", "SUPER_ADMIN"] and target.id != user.id:
+        raise HTTPException(status_code=403, detail="Insufficient permissions to modify this account")
+    target.allowed_segments = req.allowed_segments
+    target.updated_at = ist_now()
     db.commit()
-    return {"data": _serialize(user)}
+    return {"data": _serialize(target)}
 
 
 @router.post("/admin/users/{user_id}/brokerage-plan")
-def admin_set_brokerage_plan(user_id: int, req: BrokeragePlanRequest, db: Session = Depends(get_db)):
-    user = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
-    if not user:
+def admin_set_brokerage_plan(user_id: int, req: BrokeragePlanRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
+    if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    user.brokerage_plan_id = req.brokerage_plan_id
-    user.updated_at = ist_now()
+    if user.role == "ADMIN" and target.role in ["ADMIN", "SUPER_ADMIN"] and target.id != user.id:
+        raise HTTPException(status_code=403, detail="Insufficient permissions to modify this account")
+    target.brokerage_plan_id = req.brokerage_plan_id
+    target.updated_at = ist_now()
     db.commit()
-    return {"data": _serialize(user)}
+    return {"data": _serialize(target)}
 
 
 @router.post("/admin/margins/recalculate")
-def admin_recalculate_margins(db: Session = Depends(get_db)):
+def admin_recalculate_margins(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
     users = db.query(models.UserAccount).all()
     updated = 0
     for user in users:
@@ -1397,29 +1651,55 @@ def admin_recalculate_margins(db: Session = Depends(get_db)):
 
 
 @router.post("/admin/ledger/adjust")
-def adjust_ledger(req: LedgerAdjustRequest, db: Session = Depends(get_db)):
+def adjust_ledger(req: LedgerAdjustRequest, caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
     user = db.query(models.UserAccount).filter(models.UserAccount.id == req.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    # ADMIN restrictions: cannot adjust ledger for ADMIN/SUPER_ADMIN except themselves
+    if caller.role == "ADMIN" and user.role in ["ADMIN", "SUPER_ADMIN"] and user.id != caller.id:
+        raise HTTPException(status_code=403, detail="Insufficient permissions to adjust this account")
     _update_ledger(db, user, credit=req.credit, debit=req.debit, entry_type="ADJUST", remarks=req.remarks or "Manual adjustment")
     db.commit()
     return {"status": "ok"}
 
 
 @router.get("/admin/ledger")
-def list_ledger(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+def list_ledger(caller=Depends(get_current_user), user_id: Optional[int] = None, db: Session = Depends(get_db)):
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
     query = db.query(models.LedgerEntry)
     if user_id:
+        # If ADMIN requests a specific user's ledger, enforce visibility rules
+        target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+        if caller.role == "ADMIN" and target.role in ["ADMIN", "SUPER_ADMIN"] and target.id != caller.id:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to view this ledger")
         query = query.filter(models.LedgerEntry.user_id == user_id)
+    else:
+        if caller.role == "ADMIN":
+            # ADMIN should not see SUPER_ADMIN ledger entries
+            sub = db.query(models.UserAccount.id).filter(models.UserAccount.role == "SUPER_ADMIN").subquery()
+            query = query.filter(~models.LedgerEntry.user_id.in_(sub))
     entries = query.order_by(models.LedgerEntry.created_at.desc()).all()
     return {"data": [_serialize(e) for e in entries]}
 
 
 @router.get("/admin/ledger/summary")
-def ledger_summary(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+def ledger_summary(caller=Depends(get_current_user), user_id: Optional[int] = None, db: Session = Depends(get_db)):
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
     query = db.query(models.LedgerEntry)
     if user_id:
+        target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+        if caller.role == "ADMIN" and target.role in ["ADMIN", "SUPER_ADMIN"] and target.id != caller.id:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to view this summary")
         query = query.filter(models.LedgerEntry.user_id == user_id)
+    else:
+        if caller.role == "ADMIN":
+            sub = db.query(models.UserAccount.id).filter(models.UserAccount.role == "SUPER_ADMIN").subquery()
+            query = query.filter(~models.LedgerEntry.user_id.in_(sub))
     entries = query.all()
     total_credit = sum(e.credit or 0.0 for e in entries)
     total_debit = sum(e.debit or 0.0 for e in entries)
@@ -1427,19 +1707,43 @@ def ledger_summary(user_id: Optional[int] = None, db: Session = Depends(get_db))
 
 
 @router.get("/admin/pnl/snapshots")
-def list_pnl_snapshots(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+def list_pnl_snapshots(caller=Depends(get_current_user), user_id: Optional[int] = None, db: Session = Depends(get_db)):
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
     query = db.query(models.PnlSnapshot)
     if user_id:
+        target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+        if caller.role == "ADMIN" and target.role in ["ADMIN", "SUPER_ADMIN"] and target.id != caller.id:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to view this user's PnL")
         query = query.filter(models.PnlSnapshot.user_id == user_id)
+    else:
+        if caller.role == "ADMIN":
+            # ADMIN should only see USER snapshots (exclude ADMIN/SUPER_ADMIN)
+            user_ids = [u.id for u in db.query(models.UserAccount).filter(models.UserAccount.role == "USER").all()]
+            query = query.filter(models.PnlSnapshot.user_id.in_(user_ids))
     snapshots = query.order_by(models.PnlSnapshot.created_at.desc()).all()
     return {"data": [_serialize(s) for s in snapshots]}
 
 
 @router.post("/admin/pnl/snapshots")
-def record_pnl_snapshot(req: PnlSnapshotRequest, db: Session = Depends(get_db)):
+def record_pnl_snapshot(req: PnlSnapshotRequest, caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
     _get_or_create_admin(db)
     users = db.query(models.UserAccount).all()
-    target_ids = [req.user_id] if req.user_id else [u.id for u in users]
+    if caller.role == "SUPER_ADMIN":
+        target_ids = [req.user_id] if req.user_id else [u.id for u in users]
+    else:
+        # ADMIN: only allow snapshots for USER accounts; if specific user_id provided, enforce it's allowed
+        if req.user_id:
+            target_user = db.query(models.UserAccount).filter(models.UserAccount.id == req.user_id).first()
+            if not target_user:
+                raise HTTPException(status_code=404, detail="User not found")
+            if target_user.role != "USER" and target_user.id != caller.id:
+                raise HTTPException(status_code=403, detail="Insufficient permissions to snapshot this account")
+            target_ids = [req.user_id]
+        else:
+            target_ids = [u.id for u in users if u.role == "USER"]
     results = []
     for uid in target_ids:
         positions = db.query(models.MockPosition).filter(models.MockPosition.user_id == uid).all()
@@ -1462,20 +1766,36 @@ def record_pnl_snapshot(req: PnlSnapshotRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/admin/payouts")
-def list_payouts(db: Session = Depends(get_db)):
-    entries = db.query(models.LedgerEntry).filter(models.LedgerEntry.entry_type == "PAYOUT").all()
+def list_payouts(caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
+    query = db.query(models.LedgerEntry).filter(models.LedgerEntry.entry_type == "PAYOUT")
+    if caller.role == "ADMIN":
+        sub = db.query(models.UserAccount.id).filter(models.UserAccount.role == "SUPER_ADMIN").subquery()
+        query = query.filter(~models.LedgerEntry.user_id.in_(sub))
+    entries = query.all()
     return {"data": [_serialize(e) for e in entries]}
 
 
 @router.get("/admin/payins")
-def list_payins(db: Session = Depends(get_db)):
-    entries = db.query(models.LedgerEntry).filter(models.LedgerEntry.entry_type == "PAYIN").all()
+def list_payins(caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
+    query = db.query(models.LedgerEntry).filter(models.LedgerEntry.entry_type == "PAYIN")
+    if caller.role == "ADMIN":
+        sub = db.query(models.UserAccount.id).filter(models.UserAccount.role == "SUPER_ADMIN").subquery()
+        query = query.filter(~models.LedgerEntry.user_id.in_(sub))
+    entries = query.all()
     return {"data": [_serialize(e) for e in entries]}
 
 
 @router.post("/admin/margins/adjust")
-def adjust_margin(req: MarginAdjustRequest, db: Session = Depends(get_db)):
+def adjust_margin(req: MarginAdjustRequest, caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
     margin = _get_or_create_margin(db, req.user_id)
+    target_user = db.query(models.UserAccount).filter(models.UserAccount.id == req.user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if caller.role == "ADMIN" and target_user.role in ["ADMIN", "SUPER_ADMIN"] and target_user.id != caller.id:
+        raise HTTPException(status_code=403, detail="Insufficient permissions to modify this account's margin")
     if req.available_margin is not None:
         margin.available_margin = req.available_margin
     if req.used_margin is not None:
@@ -1486,8 +1806,9 @@ def adjust_margin(req: MarginAdjustRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/admin/market/force")
-def admin_force_market(payload: dict, db: Session = Depends(get_db)):
+def admin_force_market(payload: dict, caller=Depends(get_current_user), db: Session = Depends(get_db)):
     """Force market open/close for an exchange. payload: {exchange: 'NSE', state: 'open'|'close'|'none'}"""
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
     ex = payload.get("exchange")
     state = payload.get("state")
     if not ex or state not in {"open", "close", "none"}:
@@ -1497,8 +1818,9 @@ def admin_force_market(payload: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/admin/price/update")
-def admin_update_price(payload: dict, db: Session = Depends(get_db)):
+def admin_update_price(payload: dict, caller=Depends(get_current_user), db: Session = Depends(get_db)):
     """Update dashboard price for a symbol. payload: {symbol: 'NIFTY', price: 18000.5}"""
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
     sym = payload.get("symbol")
     price = payload.get("price")
     try:
@@ -1512,10 +1834,11 @@ def admin_update_price(payload: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/admin/market/depth")
-def admin_set_depth(payload: dict, db: Session = Depends(get_db)):
+def admin_set_depth(payload: dict, caller=Depends(get_current_user), db: Session = Depends(get_db)):
     """Set market depth for a symbol (admin test helper).
     payload: {symbol: 'RELIANCE', depth: {'bids':[{'price':..,'qty':..}], 'asks':[{'price':..,'qty':..}]}}
     """
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
     sym = payload.get("symbol")
     depth = payload.get("depth")
     if not sym or not isinstance(depth, dict):

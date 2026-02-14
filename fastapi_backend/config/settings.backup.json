@@ -1,10 +1,11 @@
 {
-  "timestamp": "2026-02-08T15:51:51.683616",
+  "timestamp": "2026-02-12T20:50:09.458939",
   "version": "1.0",
-  "client_id": "1100353799",
+  "client_id": "11003537****",
   "auth_mode": "DAILY_TOKEN",
   "api_key": "",
   "api_secret": "",
-  "notes": "This is a backup of working settings. Daily token must be entered fresh each day.",
-  "locked": false
+  "daily_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzcxMDE1NzgxLCJpYXQiOjE3NzA5MjkzODEsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwMzUzNzk5In0.Ip1D8loIoDcA9tK6H47u9GF4l7U2kQrSRn8NuZ7bhkyXhMVEp88XnKJ5HoIHuxwiTZum8tWqyIamZKjjSDhAfg",
+  "notes": "This backup now includes the token for auto-restore in production.",
+  "locked": true
 }

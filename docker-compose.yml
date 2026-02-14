@@ -8,12 +8,12 @@ services:
     ports:
       - "8010:8000"
     volumes:
-      # SAFE 1: This protects your database (Dhan keys, positions, login)
+      # Use named volume to mimic production deployment
       - trading-db-data:/app/database
       # SAFE 2: This protects your activity logs so they aren't wiped
       - trading-logs:/app/logs
     environment:
-      - DATABASE_URL=sqlite:////app/database/broker.db
+      - DATABASE_URL=postgresql://app:app@db:5432/app
     restart: always
     labels:
       - "traefik.enable=true"
@@ -30,6 +30,20 @@ services:
       - POSTGRES_USER=app
       - POSTGRES_PASSWORD=app
       - POSTGRES_DB=app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    restart: always
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`tradingnexus.pro`)"
+      - "traefik.http.routers.frontend.entrypoints=http,https"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
 
 volumes:
   trading-db-data:

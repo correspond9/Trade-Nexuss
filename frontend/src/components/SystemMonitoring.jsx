@@ -56,7 +56,7 @@ const SystemMonitoring = () => {
     };
 
     fetchSystemStatus();
-    const interval = setInterval(fetchSystemStatus, 30000);
+    const interval = setInterval(fetchSystemStatus, 1000); // Poll every second for live feedback
     
     return () => clearInterval(interval);
   }, []);

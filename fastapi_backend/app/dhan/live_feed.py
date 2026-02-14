@@ -1093,7 +1093,15 @@ def start_live_feed():
                     instruments.append((exchange, sec_id, mode))
                 
                 # Create DhanFeed (compatible with multiple dhanhq versions)
-                _market_feed = _create_dhan_feed(creds.client_id, token, instruments)
+                try:
+                    _market_feed = _create_dhan_feed(creds.client_id, token, instruments)
+                except Exception as e:
+                    print(f"[ERROR] Failed to create DhanFeed instance: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    _record_connection_attempt(success=False)
+                    time.sleep(10)
+                    continue
                 
                 print(f"[OK] Starting Dhan WebSocket feed (Phase 4 Dynamic)")
                 print(f"[OK] Initial subscriptions: {len(instruments)} securities")
@@ -1139,7 +1147,19 @@ def start_live_feed():
                     pass
                 
                 # Establish and maintain WebSocket connection once
-                _market_feed.run_forever()
+                try:
+                    print("[DEBUG] Calling _market_feed.run_forever()")
+                    _market_feed.run_forever()
+                except Exception as e:
+                    print(f"[ERROR] _market_feed.run_forever() crashed: {e}")
+                    # If it's an authorization failure, trigger cooldown
+                    if "401" in str(e) or "Unauthorized" in str(e) or "Access Token" in str(e):
+                         _trigger_cooldown("Authorization Failed")
+                    elif "1006" in str(e) or "Connection closed" in str(e):
+                        # Connection closed cleanly or uncleanly
+                        print("[WARN] Connection closed by server.")
+                    raise e # Re-raise to trigger outer loop retry logic
+
 
                 # Main data loop
                 while True:

@@ -1,8 +1,16 @@
 // API service with caching and error handling
 class ApiService {
   constructor() {
-    // Ensure base URL comes from env and has no trailing slash
-    const rawBase = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
+    // Determine base URL: prefer runtime-config, then Vite env, then relative '/api/v2'
+    let rawBase = null;
+    try {
+      if (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__ && window.__RUNTIME_CONFIG__.API_BASE) {
+        rawBase = window.__RUNTIME_CONFIG__.API_BASE;
+      }
+    } catch (e) {
+      // ignore
+    }
+    rawBase = rawBase || import.meta.env.VITE_API_URL || '/api/v2';
     this.baseURL = String(rawBase).replace(/\/+$/, '');
     this.cache = new Map();
     this.defaultHeaders = {
@@ -10,6 +18,15 @@ class ApiService {
     };
     this.useMockData = false;
     this.authToken = null;
+    // Initialize auth token from localStorage if present (supports reloads)
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const stored = localStorage.getItem('authToken') || localStorage.getItem('token');
+        if (stored) this.authToken = stored;
+      }
+    } catch (e) {
+      // ignore if localStorage not available
+    }
     // Monkey-patch global fetch to prepend baseURL for relative paths (e.g., fetch('/admin/...'))
     try {
       if (typeof window !== 'undefined' && window.fetch && !window.__API_SERVICE_FETCH_PATCHED__) {
@@ -39,6 +56,44 @@ class ApiService {
 
   getAuthHeaders() {
     return this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {};
+  }
+
+  // Remove credential-like fields from outgoing JSON bodies to avoid accidental leakage
+  // EXCEPTION: Allow credentials to be sent to /credentials/save
+  sanitizeBody(obj, url) {
+    // If the URL is for saving credentials, DO NOT sanitize
+    if (url && url.includes('/credentials/save')) {
+      console.log('Allowing credential save payload:', obj);
+      return obj;
+    }
+    if (url && url.includes('/auth/login')) {
+      return obj;
+    }
+
+    const SENSITIVE_KEYS = new Set([
+      'api_key','apiKey','api_secret','apiSecret','secret_api','secret',
+      'client_id','clientId','access_token','accessToken','auth_token','authToken',
+      'daily_token','dailyToken'
+    ]);
+
+    const _recurse = (val) => {
+      if (val == null) return val;
+      if (typeof val !== 'object') return val;
+      if (typeof FormData !== 'undefined' && val instanceof FormData) return val;
+      if (Array.isArray(val)) return val.map(_recurse);
+      const out = {};
+      Object.keys(val).forEach((k) => {
+        if (SENSITIVE_KEYS.has(k)) return; // skip sensitive key
+        out[k] = _recurse(val[k]);
+      });
+      return out;
+    };
+
+    try {
+      return _recurse(obj);
+    } catch (e) {
+      return obj;
+    }
   }
 
   // Helper function to generate dynamic expiry dates based on symbol type
@@ -652,22 +707,25 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    // Build full URL safely to avoid duplicate slashes or duplicate /api/v2 segments
-    const isAbsolute = /^https?:\/\//i.test(endpoint);
-    const fullUrl = isAbsolute
-      ? endpoint
-      : `${this.baseURL}/${String(endpoint).replace(/^\/+/, '')}`;
-
+    const url = endpoint.startsWith('http') ? endpoint : `${this.baseURL}${endpoint}`;
     const headers = {
-      ...this.defaultHeaders,
+      'Content-Type': 'application/json',
       ...this.getAuthHeaders(),
       ...options.headers,
     };
 
+    let body = options.body;
+    if (body && typeof body === 'object' && !(body instanceof FormData)) {
+      // Pass the endpoint URL to sanitizeBody so exceptions can be made
+      // Fix: Use the relative endpoint for checking exceptions, not the full URL if possible
+      body = JSON.stringify(this.sanitizeBody(body, endpoint));
+    }
+
     try {
-      const response = await fetch(fullUrl, {
+      const response = await fetch(url, {
         ...options,
         headers,
+        body,
       });
 
       // Handle 401 Unauthorized
@@ -758,16 +816,24 @@ class ApiService {
   }
 
   async post(endpoint, data = {}) {
+    const safe = this.sanitizeBody(data, endpoint);
+    const body = (typeof FormData !== 'undefined' && safe instanceof FormData) || typeof safe === 'string'
+      ? safe
+      : JSON.stringify(safe);
     return this.request(endpoint, {
       method: 'POST',
-      body: JSON.stringify(data),
+      body,
     });
   }
 
   async put(endpoint, data = {}) {
+    const safe = this.sanitizeBody(data, endpoint);
+    const body = (typeof FormData !== 'undefined' && safe instanceof FormData) || typeof safe === 'string'
+      ? safe
+      : JSON.stringify(safe);
     return this.request(endpoint, {
       method: 'PUT',
-      body: JSON.stringify(data),
+      body,
     });
   }
 
@@ -778,9 +844,13 @@ class ApiService {
   }
 
   async patch(endpoint, data = {}) {
+    const safe = this.sanitizeBody(data, endpoint);
+    const body = (typeof FormData !== 'undefined' && safe instanceof FormData) || typeof safe === 'string'
+      ? safe
+      : JSON.stringify(safe);
     return this.request(endpoint, {
       method: 'PATCH',
-      body: JSON.stringify(data),
+      body,
     });
   }
 

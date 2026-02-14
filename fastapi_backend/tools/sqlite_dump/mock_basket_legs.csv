@@ -1,0 +1,2 @@
+id,basket_id,symbol,security_id,exchange_segment,transaction_type,quantity,order_type,product_type,price,created_at
+1,1,NIFTY 25850 PE,,NSE_FNO,SELL,325,MARKET,NORMAL,0.0,2026-02-09 05:41:08.021093

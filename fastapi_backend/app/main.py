@@ -1,7 +1,7 @@
 import logging
 import traceback
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.storage import db as storage_db
 
@@ -15,6 +15,8 @@ from app.rest.mock_exchange import router as mock_exchange_router
 from app.commodity_engine.commodity_rest import router as commodity_router
 from app.trading.positions import router as positions_router
 from app.trading.orders import router as orders_router
+from app.routers.authoritative_option_chain import router as option_chain_router
+from app.admin.admin_panel import router as admin_router
 
 # Configure logging to ensure tracebacks appear in container logs
 logging.basicConfig(
@@ -24,12 +26,29 @@ logging.basicConfig(
 log = logging.getLogger("trading_nexus")
 log.setLevel(logging.DEBUG)
 
-app = FastAPI(title="Trading Nexus API")
+app = FastAPI(
+    title="Trading Nexus API",
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    redoc_url=None
+)
 
-# CORS
+# Register lifecycle hooks (startup/shutdown) to initialize market caches and streams
+from app.lifecycle import hooks as lifecycle_hooks
+
+app.add_event_handler("startup", lifecycle_hooks.on_start)
+app.add_event_handler("shutdown", lifecycle_hooks.on_stop)
+
+# CORS: restrict to known frontend origins to allow credentials safely
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://tradingnexus.pro",
+        "https://www.tradingnexus.pro",
+        "https://app.tradingnexus.pro",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -72,6 +91,10 @@ def health_deep():
 def test():
     return {"message": "test route active"}
 
+@app.get("/docs", include_in_schema=False)
+def docs_redirect():
+    return RedirectResponse(url="/api/docs")
+
 
 # Middleware: log requests and catch+log unhandled exceptions with full traceback
 @app.middleware("http")
@@ -107,6 +130,16 @@ app.include_router(commodity_router, prefix=API_PREFIX)
 app.include_router(positions_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(mock_exchange_router, prefix=API_PREFIX)
+app.include_router(option_chain_router, prefix=API_PREFIX + "/options")
+app.include_router(admin_router, prefix=API_PREFIX)
+from app.rest.option_chain_compat import router as option_chain_compat_router
+app.include_router(option_chain_compat_router, prefix=API_PREFIX)
+# Backward compatibility for older frontend calls (v1)
+import os as _os
+_disable_v1 = (_os.getenv("DISABLE_V1_COMPAT") or "").strip().lower() in ("1","true","yes","on")
+if not _disable_v1:
+    app.include_router(credentials_router, prefix="/api/v1")
+    app.include_router(settings_router, prefix="/api/v1")
 
 # Backstop admin route for tests: set market depth
 from app.market.market_state import state as market_state

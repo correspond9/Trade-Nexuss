@@ -5,6 +5,7 @@ import time
 from threading import RLock
 from typing import Dict, Optional, Tuple
 import asyncio
+import os
 
 from app.market_orchestrator.exchange_router import ExchangeRouter
 from app.market_orchestrator.market_cache_manager import MarketCacheManager
@@ -111,6 +112,10 @@ class MarketDataOrchestrator:
             if self._streams_started:
                 return
             self._streams_started = True
+        flag = (os.getenv("DISABLE_DHAN_WS") or os.getenv("BACKEND_OFFLINE") or os.getenv("DISABLE_MARKET_STREAMS") or "").strip().lower()
+        env = (os.getenv("ENVIRONMENT") or "").strip().lower()
+        if env != "production" and flag in ("1", "true", "yes", "on"):
+            return
 
         self.start_equity_stream()
         await self.start_mcx_stream()

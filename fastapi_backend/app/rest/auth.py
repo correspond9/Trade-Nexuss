@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -51,7 +51,25 @@ def _get_db() -> Session:
 
 
 @router.post("/auth/login", response_model=LoginResponse)
-def login(payload: LoginRequest):
+async def login(request: Request, payload: LoginRequest):
+    # Defensive guard: reject requests that include Dhan/admin credential fields
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+
+    forbidden_keys = {
+        "client_id",
+        "api_key",
+        "api_secret",
+        "auth_token",
+        "daily_token",
+        "dhan_token",
+        "access_token",
+    }
+    if isinstance(raw, dict) and forbidden_keys.intersection(set(k.lower() for k in raw.keys())):
+        raise HTTPException(status_code=400, detail="Invalid fields in login payload")
+
     db = _get_db()
     try:
         login_value = (payload.mobile or payload.user_id or payload.username or payload.email or "").strip()

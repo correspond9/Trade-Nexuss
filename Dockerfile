@@ -5,8 +5,9 @@ WORKDIR /app
 
 # Install system dependencies (gcc for any pip packages that need compiling)
 RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+  gcc \
+  curl \
+  && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
 COPY fastapi_backend/requirements.txt .

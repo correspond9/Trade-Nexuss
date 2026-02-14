@@ -1,0 +1,3 @@
+id,user_id,symbol,expiry_date,instrument_type,added_at,added_order
+1,1,NIFTY,2026-02-10,INDEX_OPTION,2026-02-09 05:42:50.080737,1
+2,1,NIFTY,26FEB2026,INDEX_OPTION,2026-02-10 18:44:32.426521,2
