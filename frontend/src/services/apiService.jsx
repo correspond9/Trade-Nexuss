@@ -1,8 +1,16 @@
 // API service with caching and error handling
 class ApiService {
   constructor() {
-    // Ensure base URL comes from env and has no trailing slash
-    const rawBase = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v2';
+    // Determine base URL: prefer runtime-config, then Vite env, then relative '/api/v2'
+    let rawBase = null;
+    try {
+      if (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__ && window.__RUNTIME_CONFIG__.API_BASE) {
+        rawBase = window.__RUNTIME_CONFIG__.API_BASE;
+      }
+    } catch (e) {
+      // ignore
+    }
+    rawBase = rawBase || import.meta.env.VITE_API_URL || '/api/v2';
     this.baseURL = String(rawBase).replace(/\/+$/, '');
     this.cache = new Map();
     this.defaultHeaders = {

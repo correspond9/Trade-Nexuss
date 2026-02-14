@@ -175,42 +175,33 @@ const SuperAdmin = () => {
                         Choose between Daily Token (24-hour validity) or Static IP authentication for DhanHQ WebSocket
                       </p>
                       
-                      {/* Mode Selection */}
+                      {/* Mode Selection - Toggle */}
                       <div className="flex items-center space-x-4">
                         <div className="flex items-center">
-                          <input
-                            type="radio"
-                            id="daily-token"
-                            name="auth-mode"
-                            value="DAILY_TOKEN"
-                            checked={localSettings.authMode === 'DAILY_TOKEN'}
-                            onChange={(e) => {
-                              const newMode = e.target.value;
-                              setLocalSettings((s) => ({ ...s, authMode: newMode }));
-                              switchMode(newMode);
-                            }}
-                            className="mr-2"
-                          />
-                          <label htmlFor="daily-token" className="text-sm font-medium text-gray-700 cursor-pointer">
-                            Daily Token (Mode A)
-                          </label>
-                        </div>
-                        <div className="flex items-center">
-                          <input
-                            type="radio"
-                            id="static-ip"
-                            name="auth-mode"
-                            value="STATIC_IP"
-                            checked={localSettings.authMode === 'STATIC_IP'}
-                            onChange={(e) => {
-                              const newMode = e.target.value;
-                              setLocalSettings((s) => ({ ...s, authMode: newMode }));
-                              switchMode(newMode);
-                            }}
-                            className="mr-2"
-                          />
-                          <label htmlFor="static-ip" className="text-sm font-medium text-gray-700 cursor-pointer">
-                            Static IP (Mode B)
+                          <label htmlFor="auth-toggle" className="flex items-center cursor-pointer">
+                            <div className="relative">
+                              <input
+                                id="auth-toggle"
+                                type="checkbox"
+                                className="sr-only"
+                                checked={localSettings.authMode === 'DAILY_TOKEN'}
+                                onChange={async (e) => {
+                                  const newMode = e.target.checked ? 'DAILY_TOKEN' : 'STATIC_IP';
+                                  // Optimistic UI update
+                                  const prev = localSettings.authMode;
+                                  setLocalSettings((s) => ({ ...s, authMode: newMode }));
+                                  try {
+                                    await switchMode(newMode);
+                                  } catch (err) {
+                                    // Revert UI on error
+                                    setLocalSettings((s) => ({ ...s, authMode: prev }));
+                                  }
+                                }}
+                              />
+                              <div className="w-11 h-6 bg-gray-200 rounded-full shadow-inner"></div>
+                              <div className={`dot absolute left-0 top-0 w-6 h-6 bg-white rounded-full shadow transform transition ${localSettings.authMode === 'DAILY_TOKEN' ? 'translate-x-5' : 'translate-x-0'}`} />
+                            </div>
+                            <span className="ml-3 text-sm font-medium text-gray-700">{localSettings.authMode === 'DAILY_TOKEN' ? 'Daily Token (Mode A)' : 'Static IP (Mode B)'}</span>
                           </label>
                         </div>
                       </div>
