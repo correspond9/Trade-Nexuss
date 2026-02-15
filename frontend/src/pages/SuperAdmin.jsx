@@ -25,6 +25,8 @@ const SuperAdmin = () => {
 
   // Error state for save operations
   const [saveError, setSaveError] = useState(null);
+  const [masterLoading, setMasterLoading] = useState(false);
+  const [masterMsg, setMasterMsg] = useState('');
   const [uploadMsg, setUploadMsg] = useState('');
   const [exposureFile, setExposureFile] = useState(null);
   const [equitySpanFile, setEquitySpanFile] = useState(null);
@@ -39,6 +41,22 @@ const SuperAdmin = () => {
       setSaveError(error.message);
       // Clear error after 5 seconds
       setTimeout(() => setSaveError(null), 5000);
+    }
+  };
+
+  const handleLoadInstrumentMaster = async () => {
+    setMasterLoading(true);
+    setMasterMsg('');
+    try {
+      const res = await apiService.post('/admin/load-instrument-master', {});
+      const count = res?.records ?? 0;
+      setMasterMsg(`✅ Instrument master loaded (${count.toLocaleString()} records)`);
+    } catch (error) {
+      const detail = error?.message || 'Failed to load instrument master';
+      setMasterMsg(`❌ ${detail}`);
+    } finally {
+      setMasterLoading(false);
+      setTimeout(() => setMasterMsg(''), 6000);
     }
   };
 
@@ -360,7 +378,18 @@ const SuperAdmin = () => {
                 )}
 
                 {/* Save Button */}
-                <div className="flex justify-end">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs text-gray-600">
+                    Load instrument master manually after token/credentials save.
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleLoadInstrumentMaster}
+                      disabled={masterLoading}
+                      className="bg-gray-800 text-white px-4 py-2 rounded-md hover:bg-gray-900 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    >
+                      {masterLoading ? 'Loading Master...' : 'Load Instrument Master'}
+                    </button>
                   <button
                     onClick={handleSave}
                     disabled={loading}
@@ -368,7 +397,11 @@ const SuperAdmin = () => {
                   >
                     {loading ? 'Saving...' : `Save ${localSettings.authMode === 'DAILY_TOKEN' ? 'Token' : 'Credentials'}`}
                   </button>
+                  </div>
                 </div>
+                {masterMsg && (
+                  <div className="mt-3 text-sm text-gray-700">{masterMsg}</div>
+                )}
               </div>
             </div>
 

@@ -1,4 +1,5 @@
 
+import asyncio
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 from app.users.auth import get_current_user, get_db
@@ -9,6 +10,22 @@ import os
 import zipfile
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.post("/load-instrument-master")
+async def load_instrument_master(user=Depends(get_current_user)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    try:
+        from app.market.instrument_master.loader import MASTER
+
+        await asyncio.to_thread(MASTER.load)
+        return {
+            "status": "ok",
+            "message": "Instrument master loaded successfully",
+            "records": len(getattr(MASTER, "rows", []) or []),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @router.post("/suspend/{username}")
 def suspend_user(username: str, user=Depends(get_current_user), db: Session = Depends(get_db)):
