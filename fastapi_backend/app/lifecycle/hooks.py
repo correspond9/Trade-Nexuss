@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Global scheduler instance
 _scheduler = None
+_bootstrap_task: Optional[asyncio.Task] = None
 
 def get_scheduler():
     """Get or create the background scheduler"""
@@ -321,31 +322,11 @@ async def load_tier_b_chains():
 
 async def on_start():
     """Application startup - initialize managers and scheduler"""
+    global _bootstrap_task
+
     print("\n" + "="*70)
     print("[STARTUP] Initializing Broking Terminal V2 Backend")
     print("="*70)
-
-    # Ensure database schema exists before any managers query tables
-    from app.storage.migrations import init_db
-    init_db()
-    
-    # Load instrument master
-    print("[STARTUP] Loading instrument master...")
-    MASTER.load()
-    print("[STARTUP] ✓ Instrument master loaded")
-    
-    # Initialize managers (they auto-initialize on import)
-    print("[STARTUP] Initializing subscription managers...")
-    from app.market.subscription_manager import SUBSCRIPTION_MGR
-    from app.market.watchlist_manager import WATCHLIST_MGR
-    from app.market.ws_manager import WS_MANAGER
-    from app.market.atm_engine import ATM_ENGINE
-    print("[STARTUP] ✓ Subscription managers initialized")
-    
-    # Load subscriptions from database (deferred from __init__ to avoid import-time DB queries)
-    print("[STARTUP] Loading subscriptions from database...")
-    SUBSCRIPTION_MGR._load_from_database()
-    print("[STARTUP] ✓ Subscriptions loaded from database")
     
     # Start EOD scheduler
     print("[STARTUP] Starting EOD scheduler...")
@@ -366,22 +347,50 @@ async def on_start():
     scheduler.start()
     print("[STARTUP] ✓ EOD scheduler started (fires at 3:30 PM IST)")
     print("[STARTUP] ✓ Manual trigger: POST /api/v2/admin/unsubscribe-all-tier-a")
-    
-    # Load Tier B chains (Phase 3) and start market streams in background so
-    # startup can complete quickly (prevents healthcheck restart loops).
+
+    # Run heavy initialization in the background so startup can complete quickly
+    # (prevents healthcheck restart loops).
     def _log_task_result(task: asyncio.Task, name: str) -> None:
         exc = task.exception()
         if exc:
             logger.exception("[STARTUP] Background task '%s' failed", name, exc_info=exc)
 
-    print("[STARTUP] Scheduling Tier B pre-load in background...")
-    tier_b_task = asyncio.create_task(load_tier_b_chains())
-    tier_b_task.add_done_callback(lambda t: _log_task_result(t, "load_tier_b_chains"))
+    async def _bootstrap_after_startup() -> None:
+        print("[STARTUP] Background bootstrap started...")
 
-    print("[STARTUP] Scheduling market data streams in background...")
-    from app.market_orchestrator import get_orchestrator
-    streams_task = asyncio.create_task(get_orchestrator().start_streams())
-    streams_task.add_done_callback(lambda t: _log_task_result(t, "start_streams"))
+        # Ensure database schema exists before any managers query tables
+        from app.storage.migrations import init_db
+        await asyncio.to_thread(init_db)
+
+        # Load instrument master
+        print("[STARTUP] Loading instrument master...")
+        await asyncio.to_thread(MASTER.load)
+        print("[STARTUP] ✓ Instrument master loaded")
+
+        # Initialize managers (they auto-initialize on import)
+        print("[STARTUP] Initializing subscription managers...")
+        from app.market.subscription_manager import SUBSCRIPTION_MGR
+        from app.market.watchlist_manager import WATCHLIST_MGR
+        from app.market.ws_manager import WS_MANAGER
+        from app.market.atm_engine import ATM_ENGINE
+        print("[STARTUP] ✓ Subscription managers initialized")
+
+        # Load subscriptions from database (deferred from __init__ to avoid import-time DB queries)
+        print("[STARTUP] Loading subscriptions from database...")
+        await asyncio.to_thread(SUBSCRIPTION_MGR._load_from_database)
+        print("[STARTUP] ✓ Subscriptions loaded from database")
+
+        print("[STARTUP] Scheduling Tier B pre-load in background...")
+        tier_b_task = asyncio.create_task(load_tier_b_chains())
+        tier_b_task.add_done_callback(lambda t: _log_task_result(t, "load_tier_b_chains"))
+
+        print("[STARTUP] Scheduling market data streams in background...")
+        from app.market_orchestrator import get_orchestrator
+        streams_task = asyncio.create_task(get_orchestrator().start_streams())
+        streams_task.add_done_callback(lambda t: _log_task_result(t, "start_streams"))
+
+    _bootstrap_task = asyncio.create_task(_bootstrap_after_startup())
+    _bootstrap_task.add_done_callback(lambda t: _log_task_result(t, "bootstrap_after_startup"))
 
     print("[STARTUP] ✓ Backend ready!")
     print("="*70 + "\n")
