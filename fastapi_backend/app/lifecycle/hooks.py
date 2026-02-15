@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 from typing import Optional
@@ -366,16 +367,21 @@ async def on_start():
     print("[STARTUP] ✓ EOD scheduler started (fires at 3:30 PM IST)")
     print("[STARTUP] ✓ Manual trigger: POST /api/v2/admin/unsubscribe-all-tier-a")
     
-    # Load Tier B chains (Phase 3) before starting the feed so default
-    # subscriptions already exist when we compute initial targets.
-    print("[STARTUP] Loading Tier B pre-loaded chains...")
-    await load_tier_b_chains()
-    
-    # Start market data streams after Tier B is registered
-    print("[STARTUP] Starting market data streams...")
+    # Load Tier B chains (Phase 3) and start market streams in background so
+    # startup can complete quickly (prevents healthcheck restart loops).
+    def _log_task_result(task: asyncio.Task, name: str) -> None:
+        exc = task.exception()
+        if exc:
+            logger.exception("[STARTUP] Background task '%s' failed", name, exc_info=exc)
+
+    print("[STARTUP] Scheduling Tier B pre-load in background...")
+    tier_b_task = asyncio.create_task(load_tier_b_chains())
+    tier_b_task.add_done_callback(lambda t: _log_task_result(t, "load_tier_b_chains"))
+
+    print("[STARTUP] Scheduling market data streams in background...")
     from app.market_orchestrator import get_orchestrator
-    await get_orchestrator().start_streams()
-    print("[STARTUP] ✓ Market data streams started")
+    streams_task = asyncio.create_task(get_orchestrator().start_streams())
+    streams_task.add_done_callback(lambda t: _log_task_result(t, "start_streams"))
 
     print("[STARTUP] ✓ Backend ready!")
     print("="*70 + "\n")
