@@ -27,7 +27,8 @@ USER app
 EXPOSE 8000
 
 # Health check (NO curl needed) - runs inside the container
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+# Extended start-period from 40s to 180s to allow Tier B preload to complete
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)" || exit 1
 
 # Run the application
