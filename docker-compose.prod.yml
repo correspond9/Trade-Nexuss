@@ -69,8 +69,10 @@ services:
 
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: https://api.tradingnexus.pro
     ports:
       - "3000:80"
     labels:
