@@ -3,6 +3,7 @@ import traceback
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from app.storage import db as storage_db
 
 # import routers
@@ -75,7 +76,7 @@ def health_deep():
     # DB check
     try:
         with storage_db.engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         results["checks"]["database"] = {"status": "ok"}
     except Exception as e:
         tb = traceback.format_exc()
