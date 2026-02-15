@@ -472,7 +472,12 @@ class SubscriptionManager:
     def _load_from_database(self):
         """Load existing subscriptions from database"""
         try:
+            from sqlalchemy import inspect
+            from app.storage.db import engine, Base
             from app.storage.models import Subscription
+            # Create schema on demand if tables are missing (e.g., fresh Postgres)
+            if not inspect(engine).has_table("subscriptions"):
+                Base.metadata.create_all(bind=engine)
             orchestrator = get_orchestrator()
             active_subs = self.db.query(Subscription).filter(Subscription.active == True).all()
             
