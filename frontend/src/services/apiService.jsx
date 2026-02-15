@@ -725,6 +725,7 @@ class ApiService {
 
   async request(endpoint, options = {}) {
     const url = endpoint.startsWith('http') ? endpoint : `${this.baseURL}${endpoint}`;
+    const isLoginEndpoint = endpoint.includes('/auth/login');
     const headers = {
       'Content-Type': 'application/json',
       ...this.getAuthHeaders(),
@@ -745,11 +746,19 @@ class ApiService {
         body,
       });
 
-      // Handle 401 Unauthorized
+      // Handle 401 Unauthorized (but do not hijack login endpoint errors)
       if (response.status === 401) {
-        localStorage.removeItem('authToken');
-        window.location.href = '/login';
-        throw new Error('Session expired. Please login again.');
+        const errorData = await response.json().catch(() => ({}));
+        const message = errorData.message || errorData.detail || 'Unauthorized';
+
+        if (!isLoginEndpoint) {
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('authUser');
+          window.location.href = '/login';
+          throw new Error('Session expired. Please login again.');
+        }
+
+        throw new Error(message);
       }
 
       // Handle other HTTP errors
