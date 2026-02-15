@@ -33,6 +33,10 @@ from app.oms.order_ids import generate as generate_order_id
 IST_OFFSET = timedelta(hours=5, minutes=30)
 
 
+def ist_now():
+    return datetime.utcnow() + IST_OFFSET
+
+
 router = APIRouter(tags=["mock-exchange"])
 EXEC_ENGINE = get_execution_engine()
 

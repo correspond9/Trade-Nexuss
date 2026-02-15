@@ -1,5 +1,6 @@
 
 import asyncio
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -13,6 +14,13 @@ import os
 import zipfile
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+_load_master_task: asyncio.Task | None = None
+_load_master_state = {
+    "running": False,
+    "last_error": None,
+    "last_records": 0,
+    "last_loaded_at": None,
+}
 
 
 class UserAuthCheckIn(BaseModel):
@@ -20,20 +28,75 @@ class UserAuthCheckIn(BaseModel):
     password: str | None = None
 
 
-@router.post("/load-instrument-master")
-async def load_instrument_master(user=Depends(get_current_user)):
-    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+async def _load_master_background():
+    _load_master_state["running"] = True
+    _load_master_state["last_error"] = None
     try:
         from app.market.instrument_master.loader import MASTER
 
         await asyncio.to_thread(MASTER.load)
+        _load_master_state["last_records"] = len(getattr(MASTER, "rows", []) or [])
+        _load_master_state["last_loaded_at"] = datetime.now(timezone.utc).isoformat()
+    except Exception as exc:
+        _load_master_state["last_error"] = str(exc)
+    finally:
+        _load_master_state["running"] = False
+
+
+@router.post("/load-instrument-master")
+async def load_instrument_master(force: bool = False, user=Depends(get_current_user)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    try:
+        from app.market.instrument_master.loader import MASTER
+
+        global _load_master_task
+
+        # Fast return if already loaded and no forced reload requested
+        current_records = len(getattr(MASTER, "rows", []) or [])
+        if current_records > 0 and not force:
+            _load_master_state["last_records"] = current_records
+            if not _load_master_state.get("last_loaded_at"):
+                _load_master_state["last_loaded_at"] = datetime.now(timezone.utc).isoformat()
+            return {
+                "status": "ok",
+                "message": "Instrument master already loaded",
+                "records": current_records,
+                "running": False,
+                "last_loaded_at": _load_master_state.get("last_loaded_at"),
+            }
+
+        # If a load is already running, do not start another one
+        if _load_master_state.get("running"):
+            return {
+                "status": "running",
+                "message": "Instrument master loading is already in progress",
+                "records": _load_master_state.get("last_records", 0),
+                "running": True,
+                "last_loaded_at": _load_master_state.get("last_loaded_at"),
+            }
+
+        _load_master_task = asyncio.create_task(_load_master_background())
         return {
-            "status": "ok",
-            "message": "Instrument master loaded successfully",
-            "records": len(getattr(MASTER, "rows", []) or []),
+            "status": "started",
+            "message": "Instrument master load started in background",
+            "records": _load_master_state.get("last_records", 0),
+            "running": True,
+            "last_loaded_at": _load_master_state.get("last_loaded_at"),
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/load-instrument-master/status")
+def load_instrument_master_status(user=Depends(get_current_user)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    return {
+        "status": "running" if _load_master_state.get("running") else "idle",
+        "running": bool(_load_master_state.get("running")),
+        "records": int(_load_master_state.get("last_records") or 0),
+        "last_loaded_at": _load_master_state.get("last_loaded_at"),
+        "last_error": _load_master_state.get("last_error"),
+    }
 
 
 @router.post("/user-auth-check")

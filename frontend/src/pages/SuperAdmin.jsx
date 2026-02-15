@@ -58,7 +58,13 @@ const SuperAdmin = () => {
     try {
       const res = await apiService.post('/admin/load-instrument-master', {});
       const count = res?.records ?? 0;
-      setMasterMsg(`✅ Instrument master loaded (${count.toLocaleString()} records)`);
+      if (res?.status === 'started') {
+        setMasterMsg('⏳ Instrument master load started in background. It may take a minute.');
+      } else if (res?.status === 'running') {
+        setMasterMsg('⏳ Instrument master is already loading. Please wait.');
+      } else {
+        setMasterMsg(`✅ Instrument master ready (${count.toLocaleString()} records)`);
+      }
     } catch (error) {
       const detail = error?.message || 'Failed to load instrument master';
       setMasterMsg(`❌ ${detail}`);
