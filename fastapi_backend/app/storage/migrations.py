@@ -7,6 +7,11 @@ from .db import SessionLocal
 from . import models
 from app.users.passwords import hash_password
 
+DEFAULT_BOOTSTRAP_ADMIN_MOBILE = "9999999999"
+DEFAULT_BOOTSTRAP_ADMIN_PASSWORD = "Admin@123"
+DEFAULT_BOOTSTRAP_ADMIN_USERNAME = "superadmin"
+DEFAULT_BOOTSTRAP_ADMIN_ROLE = "SUPER_ADMIN"
+
 def _get_existing_columns(table_name: str) -> set:
     """Get existing columns for a table using database-agnostic introspection."""
     inspector = inspect(engine)
@@ -75,15 +80,15 @@ def _ensure_user_accounts_columns():
 
 
 def _ensure_bootstrap_admin_user():
-    """Create/repair an admin login user from env vars (for fresh Postgres deployments)."""
-    mobile = (os.getenv("BOOTSTRAP_ADMIN_MOBILE") or "").strip()
-    password = (os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
-    username = (os.getenv("BOOTSTRAP_ADMIN_USERNAME") or mobile or "").strip()
-    role = (os.getenv("BOOTSTRAP_ADMIN_ROLE") or "SUPER_ADMIN").strip().upper()
+    """Create/repair an admin login user for fresh deployments.
 
-    if not mobile or not password:
-        print("[DB] Bootstrap admin skipped (BOOTSTRAP_ADMIN_MOBILE/PASSWORD not set)")
-        return
+    Uses hardcoded defaults so first login works without environment variables.
+    Env vars can still override defaults if provided.
+    """
+    mobile = (os.getenv("BOOTSTRAP_ADMIN_MOBILE") or DEFAULT_BOOTSTRAP_ADMIN_MOBILE).strip()
+    password = (os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or DEFAULT_BOOTSTRAP_ADMIN_PASSWORD).strip()
+    username = (os.getenv("BOOTSTRAP_ADMIN_USERNAME") or DEFAULT_BOOTSTRAP_ADMIN_USERNAME).strip()
+    role = (os.getenv("BOOTSTRAP_ADMIN_ROLE") or DEFAULT_BOOTSTRAP_ADMIN_ROLE).strip().upper()
 
     db = SessionLocal()
     try:
