@@ -9,6 +9,7 @@ from typing import Dict, List, Set, Optional, Tuple
 from collections import defaultdict
 from app.storage.db import SessionLocal
 from app.storage.models import Subscription, SubscriptionLog
+from app.storage.migrations import init_db
 from app.market.instrument_master.registry import REGISTRY
 from app.market_orchestrator import get_orchestrator
 from app.market.security_ids import (
@@ -569,6 +570,7 @@ class SubscriptionManager:
 
 
 # Global subscription manager
+init_db()
 SUBSCRIPTION_MGR = SubscriptionManager()
 
 def get_subscription_manager() -> SubscriptionManager:
