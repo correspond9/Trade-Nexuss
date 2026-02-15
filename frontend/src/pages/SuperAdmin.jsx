@@ -8,6 +8,7 @@ import SystemMonitoring from '../components/SystemMonitoring';
 
 const SuperAdmin = () => {
   const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('settings');
   const [marketConfig, setMarketConfig] = useState(null);
   const [mcError, setMcError] = useState(null);
   const API_BASE = apiService.baseURL;
@@ -31,6 +32,11 @@ const SuperAdmin = () => {
   const [exposureFile, setExposureFile] = useState(null);
   const [equitySpanFile, setEquitySpanFile] = useState(null);
   const [commoditySpanFile, setCommoditySpanFile] = useState(null);
+  const [authCheckIdentifier, setAuthCheckIdentifier] = useState('');
+  const [authCheckPassword, setAuthCheckPassword] = useState('');
+  const [authCheckLoading, setAuthCheckLoading] = useState(false);
+  const [authCheckResult, setAuthCheckResult] = useState(null);
+  const [authCheckError, setAuthCheckError] = useState('');
 
   // Handle save with error handling
   const handleSave = async () => {
@@ -52,7 +58,11 @@ const SuperAdmin = () => {
     setMasterLoading(true);
     setMasterMsg('');
     try {
-      const res = await apiService.post('/admin/load-instrument-master', {});
+      const res = await apiService.request(`${ROOT_BASE}/admin/load-instrument-master`, {
+        method: 'POST',
+        headers: { 'X-USER': user?.username || '' },
+        body: {}
+      });
       const count = res?.records ?? 0;
       setMasterMsg(`✅ Instrument master loaded (${count.toLocaleString()} records)`);
     } catch (error) {
@@ -61,6 +71,38 @@ const SuperAdmin = () => {
     } finally {
       setMasterLoading(false);
       setTimeout(() => setMasterMsg(''), 6000);
+    }
+  };
+
+  const handleUserAuthCheck = async () => {
+    if (!authCheckIdentifier.trim()) {
+      setAuthCheckError('Please enter mobile/user identifier');
+      return;
+    }
+
+    setAuthCheckLoading(true);
+    setAuthCheckError('');
+    setAuthCheckResult(null);
+
+    try {
+      const payload = {
+        identifier: authCheckIdentifier.trim(),
+      };
+      if (authCheckPassword.trim()) {
+        payload.password = authCheckPassword;
+      }
+
+      const res = await apiService.request(`${ROOT_BASE}/admin/user-auth-check`, {
+        method: 'POST',
+        headers: { 'X-USER': user?.username || '' },
+        body: payload,
+      });
+
+      setAuthCheckResult(res);
+    } catch (error) {
+      setAuthCheckError(error?.message || 'Auth check failed');
+    } finally {
+      setAuthCheckLoading(false);
     }
   };
 
@@ -147,6 +189,31 @@ const SuperAdmin = () => {
           </div>
         </div>
 
+        <div className="mb-6 flex flex-wrap gap-2">
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'settings'
+                ? 'bg-blue-600 text-white'
+                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            Settings & Monitoring
+          </button>
+          <button
+            onClick={() => setActiveTab('user-auth-check')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'user-auth-check'
+                ? 'bg-blue-600 text-white'
+                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            User Auth Check
+          </button>
+        </div>
+
+        {activeTab === 'settings' && (
+          <>
         {/* Main Content - Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
@@ -606,6 +673,77 @@ const SuperAdmin = () => {
           <strong>Admin note:</strong> Authentication credentials are now visible for easier management and validation.
           This is an admin-only panel. Ensure proper access control to this dashboard.
         </div>
+          </>
+        )}
+
+        {activeTab === 'user-auth-check' && (
+          <div className="max-w-4xl">
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-6 space-y-4">
+                <h2 className="text-lg font-semibold text-gray-900">User Auth Check</h2>
+                <p className="text-sm text-gray-600">
+                  Diagnose user login issues safely (existence, status, role, password match). No password/hash is exposed.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Mobile / User ID / Username / Email</label>
+                    <input
+                      type="text"
+                      value={authCheckIdentifier}
+                      onChange={(e) => setAuthCheckIdentifier(e.target.value)}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. 9967595222"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Password (optional verify)</label>
+                    <input
+                      type="password"
+                      value={authCheckPassword}
+                      onChange={(e) => setAuthCheckPassword(e.target.value)}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="Optional: verify password match"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleUserAuthCheck}
+                    disabled={authCheckLoading}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  >
+                    {authCheckLoading ? 'Checking...' : 'Check User Auth'}
+                  </button>
+                </div>
+
+                {authCheckError && (
+                  <div className="p-3 bg-red-100 border border-red-300 text-red-700 rounded text-sm">{authCheckError}</div>
+                )}
+
+                {authCheckResult && (
+                  <div className="p-4 border rounded bg-gray-50 text-sm space-y-2">
+                    <div><strong>Message:</strong> {authCheckResult?.message || '-'}</div>
+                    <div><strong>User Exists:</strong> {String(!!authCheckResult?.exists)}</div>
+                    {authCheckResult?.data && (
+                      <>
+                        <div><strong>Status:</strong> {authCheckResult.data.status || '-'}</div>
+                        <div><strong>Role:</strong> {authCheckResult.data.role || '-'}</div>
+                        <div><strong>Username:</strong> {authCheckResult.data.username || '-'}</div>
+                        <div><strong>Mobile:</strong> {authCheckResult.data.mobile || '-'}</div>
+                        <div><strong>Has Password:</strong> {String(!!authCheckResult.data.has_password)}</div>
+                        {authCheckResult.data.password_match !== null && authCheckResult.data.password_match !== undefined && (
+                          <div><strong>Password Match:</strong> {String(!!authCheckResult.data.password_match)}</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

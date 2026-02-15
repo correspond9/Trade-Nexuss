@@ -100,7 +100,7 @@ async def login(request: Request, payload: LoginRequest):
             )
 
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+            raise HTTPException(status_code=401, detail="User not exist")
 
         if user.status != "ACTIVE":
             raise HTTPException(status_code=403, detail="User not active")

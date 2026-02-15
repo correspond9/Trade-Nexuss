@@ -2,14 +2,22 @@
 import asyncio
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from pydantic import BaseModel
 from app.users.auth import get_current_user, get_db
 from app.users.permissions import require_role
 from app.storage.models import UserAccount, Notification, MockOrder, MockTrade, ExecutionEvent, MockPosition, LedgerEntry, PnlSnapshot
+from app.users.passwords import verify_password
 from app.notifications.notifier import notify
 import os
 import zipfile
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+class UserAuthCheckIn(BaseModel):
+    identifier: str
+    password: str | None = None
 
 
 @router.post("/load-instrument-master")
@@ -26,6 +34,61 @@ async def load_instrument_master(user=Depends(get_current_user)):
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/user-auth-check")
+def user_auth_check(payload: UserAuthCheckIn, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+
+    identifier = (payload.identifier or "").strip()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="identifier is required")
+
+    target = (
+        db.query(UserAccount)
+        .filter(
+            (func.lower(UserAccount.mobile) == identifier.lower())
+            | (func.lower(UserAccount.user_id) == identifier.lower())
+            | (func.lower(UserAccount.username) == identifier.lower())
+            | (func.lower(UserAccount.email) == identifier.lower())
+        )
+        .first()
+    )
+
+    if not target:
+        return {
+            "success": True,
+            "exists": False,
+            "message": "User not exist",
+            "data": {
+                "identifier": identifier,
+            },
+        }
+
+    has_password_material = bool((target.password_hash or "").strip() and (target.password_salt or "").strip())
+    password_match = None
+    if payload.password is not None:
+        password_match = bool(
+            has_password_material
+            and verify_password(payload.password, target.password_salt or "", target.password_hash or "")
+        )
+
+    return {
+        "success": True,
+        "exists": True,
+        "message": "User found",
+        "data": {
+            "id": target.id,
+            "user_id": target.user_id,
+            "username": target.username,
+            "mobile": target.mobile,
+            "email": target.email,
+            "role": target.role,
+            "status": target.status,
+            "has_password": has_password_material,
+            "password_match": password_match,
+        },
+    }
 
 @router.post("/suspend/{username}")
 def suspend_user(username: str, user=Depends(get_current_user), db: Session = Depends(get_db)):
