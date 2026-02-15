@@ -1,5 +1,6 @@
 
 import os
+import sqlite3
 from sqlalchemy import text, inspect
 from .db import engine, Base, DB_PATH
 from .db import SessionLocal
@@ -149,6 +150,99 @@ def _ensure_bootstrap_admin_user():
         db.close()
 
 
+def _restore_users_from_sqlite_if_configured():
+    """Optionally restore users from a SQLite backup file into current DB.
+
+    Controlled by env vars:
+      - SQLITE_USERS_RESTORE_ON_START=true
+      - SQLITE_USERS_RESTORE_PATH=/absolute/path/to/sqlite.db
+    """
+    enabled = (os.getenv("SQLITE_USERS_RESTORE_ON_START") or "").strip().lower() in ("1", "true", "yes", "on")
+    if not enabled:
+        return
+
+    sqlite_path = (os.getenv("SQLITE_USERS_RESTORE_PATH") or "").strip()
+    if not sqlite_path:
+        print("[DB] SQLite restore skipped (SQLITE_USERS_RESTORE_PATH not set)")
+        return
+
+    if not os.path.exists(sqlite_path):
+        print(f"[DB] SQLite restore skipped (file not found): {sqlite_path}")
+        return
+
+    print(f"[DB] Restoring users from SQLite: {sqlite_path}")
+
+    src = sqlite3.connect(sqlite_path)
+    src.row_factory = sqlite3.Row
+    src_cur = src.cursor()
+
+    dst = SessionLocal()
+    try:
+        src_cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_accounts'")
+        if not src_cur.fetchone():
+            print("[DB] SQLite restore skipped (user_accounts table missing)")
+            return
+
+        src_cur.execute("SELECT * FROM user_accounts")
+        rows = src_cur.fetchall()
+        if not rows:
+            print("[DB] SQLite restore skipped (no user rows)")
+            return
+
+        restored = 0
+        repaired = 0
+
+        for row in rows:
+            row = dict(row)
+            mobile = (row.get("mobile") or "").strip() or None
+            user_id = (row.get("user_id") or "").strip() or None
+            username = (row.get("username") or "").strip() or None
+            email = (row.get("email") or "").strip() or None
+
+            target = None
+            if mobile:
+                target = dst.query(models.UserAccount).filter(models.UserAccount.mobile == mobile).first()
+            if not target and user_id:
+                target = dst.query(models.UserAccount).filter(models.UserAccount.user_id == user_id).first()
+            if not target and username:
+                target = dst.query(models.UserAccount).filter(models.UserAccount.username == username).first()
+            if not target and email:
+                target = dst.query(models.UserAccount).filter(models.UserAccount.email == email).first()
+
+            if not target:
+                target = models.UserAccount()
+                dst.add(target)
+                restored += 1
+            else:
+                repaired += 1
+
+            for col in [
+                "username", "email", "mobile", "user_id", "password_salt", "password_hash",
+                "require_password_reset", "role", "status", "allowed_segments", "wallet_balance",
+                "margin_multiplier", "brokerage_plan_id"
+            ]:
+                if col in row:
+                    setattr(target, col, row.get(col))
+
+            if not (target.status or "").strip():
+                target.status = "ACTIVE"
+            if not (target.role or "").strip():
+                target.role = "USER"
+
+        dst.commit()
+        print(f"[DB] ✓ SQLite user restore complete. inserted={restored}, updated={repaired}")
+    except Exception as exc:
+        dst.rollback()
+        print(f"[DB] ✗ SQLite user restore failed: {exc}")
+        raise
+    finally:
+        try:
+            src.close()
+        except Exception:
+            pass
+        dst.close()
+
+
 def init_db():
     """Initialize database tables and ensure schema is up to date."""
     print(f"[DB] Initializing database at: {DB_PATH}")
@@ -160,6 +254,7 @@ def init_db():
         
         _ensure_dhan_credentials_columns()
         _ensure_user_accounts_columns()
+        _restore_users_from_sqlite_if_configured()
         _ensure_bootstrap_admin_user()
         print("[DB] ✓ Schema migrations complete")
         
