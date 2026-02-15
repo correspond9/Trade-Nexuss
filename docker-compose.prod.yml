@@ -24,6 +24,8 @@ services:
       - LOG_LEVEL=WARNING
       - ENVIRONMENT=production
       - DEBUG=false
+      - STARTUP_LOAD_MASTER=false
+      - STARTUP_LOAD_TIER_B=false
     env_file:
       - .env.production
     depends_on:

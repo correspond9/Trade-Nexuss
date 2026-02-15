@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from datetime import datetime
 from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -11,6 +12,13 @@ logger = logging.getLogger(__name__)
 # Global scheduler instance
 _scheduler = None
 _bootstrap_task: Optional[asyncio.Task] = None
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = (os.getenv(name) or "").strip().lower()
+    if not value:
+        return default
+    return value in ("1", "true", "yes", "on")
 
 def get_scheduler():
     """Get or create the background scheduler"""
@@ -334,6 +342,7 @@ async def on_start():
 
     async def _bootstrap_after_startup() -> None:
         logger.info("[STARTUP] Background bootstrap started")
+        is_production = (os.getenv("ENVIRONMENT") or "").strip().lower() == "production"
 
         # Start EOD scheduler
         try:
@@ -359,9 +368,13 @@ async def on_start():
         await asyncio.to_thread(init_db)
 
         # Load instrument master
-        logger.info("[STARTUP] Loading instrument master...")
-        await asyncio.to_thread(MASTER.load)
-        logger.info("[STARTUP] Instrument master loaded")
+        load_master = _env_bool("STARTUP_LOAD_MASTER", default=not is_production)
+        if load_master:
+            logger.info("[STARTUP] Loading instrument master...")
+            await asyncio.to_thread(MASTER.load)
+            logger.info("[STARTUP] Instrument master loaded")
+        else:
+            logger.warning("[STARTUP] Skipping instrument master load (STARTUP_LOAD_MASTER=false)")
 
         # Initialize managers (they auto-initialize on import)
         logger.info("[STARTUP] Initializing subscription managers...")
@@ -376,9 +389,13 @@ async def on_start():
         await asyncio.to_thread(SUBSCRIPTION_MGR._load_from_database)
         logger.info("[STARTUP] Subscriptions loaded from database")
 
-        logger.info("[STARTUP] Scheduling Tier B pre-load in background...")
-        tier_b_task = asyncio.create_task(load_tier_b_chains())
-        tier_b_task.add_done_callback(lambda t: _log_task_result(t, "load_tier_b_chains"))
+        load_tier_b = _env_bool("STARTUP_LOAD_TIER_B", default=not is_production)
+        if load_tier_b:
+            logger.info("[STARTUP] Scheduling Tier B pre-load in background...")
+            tier_b_task = asyncio.create_task(load_tier_b_chains())
+            tier_b_task.add_done_callback(lambda t: _log_task_result(t, "load_tier_b_chains"))
+        else:
+            logger.warning("[STARTUP] Skipping Tier B preload (STARTUP_LOAD_TIER_B=false)")
 
         logger.info("[STARTUP] Scheduling market data streams in background...")
         from app.market_orchestrator import get_orchestrator
