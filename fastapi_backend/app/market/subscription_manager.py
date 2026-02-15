@@ -9,6 +9,7 @@ from typing import Dict, List, Set, Optional, Tuple
 from collections import defaultdict
 from app.storage.db import SessionLocal
 from app.storage.models import Subscription, SubscriptionLog
+from app.storage.migrations import init_db
 from app.market.instrument_master.registry import REGISTRY
 from app.market_orchestrator import get_orchestrator
 from app.market.security_ids import (
@@ -471,7 +472,12 @@ class SubscriptionManager:
     def _load_from_database(self):
         """Load existing subscriptions from database"""
         try:
+            from sqlalchemy import inspect
+            from app.storage.db import engine, Base
             from app.storage.models import Subscription
+            # Create schema on demand if tables are missing (e.g., fresh Postgres)
+            if not inspect(engine).has_table("subscriptions"):
+                Base.metadata.create_all(bind=engine)
             orchestrator = get_orchestrator()
             active_subs = self.db.query(Subscription).filter(Subscription.active == True).all()
             
@@ -569,6 +575,7 @@ class SubscriptionManager:
 
 
 # Global subscription manager
+init_db()
 SUBSCRIPTION_MGR = SubscriptionManager()
 
 def get_subscription_manager() -> SubscriptionManager:
