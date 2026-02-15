@@ -1,9 +1,11 @@
 FROM node:18-alpine AS build
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies with fallback strategies
 COPY package*.json ./
-RUN npm ci --verbose || npm ci --no-audit --legacy-peer-deps
+RUN npm install --verbose --no-audit --legacy-peer-deps 2>&1 || \
+    (npm cache clean --force && npm install --no-audit --legacy-peer-deps 2>&1) || \
+    npm install --ignore-scripts --no-audit --legacy-peer-deps 2>&1
 
 # Copy source and build
 COPY . .
