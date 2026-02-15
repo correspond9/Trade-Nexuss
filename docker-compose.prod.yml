@@ -10,7 +10,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 180s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.tradingbackend.rule=Host(`api.tradingnexus.pro`)"
@@ -66,6 +66,32 @@ services:
       - redis_data:/data
     restart: always
     command: redis-server --appendonly yes
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "3000:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tradingfrontend.rule=Host(`tradingnexus.pro`) || Host(`www.tradingnexus.pro`) || Host(`app.tradingnexus.pro`)"
+      - "traefik.http.routers.tradingfrontend.entrypoints=http,https"
+      - "traefik.http.routers.tradingfrontend.tls=true"
+      - "traefik.http.services.tradingfrontend.loadbalancer.server.port=3000"
+    environment:
+      - VITE_API_URL=https://api.tradingnexus.pro
+    depends_on:
+      - backend
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
 volumes:
   postgres_data:
