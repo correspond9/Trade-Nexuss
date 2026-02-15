@@ -3,7 +3,7 @@ WORKDIR /app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm ci --silent
+RUN npm ci --verbose || npm ci --no-audit --legacy-peer-deps
 
 # Copy source and build
 COPY . .
