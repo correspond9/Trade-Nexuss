@@ -1441,41 +1441,41 @@ def update_user(user_id: int, req: UserUpdateRequest, user=Depends(get_current_u
         if target.role == "ADMIN" and target.id != user.id:
             raise HTTPException(status_code=403, detail="Insufficient permissions to modify other ADMIN accounts")
     margin = _get_or_create_margin(db, target.id)
-    previous_wallet = user.wallet_balance or 0.0
-    previous_multiplier = _normalize_margin_multiplier(user.margin_multiplier)
+    previous_wallet = target.wallet_balance or 0.0
+    previous_multiplier = _normalize_margin_multiplier(target.margin_multiplier)
     if req.username is not None:
-        user.username = req.username
+        target.username = req.username
     if req.email is not None:
-        user.email = req.email
+        target.email = req.email
     if req.mobile is not None:
-        user.mobile = req.mobile
-        user.user_id = req.mobile
+        target.mobile = req.mobile
+        target.user_id = req.mobile
     if req.role is not None:
-        user.role = req.role
+        target.role = req.role
     if req.status is not None:
-        user.status = req.status
+        target.status = req.status
     if req.allowed_segments is not None:
-        user.allowed_segments = req.allowed_segments
+        target.allowed_segments = req.allowed_segments
     if req.wallet_balance is not None:
-        user.wallet_balance = req.wallet_balance
+        target.wallet_balance = req.wallet_balance
     if req.margin_multiplier is not None:
-        user.margin_multiplier = _normalize_margin_multiplier(req.margin_multiplier)
+        target.margin_multiplier = _normalize_margin_multiplier(req.margin_multiplier)
     if req.brokerage_plan_id is not None:
-        user.brokerage_plan_id = req.brokerage_plan_id
+        target.brokerage_plan_id = req.brokerage_plan_id
     if req.initial_password:
         salt, digest = hash_password(req.initial_password)
-        user.password_salt = salt
-        user.password_hash = digest
-        user.require_password_reset = True
+        target.password_salt = salt
+        target.password_hash = digest
+        target.require_password_reset = True
     if req.wallet_balance is not None or req.margin_multiplier is not None:
-        updated_multiplier = _normalize_margin_multiplier(user.margin_multiplier)
+        updated_multiplier = _normalize_margin_multiplier(target.margin_multiplier)
         if req.margin_multiplier is not None:
             margin.available_margin = max(
                 0.0,
-                (user.wallet_balance or 0.0) * updated_multiplier - (margin.used_margin or 0.0)
+                (target.wallet_balance or 0.0) * updated_multiplier - (margin.used_margin or 0.0)
             )
         elif req.wallet_balance is not None:
-            delta_wallet = (user.wallet_balance or 0.0) - previous_wallet
+            delta_wallet = (target.wallet_balance or 0.0) - previous_wallet
             margin.available_margin = max(
                 0.0,
                 margin.available_margin + (delta_wallet * previous_multiplier)

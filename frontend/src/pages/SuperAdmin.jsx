@@ -11,8 +11,6 @@ const SuperAdmin = () => {
   const [activeTab, setActiveTab] = useState('settings');
   const [marketConfig, setMarketConfig] = useState(null);
   const [mcError, setMcError] = useState(null);
-  const API_BASE = apiService.baseURL;
-  const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');
   
   // Use custom hook for authentication settings
   const {
@@ -58,11 +56,7 @@ const SuperAdmin = () => {
     setMasterLoading(true);
     setMasterMsg('');
     try {
-      const res = await apiService.request(`${ROOT_BASE}/admin/load-instrument-master`, {
-        method: 'POST',
-        headers: { 'X-USER': user?.username || '' },
-        body: {}
-      });
+      const res = await apiService.post('/admin/load-instrument-master', {});
       const count = res?.records ?? 0;
       setMasterMsg(`✅ Instrument master loaded (${count.toLocaleString()} records)`);
     } catch (error) {
@@ -92,11 +86,7 @@ const SuperAdmin = () => {
         payload.password = authCheckPassword;
       }
 
-      const res = await apiService.request(`${ROOT_BASE}/admin/user-auth-check`, {
-        method: 'POST',
-        headers: { 'X-USER': user?.username || '' },
-        body: payload,
-      });
+      const res = await apiService.post('/admin/user-auth-check', payload);
 
       setAuthCheckResult(res);
     } catch (error) {
@@ -579,9 +569,8 @@ const SuperAdmin = () => {
                         const fd = new FormData();
                         fd.append('file', exposureFile);
                         try {
-                          await apiService.request(`${ROOT_BASE}/admin/upload/equity-exposure`, {
+                          await apiService.request('/admin/upload/equity-exposure', {
                             method: 'POST',
-                            headers: { 'X-USER': user?.username || '' },
                             body: fd
                           });
                           setUploadMsg('Equity exposure uploaded');
@@ -605,9 +594,8 @@ const SuperAdmin = () => {
                         const fd = new FormData();
                         fd.append('file', equitySpanFile);
                         try {
-                          await apiService.request(`${ROOT_BASE}/admin/upload/equity-span`, {
+                          await apiService.request('/admin/upload/equity-span', {
                             method: 'POST',
-                            headers: { 'X-USER': user?.username || '' },
                             body: fd
                           });
                           setUploadMsg('Equity SPAN uploaded');
@@ -631,9 +619,8 @@ const SuperAdmin = () => {
                         const fd = new FormData();
                         fd.append('file', commoditySpanFile);
                         try {
-                          await apiService.request(`${ROOT_BASE}/admin/upload/commodity-span`, {
+                          await apiService.request('/admin/upload/commodity-span', {
                             method: 'POST',
-                            headers: { 'X-USER': user?.username || '' },
                             body: fd
                           });
                           setUploadMsg('Commodity SPAN uploaded');
