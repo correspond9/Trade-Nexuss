@@ -74,7 +74,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: https://api.tradingnexus.pro
+        VITE_API_URL: https://api.tradingnexus.pro/api/v2
     ports:
       - "3000:80"
     labels:
@@ -84,7 +84,7 @@ services:
       - "traefik.http.routers.tradingfrontend.tls=true"
       - "traefik.http.services.tradingfrontend.loadbalancer.server.port=80"
     environment:
-      - VITE_API_URL=https://api.tradingnexus.pro
+      - VITE_API_URL=https://api.tradingnexus.pro/api/v2
     depends_on:
       - backend
     restart: always

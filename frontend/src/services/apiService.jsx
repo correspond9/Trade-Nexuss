@@ -11,7 +11,24 @@ class ApiService {
       // ignore
     }
     rawBase = rawBase || import.meta.env.VITE_API_URL || '/api/v2';
-    this.baseURL = String(rawBase).replace(/\/+$/, '');
+    const normalizeBase = (value) => {
+      const fallback = '/api/v2';
+      try {
+        const text = String(value || '').trim();
+        if (!text) return fallback;
+        if (text.startsWith('/')) return text.replace(/\/+$/, '');
+        const url = new URL(text);
+        const path = (url.pathname || '/').replace(/\/+$/, '');
+        if (!path || path === '/') {
+          url.pathname = '/api/v2';
+          return url.toString().replace(/\/+$/, '');
+        }
+        return url.toString().replace(/\/+$/, '');
+      } catch (_e) {
+        return String(value).replace(/\/+$/, '') || fallback;
+      }
+    };
+    this.baseURL = normalizeBase(rawBase);
     this.cache = new Map();
     this.defaultHeaders = {
       'Content-Type': 'application/json',
