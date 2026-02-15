@@ -323,6 +323,10 @@ async def on_start():
     print("\n" + "="*70)
     print("[STARTUP] Initializing Broking Terminal V2 Backend")
     print("="*70)
+
+    # Ensure database schema exists before any managers query tables
+    from app.storage.migrations import init_db
+    init_db()
     
     # Load instrument master
     print("[STARTUP] Loading instrument master...")
