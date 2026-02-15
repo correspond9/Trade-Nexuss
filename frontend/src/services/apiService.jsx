@@ -72,7 +72,24 @@ class ApiService {
   }
 
   getAuthHeaders() {
-    return this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {};
+    const headers = this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {};
+
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const rawUser = localStorage.getItem('authUser') || localStorage.getItem('user');
+        if (rawUser) {
+          const parsed = JSON.parse(rawUser);
+          const xUser = (parsed?.username || parsed?.user_id || parsed?.mobile || '').toString().trim();
+          if (xUser) {
+            headers['X-USER'] = xUser;
+          }
+        }
+      }
+    } catch (e) {
+      // ignore malformed localStorage user payload
+    }
+
+    return headers;
   }
 
   // Remove credential-like fields from outgoing JSON bodies to avoid accidental leakage
