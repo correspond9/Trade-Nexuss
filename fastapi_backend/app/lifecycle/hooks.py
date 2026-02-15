@@ -323,30 +323,7 @@ async def load_tier_b_chains():
 async def on_start():
     """Application startup - initialize managers and scheduler"""
     global _bootstrap_task
-
-    print("\n" + "="*70)
-    print("[STARTUP] Initializing Broking Terminal V2 Backend")
-    print("="*70)
-    
-    # Start EOD scheduler
-    print("[STARTUP] Starting EOD scheduler...")
-    scheduler = get_scheduler()
-    
-    # Schedule EOD cleanup for 3:30 PM IST every trading day
-    scheduler.add_job(
-        eod_cleanup,
-        'cron',
-        hour=15,           # 3:30 PM IST (15:30 in 24-hour format)
-        minute=30,
-        id='eod_cleanup',
-        name='End-of-Day Cleanup',
-        replace_existing=True,
-        max_instances=1    # Ensure only one instance runs at a time
-    )
-    
-    scheduler.start()
-    print("[STARTUP] ✓ EOD scheduler started (fires at 3:30 PM IST)")
-    print("[STARTUP] ✓ Manual trigger: POST /api/v2/admin/unsubscribe-all-tier-a")
+    logger.info("[STARTUP] Initializing Broking Terminal V2 Backend")
 
     # Run heavy initialization in the background so startup can complete quickly
     # (prevents healthcheck restart loops).
@@ -356,44 +333,67 @@ async def on_start():
             logger.exception("[STARTUP] Background task '%s' failed", name, exc_info=exc)
 
     async def _bootstrap_after_startup() -> None:
-        print("[STARTUP] Background bootstrap started...")
+        logger.info("[STARTUP] Background bootstrap started")
+
+        # Start EOD scheduler
+        try:
+            scheduler = get_scheduler()
+            scheduler.add_job(
+                eod_cleanup,
+                'cron',
+                hour=15,
+                minute=30,
+                id='eod_cleanup',
+                name='End-of-Day Cleanup',
+                replace_existing=True,
+                max_instances=1
+            )
+            if not scheduler.running:
+                scheduler.start()
+            logger.info("[STARTUP] EOD scheduler started")
+        except Exception:
+            logger.exception("[STARTUP] Failed to start EOD scheduler")
 
         # Ensure database schema exists before any managers query tables
         from app.storage.migrations import init_db
         await asyncio.to_thread(init_db)
 
         # Load instrument master
-        print("[STARTUP] Loading instrument master...")
+        logger.info("[STARTUP] Loading instrument master...")
         await asyncio.to_thread(MASTER.load)
-        print("[STARTUP] ✓ Instrument master loaded")
+        logger.info("[STARTUP] Instrument master loaded")
 
         # Initialize managers (they auto-initialize on import)
-        print("[STARTUP] Initializing subscription managers...")
+        logger.info("[STARTUP] Initializing subscription managers...")
         from app.market.subscription_manager import SUBSCRIPTION_MGR
         from app.market.watchlist_manager import WATCHLIST_MGR
         from app.market.ws_manager import WS_MANAGER
         from app.market.atm_engine import ATM_ENGINE
-        print("[STARTUP] ✓ Subscription managers initialized")
+        logger.info("[STARTUP] Subscription managers initialized")
 
         # Load subscriptions from database (deferred from __init__ to avoid import-time DB queries)
-        print("[STARTUP] Loading subscriptions from database...")
+        logger.info("[STARTUP] Loading subscriptions from database...")
         await asyncio.to_thread(SUBSCRIPTION_MGR._load_from_database)
-        print("[STARTUP] ✓ Subscriptions loaded from database")
+        logger.info("[STARTUP] Subscriptions loaded from database")
 
-        print("[STARTUP] Scheduling Tier B pre-load in background...")
+        logger.info("[STARTUP] Scheduling Tier B pre-load in background...")
         tier_b_task = asyncio.create_task(load_tier_b_chains())
         tier_b_task.add_done_callback(lambda t: _log_task_result(t, "load_tier_b_chains"))
 
-        print("[STARTUP] Scheduling market data streams in background...")
+        logger.info("[STARTUP] Scheduling market data streams in background...")
         from app.market_orchestrator import get_orchestrator
         streams_task = asyncio.create_task(get_orchestrator().start_streams())
         streams_task.add_done_callback(lambda t: _log_task_result(t, "start_streams"))
 
-    _bootstrap_task = asyncio.create_task(_bootstrap_after_startup())
-    _bootstrap_task.add_done_callback(lambda t: _log_task_result(t, "bootstrap_after_startup"))
+    loop = asyncio.get_running_loop()
 
-    print("[STARTUP] ✓ Backend ready!")
-    print("="*70 + "\n")
+    def _schedule_bootstrap() -> None:
+        global _bootstrap_task
+        _bootstrap_task = asyncio.create_task(_bootstrap_after_startup())
+        _bootstrap_task.add_done_callback(lambda t: _log_task_result(t, "bootstrap_after_startup"))
+
+    loop.call_soon(_schedule_bootstrap)
+    logger.info("[STARTUP] Backend ready (bootstrap running in background)")
 
 def on_stop():
     """Application shutdown - cleanup"""
