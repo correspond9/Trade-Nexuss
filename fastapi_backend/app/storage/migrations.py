@@ -1,7 +1,10 @@
 
+import os
 from sqlalchemy import text, inspect
 from .db import engine, Base, DB_PATH
+from .db import SessionLocal
 from . import models
+from app.users.passwords import hash_password
 
 def _get_existing_columns(table_name: str) -> set:
     """Get existing columns for a table using database-agnostic introspection."""
@@ -70,6 +73,82 @@ def _ensure_user_accounts_columns():
                 conn.commit()
 
 
+def _ensure_bootstrap_admin_user():
+    """Create/repair an admin login user from env vars (for fresh Postgres deployments)."""
+    mobile = (os.getenv("BOOTSTRAP_ADMIN_MOBILE") or "").strip()
+    password = (os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
+    username = (os.getenv("BOOTSTRAP_ADMIN_USERNAME") or mobile or "").strip()
+    role = (os.getenv("BOOTSTRAP_ADMIN_ROLE") or "SUPER_ADMIN").strip().upper()
+
+    if not mobile or not password:
+        print("[DB] Bootstrap admin skipped (BOOTSTRAP_ADMIN_MOBILE/PASSWORD not set)")
+        return
+
+    db = SessionLocal()
+    try:
+        user = (
+            db.query(models.UserAccount)
+            .filter(
+                (models.UserAccount.mobile == mobile)
+                | (models.UserAccount.user_id == mobile)
+                | (models.UserAccount.username == username)
+            )
+            .first()
+        )
+
+        salt, digest = hash_password(password)
+
+        if user:
+            updated = False
+            if not (user.password_salt or "").strip() or not (user.password_hash or "").strip():
+                user.password_salt = salt
+                user.password_hash = digest
+                updated = True
+            if not (user.mobile or "").strip():
+                user.mobile = mobile
+                updated = True
+            if not (user.user_id or "").strip():
+                user.user_id = mobile
+                updated = True
+            if user.status != "ACTIVE":
+                user.status = "ACTIVE"
+                updated = True
+            if not (user.role or "").strip():
+                user.role = role
+                updated = True
+
+            if updated:
+                db.commit()
+                print(f"[DB] ✓ Bootstrap admin repaired: username={user.username}, mobile={user.mobile}")
+            else:
+                print(f"[DB] ✓ Bootstrap admin exists: username={user.username}, mobile={user.mobile}")
+            return
+
+        new_user = models.UserAccount(
+            username=username,
+            email=None,
+            mobile=mobile,
+            user_id=mobile,
+            password_salt=salt,
+            password_hash=digest,
+            require_password_reset=False,
+            role=role,
+            status="ACTIVE",
+            allowed_segments="NSE,NFO,BSE,MCX",
+            wallet_balance=0.0,
+            margin_multiplier=5.0,
+        )
+        db.add(new_user)
+        db.commit()
+        print(f"[DB] ✓ Bootstrap admin created: username={username}, mobile={mobile}")
+    except Exception as exc:
+        db.rollback()
+        print(f"[DB] ✗ Bootstrap admin setup failed: {exc}")
+        raise
+    finally:
+        db.close()
+
+
 def init_db():
     """Initialize database tables and ensure schema is up to date."""
     print(f"[DB] Initializing database at: {DB_PATH}")
@@ -81,6 +160,7 @@ def init_db():
         
         _ensure_dhan_credentials_columns()
         _ensure_user_accounts_columns()
+        _ensure_bootstrap_admin_user()
         print("[DB] ✓ Schema migrations complete")
         
         # Verify we can query the credentials table
