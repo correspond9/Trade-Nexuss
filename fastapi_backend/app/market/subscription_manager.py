@@ -208,9 +208,10 @@ class SubscriptionManager:
         self.ws_usage = {i: 0 for i in range(1, 6)}  # ws_1 to ws_5 instrument counts
         self.lock = threading.RLock()
         self.db = SessionLocal()
+        self._db_loaded = False
         
-        # ✨ NEW: Load existing subscriptions from database
-        self._load_from_database()
+        # ✨ Database loading deferred to first use (after startup hook completes)
+        # Don't load at import time to avoid connection issues
     
     def subscribe(
         self,
@@ -470,14 +471,21 @@ class SubscriptionManager:
         pass
     
     def _load_from_database(self):
-        """Load existing subscriptions from database"""
+        """Load existing subscriptions from database (called explicitly by startup hook)"""
+        if self._db_loaded:
+            return
+        
         try:
             from sqlalchemy import inspect
             from app.storage.db import engine, Base
             from app.storage.models import Subscription
-            # Create schema on demand if tables are missing (e.g., fresh Postgres)
+            
+            # Ensure tables exist
             if not inspect(engine).has_table("subscriptions"):
+                print("[SUBSCRIPTION_MGR] subscriptions table not found, creating schema...")
                 Base.metadata.create_all(bind=engine)
+                print("[SUBSCRIPTION_MGR] Schema created")
+            
             orchestrator = get_orchestrator()
             active_subs = self.db.query(Subscription).filter(Subscription.active == True).all()
             
@@ -543,9 +551,12 @@ class SubscriptionManager:
                 print(f"[DB] Loaded {loaded_count} subscriptions from database")
             else:
                 print("[DB] No active subscriptions found in database")
+            
+            self._db_loaded = True
                 
         except Exception as e:
             print(f"[ERROR] Failed to load subscriptions from database: {e}")
+            self._db_loaded = True  # Mark as attempted even if failed
     
     def sync_to_db(self):
         """Sync all current subscriptions to database"""
@@ -574,8 +585,7 @@ class SubscriptionManager:
             print(f"[WARN] Failed to sync subscriptions to DB: {e}")
 
 
-# Global subscription manager
-init_db()
+# Global subscription manager (init_db() called in startup hook)
 SUBSCRIPTION_MGR = SubscriptionManager()
 
 def get_subscription_manager() -> SubscriptionManager:

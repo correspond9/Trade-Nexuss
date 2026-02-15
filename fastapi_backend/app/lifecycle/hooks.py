@@ -341,6 +341,11 @@ async def on_start():
     from app.market.atm_engine import ATM_ENGINE
     print("[STARTUP] ✓ Subscription managers initialized")
     
+    # Load subscriptions from database (deferred from __init__ to avoid import-time DB queries)
+    print("[STARTUP] Loading subscriptions from database...")
+    SUBSCRIPTION_MGR._load_from_database()
+    print("[STARTUP] ✓ Subscriptions loaded from database")
+    
     # Start EOD scheduler
     print("[STARTUP] Starting EOD scheduler...")
     scheduler = get_scheduler()
