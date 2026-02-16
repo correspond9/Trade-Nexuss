@@ -1,7 +1,9 @@
 import threading
+import logging
 
 # Only track the four Tier-B dashboard instruments.
 _DASHBOARD_SYMBOLS = ("NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "RELIANCE")
+logger = logging.getLogger("trading_nexus.market.live_prices")
 
 prices = {symbol: None for symbol in _DASHBOARD_SYMBOLS}
 
@@ -32,13 +34,13 @@ def update_price(symbol: str, price: float):
                 underlying = _normalize_symbol(parts[1])  # NIFTY from CE_NIFTY_...
                 if underlying in _DASHBOARD_SYMBOLS:
                     prices[underlying] = price
-                    print(f"[PRICE] Updated {underlying} from option {symbol}: {price}")
+                    logger.debug("[PRICE] Updated %s from option %s: %s", underlying, symbol, price)
         else:
             # This is a direct underlying symbol
             normalized = _normalize_symbol(symbol)
             if normalized in _DASHBOARD_SYMBOLS:
                 prices[normalized] = price
-                print(f"[PRICE] Updated {normalized}: {price}")
+                logger.debug("[PRICE] Updated %s: %s", normalized, price)
 
 def get_prices():
     """Get all dashboard prices"""

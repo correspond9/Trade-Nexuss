@@ -18,6 +18,7 @@ import importlib
 import inspect
 import socket
 import os
+import logging
 from datetime import datetime, timedelta, date
 from typing import Dict, Optional
 from dhanhq import dhanhq as DhanHQClient
@@ -57,6 +58,7 @@ FEED_MODE_QUOTE = 17
 _REST_CLIENT_LOCK = threading.Lock()
 _REST_CLIENT: Optional[DhanHQClient] = None
 _LAST_CLOSE_CACHE: Dict[str, Dict[str, object]] = {}
+logger = logging.getLogger("trading_nexus.dhan.live_feed")
 
 
 def _exchange_name_from_code(exchange_code: Optional[int], segment: Optional[str] = None) -> str:
@@ -945,11 +947,11 @@ def on_message_callback(feed, message):
             last_close = _get_last_close_price(sec_id_str, exchange_code)
             if last_close is not None:
                 update_price(symbol, last_close)
-                print(f"[PRICE] {symbol} = {last_close} (last close)")
+                logger.debug("[PRICE] %s = %s (last close)", symbol, last_close)
             return
 
         update_price(symbol, ltp)
-        print(f"[PRICE] {symbol} = {ltp}")
+        logger.debug("[PRICE] %s = %s", symbol, ltp)
 
         # ✨ CRITICAL: Update market state with depth data for non-option instruments
         try:
@@ -1188,7 +1190,7 @@ def start_live_feed():
                 
                 # Establish and maintain WebSocket connection once
                 try:
-                    print("[DEBUG] Calling _market_feed.run_forever()")
+                    logger.debug("Calling _market_feed.run_forever()")
                     _market_feed.run_forever()
                 except Exception as e:
                     print(f"[ERROR] _market_feed.run_forever() crashed: {e}")

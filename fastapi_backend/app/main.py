@@ -1,5 +1,6 @@
 import logging
 import traceback
+import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,13 +20,20 @@ from app.trading.orders import router as orders_router
 from app.routers.authoritative_option_chain import router as option_chain_router
 from app.admin.admin_panel import router as admin_router
 
-# Configure logging to ensure tracebacks appear in container logs
+# Configure logging to ensure tracebacks appear in container logs.
+# Default to INFO in production; set LOG_LEVEL=DEBUG only for active troubleshooting.
+_log_level_name = (os.getenv("LOG_LEVEL") or "INFO").strip().upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=_log_level,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 log = logging.getLogger("trading_nexus")
-log.setLevel(logging.DEBUG)
+log.setLevel(_log_level)
+
+# Suppress verbose websocket binary frame dumps unless explicitly needed.
+logging.getLogger("websockets.client").setLevel(logging.WARNING)
+logging.getLogger("websockets.protocol").setLevel(logging.WARNING)
 
 app = FastAPI(
     title="Trading Nexus API",
@@ -45,8 +53,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://tradingnexus.pro",
+        "http://tradingnexus.pro",
         "https://www.tradingnexus.pro",
+        "http://www.tradingnexus.pro",
         "https://app.tradingnexus.pro",
+        "http://app.tradingnexus.pro",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
@@ -141,6 +152,7 @@ _disable_v1 = (_os.getenv("DISABLE_V1_COMPAT") or "").strip().lower() in ("1","t
 if not _disable_v1:
     app.include_router(credentials_router, prefix="/api/v1")
     app.include_router(settings_router, prefix="/api/v1")
+    app.include_router(admin_router, prefix="/api/v1")
 
 # Backstop admin route for tests: set market depth
 from app.market.market_state import state as market_state
