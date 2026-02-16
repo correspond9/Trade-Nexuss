@@ -917,42 +917,90 @@ class AuthoritativeOptionChainService:
                 async with session.post(url, json=payload, headers=headers, timeout=15) as response:
                     if response.status == 200:
                         data = await response.json()
-                        result = data.get("data", {})
+                        raw = data.get("data", data)
+
+                        def _extract_strikes(payload_obj: Any) -> List[Dict[str, Any]]:
+                            if isinstance(payload_obj, list):
+                                return payload_obj
+                            if not isinstance(payload_obj, dict):
+                                return []
+
+                            for key in (
+                                "strikes",
+                                "option_chain",
+                                "optionChain",
+                                "oc",
+                                "data",
+                            ):
+                                value = payload_obj.get(key)
+                                if isinstance(value, list):
+                                    return value
+                            return []
+
+                        def _normalize_side(strike_row: Dict[str, Any], side: str) -> Dict[str, Any]:
+                            side_upper = side.upper()
+                            side_lower = side.lower()
+                            aliases = (
+                                side_lower,
+                                side_upper,
+                                f"{side_lower}_option",
+                                f"{side_lower}_options",
+                                "call" if side_upper == "CE" else "put",
+                                "call_option" if side_upper == "CE" else "put_option",
+                                "call_options" if side_upper == "CE" else "put_options",
+                            )
+                            for alias in aliases:
+                                value = strike_row.get(alias)
+                                if isinstance(value, dict):
+                                    return value
+                            return {}
+
+                        raw_strikes = _extract_strikes(raw)
+                        normalized_strikes: List[Dict[str, Any]] = []
+
+                        for item in raw_strikes:
+                            if not isinstance(item, dict):
+                                continue
+                            strike_price = (
+                                item.get("strike_price")
+                                or item.get("strikePrice")
+                                or item.get("strike")
+                                or 0
+                            )
+                            normalized_strikes.append(
+                                {
+                                    **item,
+                                    "strike_price": strike_price,
+                                    "ce": _normalize_side(item, "CE"),
+                                    "pe": _normalize_side(item, "PE"),
+                                }
+                            )
+
+                        underlying_ltp = None
+                        if isinstance(raw, dict):
+                            underlying_ltp = (
+                                raw.get("underlying_ltp")
+                                or raw.get("underlyingLtp")
+                                or raw.get("underlying_value")
+                                or raw.get("underlyingValue")
+                                or raw.get("last_price")
+                                or raw.get("ltp")
+                            )
+
+                        result = {
+                            "strikes": normalized_strikes,
+                            "underlying_ltp": float(underlying_ltp) if underlying_ltp is not None else None,
+                        }
                         
                         # Cache the successful result
                         self._set_rest_cache(cache_key, result, "option_chain")
                         
                         # ✨ Update central live_prices cache so /market/underlying-ltp endpoint works
                         try:
-                            # Try to extract LTP from the first available strike
-                            strikes = result.get("strikes", [])
-                            if strikes:
-                                # We need the underlying LTP, but the option chain structure often doesn't give it directly.
-                                # However, sometimes the API returns it in a meta field.
-                                # Or we can infer it from the ATM strike if available, but that's an approximation.
-                                # Let's check if the response has 'underlying_price' or similar.
-                                # If not, we can use the 'last_price' of the underlying which might be available separately.
-                                
-                                # Actually, Dhan Option Chain API returns `last_price` in the root object usually?
-                                # Let's check the structure based on previous logs or standard Dhan API docs.
-                                # Assuming result has 'last_price' or 'ltp' for the underlying.
-                                
-                                # If not available directly, we can't reliably update it here without risk.
-                                # But we can try to update it if we find it.
-                                pass
-                                
-                            # Better approach: The `get_option_chain` method calculates ATM based on LTP.
-                            # But here we are just fetching raw data.
-                            
-                            # Let's try to update the live_prices cache using the `live_prices` module
                             from app.market.live_prices import update_price
-                            
-                            # Often the option chain response *might* contain the underlying spot price
-                            # Check `result.get('underlying_val')` or similar if available.
-                            # Based on Dhan API docs, the response is list of strikes.
-                            
-                            # If we can't find it, we rely on the fact that `get_or_fetch_live_data`
-                            # will update the LTP in the cache when it processes this data.
+                            ltp_val = result.get("underlying_ltp")
+                            if ltp_val is not None and float(ltp_val) > 0:
+                                update_price(underlying, float(ltp_val))
                             
                         except Exception as e:
                             logger.warning(f"Failed to update live_prices from option chain: {e}")
@@ -1848,7 +1896,14 @@ class AuthoritativeOptionChainService:
                                         pe_ltp = 0.0
                                 else:
                                     # Extract CE data from nested structure
-                                    ce_obj = strike_data.get("ce", {}) or strike_data.get("CE", {}) or {}
+                                    ce_obj = (
+                                        strike_data.get("ce", {})
+                                        or strike_data.get("CE", {})
+                                        or strike_data.get("call", {})
+                                        or strike_data.get("call_option", {})
+                                        or strike_data.get("call_options", {})
+                                        or {}
+                                    )
                                     ce_ltp = float(
                                         ce_obj.get("ltp")
                                         or ce_obj.get("lastPrice")
@@ -1887,7 +1942,14 @@ class AuthoritativeOptionChainService:
                                             ce_token = f"CE_{underlying}_{strike_price}_{expiry}"
 
                                     # Extract PE data from nested structure
-                                    pe_obj = strike_data.get("pe", {}) or strike_data.get("PE", {}) or {}
+                                    pe_obj = (
+                                        strike_data.get("pe", {})
+                                        or strike_data.get("PE", {})
+                                        or strike_data.get("put", {})
+                                        or strike_data.get("put_option", {})
+                                        or strike_data.get("put_options", {})
+                                        or {}
+                                    )
                                     pe_ltp = float(
                                         pe_obj.get("ltp")
                                         or pe_obj.get("lastPrice")
