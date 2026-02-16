@@ -1,9 +1,14 @@
 from datetime import datetime
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
+import os
+import socket
 from app.storage.db import SessionLocal
 from app.storage.models import DhanCredential
 from app.market_orchestrator import get_orchestrator
+from app.users.auth import get_current_user
+from app.users.permissions import require_role
+from fastapi import Depends
 
 router = APIRouter()
 
@@ -278,6 +283,51 @@ def clear_credentials():
         db.query(DhanCredential).delete()
         db.commit()
         return {"success": True, "message": "All credentials cleared successfully"}
+    finally:
+        db.close()
+
+
+@router.get("/credentials/runtime-diagnostics")
+def credentials_runtime_diagnostics(user=Depends(get_current_user)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+
+    db = SessionLocal()
+    try:
+        from app.storage import db as storage_db
+
+        rows = db.query(DhanCredential).all()
+        active = _get_active_credential(db)
+
+        db_url = getattr(storage_db, "DATABASE_URL", "") or ""
+        db_backend = "postgres" if db_url.startswith("postgres") else ("sqlite" if db_url.startswith("sqlite") else "other")
+        db_target = ""
+        if db_backend == "sqlite":
+            db_target = db_url.split("sqlite:///", 1)[-1]
+        elif db_backend == "postgres":
+            # redact user/password; keep host/db for diagnostics
+            db_target = db_url.split("@")[-1]
+        else:
+            db_target = db_url
+
+        return {
+            "success": True,
+            "data": {
+                "instance": {
+                    "hostname": socket.gethostname(),
+                    "pid": os.getpid(),
+                },
+                "database": {
+                    "backend": db_backend,
+                    "target": db_target,
+                },
+                "credentials": {
+                    "row_count": len(rows),
+                    "active_mode": (active.auth_mode if active else None),
+                    "active_client_id_prefix": ((active.client_id or "")[:8] if active else None),
+                    "active_has_token": bool(((active.auth_token or "").strip() if active else "") or ((active.daily_token or "").strip() if active else "")),
+                },
+            },
+        }
     finally:
         db.close()
 

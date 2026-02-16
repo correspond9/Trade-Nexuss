@@ -4,6 +4,7 @@ import { apiService } from '../services/apiService';
 
 const API_BASE = apiService.baseURL;
 const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');
+const LOCAL_CRED_CACHE_KEY = 'dhanCredViewCache';
 const CREDENTIALS_BASE = `${API_BASE}/credentials`;
 
 export const useAuthSettings = () => {
@@ -67,7 +68,7 @@ export const useAuthSettings = () => {
       
       // Check if we have valid credentials
       if (data?.client_id || data?.client_id_prefix || hasPersistedToken) {
-        return {
+        const next = {
           authMode: data.auth_mode || 'DAILY_TOKEN',
           clientId: data.client_id || (data.client_id_prefix ? `${data.client_id_prefix}****` : ''),
           accessToken: hasPersistedToken ? (data.token_masked || '****************') : '', // Masked token placeholder
@@ -82,6 +83,20 @@ export const useAuthSettings = () => {
             STATIC_IP: null
           }
         };
+        try {
+          localStorage.setItem(
+            LOCAL_CRED_CACHE_KEY,
+            JSON.stringify({
+              authMode: next.authMode,
+              clientId: next.clientId,
+              hasToken: hasPersistedToken,
+              lastAuthTime: next.lastAuthTime,
+            })
+          );
+        } catch (_e) {
+          // ignore cache write errors
+        }
+        return next;
       }
     } catch (e) {
       console.warn('Failed to load credentials via apiService, falling back to legacy URLs', e);
@@ -121,6 +136,32 @@ export const useAuthSettings = () => {
           console.error('Error loading settings from fallback url:', url, error);
         }
       }
+
+    try {
+      const raw = localStorage.getItem(LOCAL_CRED_CACHE_KEY);
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (cached && cached.clientId) {
+          return {
+            authMode: cached.authMode || 'DAILY_TOKEN',
+            clientId: cached.clientId || '',
+            accessToken: cached.hasToken ? '****************' : '',
+            apiKey: '',
+            clientSecret: '',
+            connected: !!cached.hasToken,
+            lastAuthTime: cached.lastAuthTime || null,
+            authStatus: cached.hasToken ? 'connected' : 'disconnected',
+            wsUrl: 'wss://api-feed.dhan.co?version=2&token=...&clientId=...&authType=2',
+            _cachedCredentials: {
+              DAILY_TOKEN: null,
+              STATIC_IP: null
+            }
+          };
+        }
+      }
+    } catch (_e) {
+      // ignore cache read errors
+    }
 
     return {
       authMode: 'DAILY_TOKEN',

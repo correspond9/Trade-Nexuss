@@ -65,10 +65,8 @@ const SystemMonitoring = () => {
     let interval = null;
     const fetchNotifications = async () => {
       try {
-        const authToken = localStorage.getItem('authToken');
         try {
-          const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
-          const data = await apiService.request(`${ROOT_BASE}/admin/notifications?limit=10`, { method: 'GET', headers });
+          const data = await apiService.get('/admin/notifications', { limit: 10 });
           setNotifications(data?.notifications || []);
         } catch (err) {
           console.error('Error fetching admin notifications via apiService:', err);
