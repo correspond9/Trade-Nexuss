@@ -1291,12 +1291,12 @@ class AuthoritativeOptionChainService:
                             try:
                                 # ONLY subscribe to WebSocket if market is OPEN
                                 # If market is closed, we rely purely on the REST snapshot we just fetched
-                                if is_market_open(self._get_exchange_for_underlying(underlying)):
-                                    self._sync_tier_b_subscriptions(underlying, expiry, old_strikes, new_strikes)
+                                if is_market_open(self._get_exchange_for_underlying(symbol)):
+                                    self._sync_tier_b_subscriptions(symbol, expiry, old_strikes, new_strikes)
                                 else:
-                                    logger.debug(f"  💤 Market closed for {underlying}, skipping WebSocket subscription sync")
+                                    logger.debug(f"  💤 Market closed for {symbol}, skipping WebSocket subscription sync")
                             except Exception as sync_e:
-                                logger.warning(f"⚠️ Failed to sync Tier B subscriptions for {underlying} {expiry}: {sync_e}")
+                                logger.warning(f"⚠️ Failed to sync Tier B subscriptions for {symbol} {expiry}: {sync_e}")
 
                     skeleton.atm_strike = new_atm
                     skeleton.last_updated = datetime.now()
@@ -1342,17 +1342,14 @@ class AuthoritativeOptionChainService:
                     updated_count += len(new_strikes_dict) * 2
 
                     # Update ATM registry
-                    self.atm_registry.atm_strikes[underlying] = atm_strike
-                    self.atm_registry.last_updated[underlying] = datetime.now()
+                    self.atm_registry.atm_strikes[symbol] = new_atm
+                    self.atm_registry.last_updated[symbol] = datetime.now()
                     
                     # ✨ NEW: Update live_prices cache for standalone LTP endpoints
                     from app.market.live_prices import update_price
-                    update_price(underlying, float(current_price))
-                    
-                    # Cache the result
-                    self.cache[underlying][expiry] = skeleton
+                    update_price(symbol, float(ltp))
                 
-                logger.info(f"📈 Updated {underlying}: LTP={current_price}, options updated")
+                logger.info(f"📈 Updated {symbol}: LTP={ltp}, options updated")
                 return updated_count
 
             return 0
