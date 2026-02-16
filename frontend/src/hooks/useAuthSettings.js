@@ -33,7 +33,7 @@ export const useAuthSettings = () => {
       if (data?.client_id_prefix || data?.has_token) {
         return {
           authMode: data.auth_mode || 'DAILY_TOKEN',
-          clientId: data.client_id_prefix ? `${data.client_id_prefix}****` : '',
+          clientId: data.client_id || (data.client_id_prefix ? `${data.client_id_prefix}****` : ''),
           accessToken: data.has_token ? '****************' : '', // Masked token placeholder
           apiKey: '',
           clientSecret: '',

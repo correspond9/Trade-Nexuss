@@ -20,6 +20,11 @@ class SwitchModeIn(BaseModel):
     auth_mode: str
 
 
+def _looks_masked(value: str) -> bool:
+    text = (value or "").strip()
+    return bool(text) and "*" in text
+
+
 def _get_active_credential(db: SessionLocal) -> DhanCredential | None:
     row = db.query(DhanCredential).filter(DhanCredential.is_default == True).first()
     if row:
@@ -50,6 +55,7 @@ def get_active_credentials():
             "success": True,
             "message": f"Active credentials for {row.auth_mode or 'DAILY_TOKEN'}",
             "data": {
+                "client_id": row.client_id or "",
                 "client_id_prefix": (row.client_id or "")[:8],
                 "auth_mode": row.auth_mode or "DAILY_TOKEN",
                 "has_token": bool(row.auth_token),
@@ -74,11 +80,41 @@ def save_credentials(c: CredSaveIn):
             row = DhanCredential(auth_mode=mode)
             db.add(row)
 
-        row.client_id = c.client_id.strip()
-        row.auth_token = (c.access_token or "").strip()
-        row.api_key = (c.api_key or "").strip()
-        row.api_secret = (c.secret_api or "").strip()
-        row.daily_token = (c.daily_token or "").strip()
+        incoming_client_id = (c.client_id or "").strip()
+        incoming_access_token = (c.access_token or "").strip()
+        incoming_daily_token = (c.daily_token or "").strip()
+        incoming_api_key = (c.api_key or "").strip()
+        incoming_api_secret = (c.secret_api or "").strip()
+
+        # Preserve previously saved values if frontend sends masked placeholders.
+        if _looks_masked(incoming_client_id) and row.client_id:
+            resolved_client_id = row.client_id
+        else:
+            resolved_client_id = incoming_client_id
+
+        row.client_id = resolved_client_id
+
+        if mode == "DAILY_TOKEN":
+            resolved_token = incoming_access_token or incoming_daily_token
+
+            # If frontend sends masked placeholder or empty value, keep existing valid token.
+            if (_looks_masked(resolved_token) or not resolved_token) and (row.daily_token or row.auth_token):
+                resolved_token = (row.daily_token or row.auth_token or "").strip()
+
+            row.auth_token = resolved_token
+            row.daily_token = resolved_token
+            row.api_key = ""
+            row.api_secret = ""
+        else:
+            row.api_key = incoming_api_key
+            row.api_secret = incoming_api_secret
+            # STATIC_IP mode still relies on existing token-based WS flow in current implementation.
+            # Keep prior token values unless explicitly provided (and not masked).
+            if incoming_access_token and not _looks_masked(incoming_access_token):
+                row.auth_token = incoming_access_token
+            if incoming_daily_token and not _looks_masked(incoming_daily_token):
+                row.daily_token = incoming_daily_token
+
         row.last_updated = datetime.utcnow()
 
         # Set active mode
@@ -91,6 +127,11 @@ def save_credentials(c: CredSaveIn):
         save_settings(force=True)
 
         # Start market data streams immediately after credentials are saved
+        try:
+            from app.dhan.live_feed import reset_cooldown
+            reset_cooldown()
+        except Exception:
+            pass
         get_orchestrator().start_streams_sync()
 
         return {
@@ -118,6 +159,14 @@ def switch_mode(payload: SwitchModeIn | str = Body(...)):
         db.query(DhanCredential).update({DhanCredential.is_default: False})
         target.is_default = True
         db.commit()
+
+        # On mode switch, clear any connection cooldown and restart streams.
+        try:
+            from app.dhan.live_feed import reset_cooldown
+            reset_cooldown()
+        except Exception:
+            pass
+        get_orchestrator().start_streams_sync()
 
         return {
             "success": True,
