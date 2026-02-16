@@ -5,7 +5,6 @@ import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
 import OrdersTab from './Orders';
 import BasketsTab from './BASKETS';
 import WatchlistComponent from './WATCHLIST';
-import StraddleMatrix from './STRADDLE';
 import OptionMatrixComponent from './OPTIONS';
 import PositionsTab from './POSITIONS';
 import OrderModal from '../components/OrderModal';
@@ -68,7 +67,7 @@ const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
 };
 
 const Trade = () => {
-  const [leftTab, setLeftTab] = useState('straddle');
+  const [leftTab, setLeftTab] = useState('options');
   const [rightTab, setRightTab] = useState('orders');
   const [selectedIndex, setSelectedIndex] = useState('NIFTY 50');
   const [expiries, setExpiries] = useState([]); // Display format
@@ -125,7 +124,6 @@ const Trade = () => {
   // Remove useAppContext - tabs will manage their own data
 
   const leftTabs = [
-    { id: 'straddle', name: 'Straddle' },
     { id: 'options', name: 'Options' },
     { id: 'watchlist', name: 'Watchlist' },
   ];
@@ -276,13 +274,6 @@ const Trade = () => {
             {/* Left Panel Content */}
             <div className="bg-white border border-gray-200 rounded-b-lg p-2 min-h-[400px]">
               {leftTab === 'watchlist' && <WatchlistComponent handleOpenOrderModal={handleOpenOrderModal} />}
-              {leftTab === 'straddle' && (
-                <StraddleMatrix 
-                  handleOpenOrderModal={handleOpenOrderModal}
-                  selectedIndex={selectedIndex}
-                  expiry={isoExpiry}
-                />
-              )}
               {leftTab === 'options' && <OptionMatrixComponent handleOpenOrderModal={handleOpenOrderModal} selectedIndex={selectedIndex} expiry={isoExpiry} />}
             </div>
           </div>
