@@ -35,6 +35,22 @@ const SuperAdmin = () => {
   const [authCheckLoading, setAuthCheckLoading] = useState(false);
   const [authCheckResult, setAuthCheckResult] = useState(null);
   const [authCheckError, setAuthCheckError] = useState('');
+  const [backdateForm, setBackdateForm] = useState({
+    userId: '',
+    mobile: '',
+    username: '',
+    symbol: '',
+    quantity: '',
+    avgPrice: '',
+    exchangeSegment: 'NSE_EQ',
+    productType: 'MIS',
+    createdAt: '',
+    merge: true,
+  });
+  const [backdateLoading, setBackdateLoading] = useState(false);
+  const [backdateError, setBackdateError] = useState('');
+  const [backdateMsg, setBackdateMsg] = useState('');
+  const [backdateResult, setBackdateResult] = useState(null);
 
   // Handle save with error handling
   const handleSave = async () => {
@@ -99,6 +115,55 @@ const SuperAdmin = () => {
       setAuthCheckError(error?.message || 'Auth check failed');
     } finally {
       setAuthCheckLoading(false);
+    }
+  };
+
+  const handleBackdatePosition = async () => {
+    setBackdateError('');
+    setBackdateMsg('');
+    setBackdateResult(null);
+
+    const hasTarget = backdateForm.userId || backdateForm.mobile.trim() || backdateForm.username.trim();
+    if (!hasTarget) {
+      setBackdateError('Provide at least one target: User ID, Mobile, or Username');
+      return;
+    }
+    if (!backdateForm.symbol.trim()) {
+      setBackdateError('Symbol is required');
+      return;
+    }
+    if (backdateForm.quantity === '' || Number.isNaN(Number(backdateForm.quantity))) {
+      setBackdateError('Quantity is required and must be numeric');
+      return;
+    }
+    if (backdateForm.avgPrice === '' || Number.isNaN(Number(backdateForm.avgPrice))) {
+      setBackdateError('Average price is required and must be numeric');
+      return;
+    }
+
+    setBackdateLoading(true);
+    try {
+      const payload = {
+        symbol: backdateForm.symbol.trim(),
+        quantity: Number(backdateForm.quantity),
+        avg_price: Number(backdateForm.avgPrice),
+        exchange_segment: backdateForm.exchangeSegment || 'NSE_EQ',
+        product_type: backdateForm.productType || 'MIS',
+        merge: !!backdateForm.merge,
+      };
+
+      if (backdateForm.userId) payload.user_id = Number(backdateForm.userId);
+      if (backdateForm.mobile.trim()) payload.mobile = backdateForm.mobile.trim();
+      if (backdateForm.username.trim()) payload.username = backdateForm.username.trim();
+      if (backdateForm.createdAt) payload.created_at = backdateForm.createdAt;
+
+      const res = await apiService.post('/admin/positions/backdate', payload);
+      setBackdateResult(res?.data || null);
+      setBackdateMsg('✅ Historic position saved successfully');
+    } catch (error) {
+      setBackdateError(error?.message || 'Failed to save historic position');
+    } finally {
+      setBackdateLoading(false);
     }
   };
 
@@ -205,6 +270,16 @@ const SuperAdmin = () => {
             }`}
           >
             User Auth Check
+          </button>
+          <button
+            onClick={() => setActiveTab('backdate-position')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'backdate-position'
+                ? 'bg-blue-600 text-white'
+                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            Historic Position
           </button>
         </div>
 
@@ -731,6 +806,159 @@ const SuperAdmin = () => {
                         )}
                       </>
                     )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'backdate-position' && (
+          <div className="max-w-5xl">
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-6 space-y-4">
+                <h2 className="text-lg font-semibold text-gray-900">Add Historic Position</h2>
+                <p className="text-sm text-gray-600">
+                  Adds a backdated position into an existing user account using the existing admin API.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">User ID (optional)</label>
+                    <input
+                      type="number"
+                      value={backdateForm.userId}
+                      onChange={(e) => setBackdateForm((s) => ({ ...s, userId: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. 4"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Mobile (optional)</label>
+                    <input
+                      type="text"
+                      value={backdateForm.mobile}
+                      onChange={(e) => setBackdateForm((s) => ({ ...s, mobile: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. 9326890165"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Username (optional)</label>
+                    <input
+                      type="text"
+                      value={backdateForm.username}
+                      onChange={(e) => setBackdateForm((s) => ({ ...s, username: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. anums"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Symbol</label>
+                    <input
+                      type="text"
+                      value={backdateForm.symbol}
+                      onChange={(e) => setBackdateForm((s) => ({ ...s, symbol: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. NIFTY 25000 CE"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Quantity</label>
+                    <input
+                      type="number"
+                      value={backdateForm.quantity}
+                      onChange={(e) => setBackdateForm((s) => ({ ...s, quantity: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. 50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Average Price</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={backdateForm.avgPrice}
+                      onChange={(e) => setBackdateForm((s) => ({ ...s, avgPrice: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. 121.75"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Exchange Segment</label>
+                    <select
+                      value={backdateForm.exchangeSegment}
+                      onChange={(e) => setBackdateForm((s) => ({ ...s, exchangeSegment: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                    >
+                      <option value="NSE_EQ">NSE_EQ</option>
+                      <option value="NSE_FNO">NSE_FNO</option>
+                      <option value="BSE_EQ">BSE_EQ</option>
+                      <option value="MCX_COMM">MCX_COMM</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Product Type</label>
+                    <select
+                      value={backdateForm.productType}
+                      onChange={(e) => setBackdateForm((s) => ({ ...s, productType: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                    >
+                      <option value="MIS">MIS</option>
+                      <option value="NORMAL">NORMAL</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Created At (optional)</label>
+                    <input
+                      type="datetime-local"
+                      value={backdateForm.createdAt}
+                      onChange={(e) => setBackdateForm((s) => ({ ...s, createdAt: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <label className="flex items-center space-x-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={!!backdateForm.merge}
+                        onChange={(e) => setBackdateForm((s) => ({ ...s, merge: e.target.checked }))}
+                      />
+                      <span>Merge if exists</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleBackdatePosition}
+                    disabled={backdateLoading}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  >
+                    {backdateLoading ? 'Saving...' : 'Add Historic Position'}
+                  </button>
+                </div>
+
+                {backdateError && (
+                  <div className="p-3 bg-red-100 border border-red-300 text-red-700 rounded text-sm">{backdateError}</div>
+                )}
+                {backdateMsg && (
+                  <div className="p-3 bg-green-100 border border-green-300 text-green-700 rounded text-sm">{backdateMsg}</div>
+                )}
+                {backdateResult && (
+                  <div className="p-4 border rounded bg-gray-50 text-sm space-y-1">
+                    <div><strong>Position ID:</strong> {backdateResult.id}</div>
+                    <div><strong>User ID:</strong> {backdateResult.user_id}</div>
+                    <div><strong>Symbol:</strong> {backdateResult.symbol}</div>
+                    <div><strong>Quantity:</strong> {backdateResult.quantity}</div>
+                    <div><strong>Avg Price:</strong> {backdateResult.avg_price}</div>
+                    <div><strong>Created At:</strong> {backdateResult.created_at || '-'}</div>
                   </div>
                 )}
               </div>
