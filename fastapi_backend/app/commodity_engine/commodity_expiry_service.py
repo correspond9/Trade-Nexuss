@@ -122,12 +122,12 @@ class CommodityExpiryService:
                 pass
 
         await self._rate_limit()
-        await self.rate_limiter.wait("expiry")
-        if self.rate_limiter.is_blocked("expiry"):
+        if await self.rate_limiter.is_blocked_async("expiry"):
             fallback = self._fallback_expiries_from_registry(symbol)
             if fallback:
                 self.registry.set_expiries(symbol, fallback)
             return fallback
+        await self.rate_limiter.wait("expiry")
         creds = await fetch_dhan_credentials()
         if not creds:
             return []
@@ -170,9 +170,9 @@ class CommodityExpiryService:
                             f"⚠️ MCX expiry API error for {symbol}: {response.status} - {error_text}"
                         )
                         if response.status in (401, 403):
-                            self.rate_limiter.block("expiry", 900)
+                            await self.rate_limiter.block_async("expiry", 900)
                         if response.status == 429:
-                            self.rate_limiter.block("expiry", 120)
+                            await self.rate_limiter.block_async("expiry", 120)
                         if response.status == 429:
                             await asyncio.sleep(3 + attempt * 2)
                             continue

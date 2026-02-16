@@ -566,12 +566,12 @@ class AuthoritativeOptionChainService:
         Enforce REST API rate limiting
         api_type: "quote" (1 req/sec) or "data" (5 req/sec)
         """
-        if self.rate_limiter.is_blocked(api_type):
+        if await self.rate_limiter.is_blocked_async(api_type):
             return
         await self.rate_limiter.wait(api_type)
 
-    def _block_rest_calls(self, api_type: str, seconds: int, reason: str) -> None:
-        self.rate_limiter.block(api_type, seconds)
+    async def _block_rest_calls(self, api_type: str, seconds: int, reason: str) -> None:
+        await self.rate_limiter.block_async(api_type, seconds)
         self.rest_blocked_until[api_type] = datetime.utcnow().timestamp() + seconds
         try:
             from app.storage.db import SessionLocal
@@ -778,7 +778,7 @@ class AuthoritativeOptionChainService:
     async def _fetch_market_data_from_api(self, underlying: str) -> Optional[Dict[str, Any]]:
         """Fetch live market data from DhanHQ REST API"""
         try:
-            if self.rate_limiter.is_blocked("quote"):
+            if await self.rate_limiter.is_blocked_async("quote"):
                 return None
             await self._enforce_rest_rate_limit("quote")
             
@@ -838,7 +838,7 @@ class AuthoritativeOptionChainService:
                             "UnderlyingSeg": instrument_meta["segment"]
                         }
 
-                        if self.rate_limiter.is_blocked("data"):
+                        if await self.rate_limiter.is_blocked_async("data"):
                             return None
                         await self._enforce_rest_rate_limit("data")
                         async with session.post(expiry_url, json=payload, headers=headers, timeout=10) as expiry_response:
@@ -856,17 +856,17 @@ class AuthoritativeOptionChainService:
                                 error_text = await expiry_response.text()
                                 logger.error(f"❌ DhanHQ expiry API error for {underlying}: {expiry_response.status} - {error_text}")
                                 if expiry_response.status in (401, 403):
-                                    self._block_rest_calls("data", 900, "AUTH_FAILURE")
+                                    await self._block_rest_calls("data", 900, "AUTH_FAILURE")
                                 if expiry_response.status == 429:
-                                    self._block_rest_calls("data", 120, "RATE_LIMIT")
+                                    await self._block_rest_calls("data", 120, "RATE_LIMIT")
                                 return None
                     else:
                         error_text = await response.text()
                         logger.error(f"❌ DhanHQ quote API error for {underlying}: {response.status} - {error_text}")
                         if response.status in (401, 403):
-                            self._block_rest_calls("quote", 900, "AUTH_FAILURE")
+                            await self._block_rest_calls("quote", 900, "AUTH_FAILURE")
                         if response.status == 429:
-                            self._block_rest_calls("quote", 120, "RATE_LIMIT")
+                            await self._block_rest_calls("quote", 120, "RATE_LIMIT")
                         return None
                         
         except asyncio.TimeoutError:
@@ -885,7 +885,7 @@ class AuthoritativeOptionChainService:
             if cached_data:
                 return cached_data
 
-            if self.rate_limiter.is_blocked("data"):
+            if await self.rate_limiter.is_blocked_async("data"):
                 return None
             await self._enforce_rest_rate_limit("data")
             
@@ -962,9 +962,9 @@ class AuthoritativeOptionChainService:
                         error_text = await response.text()
                         logger.error(f"❌ DhanHQ option chain API error for {underlying} {expiry}: {response.status} - {error_text}")
                         if response.status in (401, 403):
-                            self._block_rest_calls("data", 900, "AUTH_FAILURE")
+                            await self._block_rest_calls("data", 900, "AUTH_FAILURE")
                         if response.status == 429:
-                            self._block_rest_calls("data", 120, "RATE_LIMIT")
+                            await self._block_rest_calls("data", 120, "RATE_LIMIT")
                         return None
                         
         except asyncio.TimeoutError:

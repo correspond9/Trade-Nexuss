@@ -100,7 +100,7 @@ class DhanMarginService:
         return "INTRADAY"
 
     async def _post(self, endpoint: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        if self.rate_limiter.is_blocked("data"):
+        if await self.rate_limiter.is_blocked_async("data"):
             return None
         await self.rate_limiter.wait("data")
 
@@ -127,9 +127,9 @@ class DhanMarginService:
                     if response.status != 200:
                         logger.warning("Dhan margin API error %s: %s", response.status, data)
                         if response.status in (401, 403):
-                            self.rate_limiter.block("data", 900)
+                            await self.rate_limiter.block_async("data", 900)
                         if response.status == 429:
-                            self.rate_limiter.block("data", 120)
+                            await self.rate_limiter.block_async("data", 120)
                         return None
                     self._cache_set(key, data)
                     return data
