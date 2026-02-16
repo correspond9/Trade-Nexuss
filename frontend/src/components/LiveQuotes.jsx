@@ -26,7 +26,7 @@ const LiveQuotes = () => {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [dataFlowStatus, setDataFlowStatus] = useState('checking');
   const [marketDataSource, setMarketDataSource] = useState('unknown');
-  const [expiryMap, setExpiryMap] = useState({});
+  const [pollIntervalMs, setPollIntervalMs] = useState(3000);
 
   const detectPayloadSource = (payload) => {
     const explicitSource = String(payload?.source || payload?.data?.source || '').toLowerCase();
@@ -52,45 +52,14 @@ const LiveQuotes = () => {
   };
 
   useEffect(() => {
-    const loadExpiries = async () => {
-      try {
-        const results = await Promise.all(
-          CORE_INSTRUMENTS.map(async ({ key }) => {
-            try {
-              const data = await apiService.get('/options/available/expiries', { underlying: key });
-              const expiry = Array.isArray(data?.data) && data.data.length > 0 ? data.data[0] : null;
-              return [key, expiry];
-            } catch {
-              return [key, null];
-            }
-          })
-        );
-        const nextMap = results.reduce((acc, [key, expiry]) => {
-          acc[key] = expiry;
-          return acc;
-        }, {});
-        setExpiryMap(nextMap);
-      } catch (error) {
-        console.error('[LiveQuotes] Failed to load expiries:', error);
-      }
-    };
-
-    loadExpiries();
-  }, []);
-
-  useEffect(() => {
     let intervalId;
     const fetchPrices = async () => {
       try {
         const entries = await Promise.all(
           CORE_INSTRUMENTS.map(async ({ key }) => {
-            const expiry = expiryMap[key];
-            if (!expiry) {
-              return [key, null, 'unknown'];
-            }
-            const payload = await apiService.get('/options/live', { underlying: key, expiry });
-            const price = payload?.underlying_ltp || payload?.data?.underlying_ltp;
-            const source = detectPayloadSource(payload);
+            const payload = await apiService.get(`/market/underlying-ltp/${key}`);
+            const price = payload?.ltp;
+            const source = 'live_cache';
             return [key, typeof price === 'number' ? price : null, source];
           })
         );
@@ -120,21 +89,23 @@ const LiveQuotes = () => {
         const activeCount = entries.filter(([, price]) => price && price > 0).length;
         setDataFlowStatus(activeCount > 0 ? 'active' : 'waiting');
         setLastUpdate(new Date());
+        setPollIntervalMs(3000);
       } catch (error) {
         console.error('[LiveQuotes] Price fetch error:', error);
         setDataFlowStatus('error');
+        setPollIntervalMs(8000);
       }
     };
 
     fetchPrices();
-    intervalId = setInterval(fetchPrices, 1000);
+    intervalId = setInterval(fetchPrices, pollIntervalMs);
 
     return () => {
       if (intervalId) {
         clearInterval(intervalId);
       }
     };
-  }, [expiryMap]);
+  }, [pollIntervalMs]);
 
   const getStatusColor = (status) => {
     switch (status) {

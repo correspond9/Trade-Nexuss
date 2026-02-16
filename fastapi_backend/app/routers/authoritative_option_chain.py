@@ -48,7 +48,12 @@ async def get_option_chain_live(
                         _last_warmup_by_underlying[underlying] = now_locked
                         try:
                             logger.info(f"♻️ Cache miss for {underlying} {expiry}; running on-demand market-aware warm-up")
-                            await authoritative_option_chain_service.populate_cache_with_market_aware_data()
+                            await asyncio.wait_for(
+                                authoritative_option_chain_service.populate_cache_with_market_aware_data(),
+                                timeout=3.0,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(f"⚠️ Warm-up timed out for {underlying}; serving cache miss response")
                         except Exception as warmup_error:
                             logger.warning(f"⚠️ Warm-up attempt failed for {underlying}: {warmup_error}")
 
