@@ -3,6 +3,8 @@ from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 import os
 import socket
+import logging
+import threading
 from app.storage.db import SessionLocal
 from app.storage.models import DhanCredential
 from app.market_orchestrator import get_orchestrator
@@ -11,6 +13,7 @@ from app.users.permissions import require_role
 from fastapi import Depends
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 class CredSaveIn(BaseModel):
     client_id: str
@@ -63,6 +66,19 @@ def _normalize_mode(mode: str) -> str:
     if mode not in {"DAILY_TOKEN", "STATIC_IP"}:
         raise HTTPException(status_code=400, detail="Invalid auth_mode")
     return mode
+
+
+def _restart_streams_background() -> None:
+    def _runner():
+        try:
+            get_orchestrator().start_streams_sync()
+        except Exception:
+            log.exception("Background stream restart failed after credentials update")
+
+    try:
+        threading.Thread(target=_runner, name="credentials-stream-restart", daemon=True).start()
+    except Exception:
+        log.exception("Failed to start background thread for stream restart")
 
 
 @router.get("/credentials/active")
@@ -174,13 +190,13 @@ def save_credentials(c: CredSaveIn):
         # Persist to disk for auto-restore
         save_settings(force=True)
 
-        # Start market data streams immediately after credentials are saved
+        # Start market data streams in background so credential save response is not blocked
         try:
             from app.dhan.live_feed import reset_cooldown
             reset_cooldown()
         except Exception:
             pass
-        get_orchestrator().start_streams_sync()
+        _restart_streams_background()
 
         return {
             "success": True,
@@ -208,13 +224,13 @@ def switch_mode(payload: SwitchModeIn | str = Body(...)):
         target.is_default = True
         db.commit()
 
-        # On mode switch, clear any connection cooldown and restart streams.
+        # On mode switch, clear any connection cooldown and restart streams in background.
         try:
             from app.dhan.live_feed import reset_cooldown
             reset_cooldown()
         except Exception:
             pass
-        get_orchestrator().start_streams_sync()
+        _restart_streams_background()
 
         return {
             "success": True,
@@ -374,8 +390,8 @@ def save_creds(c: CredIn):
         db.add(row)
         db.commit()
 
-        # Start market data streams immediately after credentials are saved
-        get_orchestrator().start_streams_sync()
+        # Start market data streams in background to avoid blocking this endpoint
+        _restart_streams_background()
 
         return {"status": "saved"}
     finally:

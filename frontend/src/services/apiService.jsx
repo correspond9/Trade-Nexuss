@@ -854,16 +854,20 @@ class ApiService {
       return this.cache.get(cacheKey);
     }
 
-    // Build URL with params (no API key needed for JWT auth)
-    const url = new URL(`${this.baseURL}${endpoint}`);
-    Object.keys(params).forEach(key => {
+    // Build query string safely for both absolute and relative base URLs
+    const searchParams = new URLSearchParams();
+    Object.keys(params).forEach((key) => {
       if (params[key] !== undefined && params[key] !== null) {
-        url.searchParams.append(key, params[key]);
+        searchParams.append(key, params[key]);
       }
     });
+    const query = searchParams.toString();
+    const requestEndpoint = query
+      ? `${endpoint}${endpoint.includes('?') ? '&' : '?'}${query}`
+      : endpoint;
 
     try {
-      const data = await this.request(endpoint + url.search, {
+      const data = await this.request(requestEndpoint, {
         method: 'GET',
       });
 
