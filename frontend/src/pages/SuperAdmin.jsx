@@ -57,14 +57,21 @@ const SuperAdmin = () => {
     setSaveError(null);
     try {
       await saveSettings();
-      // One-click daily workflow: after token save, immediately load instrument master
-      if (localSettings.authMode === 'DAILY_TOKEN') {
-        await handleLoadInstrumentMaster();
-      }
     } catch (error) {
       setSaveError(error.message);
       // Clear error after 5 seconds
       setTimeout(() => setSaveError(null), 5000);
+      return;
+    }
+
+    // One-click daily workflow: after token save, try loading instrument master.
+    // This should never downgrade a successful credential save.
+    if (localSettings.authMode === 'DAILY_TOKEN') {
+      try {
+        await handleLoadInstrumentMaster();
+      } catch (_error) {
+        // handleLoadInstrumentMaster already sets master message
+      }
     }
   };
 

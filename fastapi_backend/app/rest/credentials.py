@@ -25,6 +25,23 @@ def _looks_masked(value: str) -> bool:
     return bool(text) and "*" in text
 
 
+def _is_valid_client_id(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
+    # Dhan client IDs are typically numeric. Keep validation permissive but strict enough to reject junk.
+    return text.isdigit() and len(text) >= 6
+
+
+def _is_valid_token(value: str) -> bool:
+    text = (value or "").strip()
+    if not text or _looks_masked(text):
+        return False
+    if " " in text:
+        return False
+    return len(text) >= 16
+
+
 def _get_active_credential(db: SessionLocal) -> DhanCredential | None:
     row = db.query(DhanCredential).filter(DhanCredential.is_default == True).first()
     if row:
@@ -86,11 +103,17 @@ def save_credentials(c: CredSaveIn):
         incoming_api_key = (c.api_key or "").strip()
         incoming_api_secret = (c.secret_api or "").strip()
 
+        if not _looks_masked(incoming_client_id) and not _is_valid_client_id(incoming_client_id):
+            raise HTTPException(status_code=400, detail="Invalid client_id. Provide a valid numeric Dhan client ID.")
+
         # Preserve previously saved values if frontend sends masked placeholders.
         if _looks_masked(incoming_client_id) and row.client_id:
             resolved_client_id = row.client_id
         else:
             resolved_client_id = incoming_client_id
+
+        if not _is_valid_client_id(resolved_client_id):
+            raise HTTPException(status_code=400, detail="client_id is required.")
 
         row.client_id = resolved_client_id
 
@@ -100,6 +123,9 @@ def save_credentials(c: CredSaveIn):
             # If frontend sends masked placeholder or empty value, keep existing valid token.
             if (_looks_masked(resolved_token) or not resolved_token) and (row.daily_token or row.auth_token):
                 resolved_token = (row.daily_token or row.auth_token or "").strip()
+
+            if not _is_valid_token(resolved_token):
+                raise HTTPException(status_code=400, detail="Invalid access token. Please enter a valid daily token.")
 
             row.auth_token = resolved_token
             row.daily_token = resolved_token

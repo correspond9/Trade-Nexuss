@@ -22,15 +22,45 @@ export const useAuthSettings = () => {
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const extractCredentialData = (result) => {
+    if (!result || typeof result !== 'object') return {};
+    if (result.data && typeof result.data === 'object' && !Array.isArray(result.data)) {
+      // Preferred backend shape: { success, message, data: {...} }
+      if (
+        'auth_mode' in result.data ||
+        'client_id' in result.data ||
+        'client_id_prefix' in result.data ||
+        'has_token' in result.data
+      ) {
+        return result.data;
+      }
+
+      // Defensive shape: { data: { data: {...} } }
+      if (
+        result.data.data &&
+        typeof result.data.data === 'object' &&
+        (
+          'auth_mode' in result.data.data ||
+          'client_id' in result.data.data ||
+          'client_id_prefix' in result.data.data ||
+          'has_token' in result.data.data
+        )
+      ) {
+        return result.data.data;
+      }
+    }
+    return result;
+  };
+
   // Load settings from backend
   const loadSavedSettings = async () => {
     // Try primary backend endpoint
     try {
       const result = await apiService.get('/credentials/active');
-      const data = result?.data || {};
+      const data = extractCredentialData(result);
       
       // Check if we have valid credentials
-      if (data?.client_id_prefix || data?.has_token) {
+      if (data?.client_id || data?.client_id_prefix || data?.has_token) {
         return {
           authMode: data.auth_mode || 'DAILY_TOKEN',
           clientId: data.client_id || (data.client_id_prefix ? `${data.client_id_prefix}****` : ''),
@@ -109,8 +139,6 @@ export const useAuthSettings = () => {
       console.log('🔐 Starting saveSettings...');
       console.log('🔐 Current settings:', localSettings);
       
-      setSaved(true);
-      
       const authHeaders = { 'Content-Type': 'application/json' };
 
       if (!localSettings.clientId || !localSettings.accessToken) {
@@ -133,7 +161,7 @@ export const useAuthSettings = () => {
       };
 
       const response = await apiService.post('/credentials/save', payload);
-      if (!response || (response && response.error)) {
+      if (!response || response.success !== true || response.error) {
         throw new Error((response && response.error) || 'Failed to save credentials');
       }
 
@@ -145,8 +173,10 @@ export const useAuthSettings = () => {
       }
 
       const refreshed = await loadSavedSettings();
-      if (refreshed) {
+      if (refreshed && (refreshed.clientId || refreshed.accessToken || refreshed.connected)) {
         setLocalSettings(refreshed);
+      } else {
+        throw new Error('Credentials saved, but reloading saved credentials failed');
       }
 
       setSaved(true);
