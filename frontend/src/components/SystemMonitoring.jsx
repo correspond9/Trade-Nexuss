@@ -18,7 +18,7 @@ const SystemMonitoring = () => {
     const fetchSystemStatus = async () => {
       try {
         const [healthData, streamData] = await Promise.all([
-          apiService.request(`${ROOT_BASE}/health`, { method: 'GET' }).catch(() => ({})),
+          apiService.get('/health').catch(() => ({})),
           apiService.get('/market/stream-status').catch(() => ({}))
         ]);
         const data = healthData;

@@ -104,10 +104,18 @@ export const useAuthSettings = () => {
 
     // Fallback logic ...
 
+      const isLocalHost = (() => {
+        try {
+          const host = window?.location?.hostname || '';
+          return host === 'localhost' || host === '127.0.0.1';
+        } catch (_e) {
+          return false;
+        }
+      })();
+
       const fallbackBases = [
         `${ROOT_BASE}/api/v2/credentials/active`,
-        'http://localhost:8000/api/v2/credentials/active',
-        'http://127.0.0.1:8000/api/v2/credentials/active'
+        ...(isLocalHost ? ['http://localhost:8000/api/v2/credentials/active', 'http://127.0.0.1:8000/api/v2/credentials/active'] : [])
       ];
 
       for (const url of fallbackBases) {

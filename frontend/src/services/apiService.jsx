@@ -58,12 +58,29 @@ class ApiService {
     try {
       if (typeof window !== 'undefined' && window.fetch && !window.__API_SERVICE_FETCH_PATCHED__) {
         const originalFetch = window.fetch.bind(window);
+        const buildAbsoluteFromBaseOrigin = (path) => {
+          try {
+            const base = new URL(this.baseURL, window.location.origin);
+            return `${base.origin}${path}`;
+          } catch (_e) {
+            return path;
+          }
+        };
         window.fetch = (input, init) => {
           try {
             if (typeof input === 'string' && input.startsWith('/')) {
-              input = `${this.baseURL}${input}`;
+              if (input.startsWith('/api/v1') || input.startsWith('/api/v2')) {
+                input = buildAbsoluteFromBaseOrigin(input);
+              } else {
+                input = `${this.baseURL}${input}`;
+              }
             } else if (input && input.url && typeof input.url === 'string' && input.url.startsWith('/')) {
-              input = new Request(`${this.baseURL}${input.url}`, input);
+              const url = input.url;
+              if (url.startsWith('/api/v1') || url.startsWith('/api/v2')) {
+                input = new Request(buildAbsoluteFromBaseOrigin(url), input);
+              } else {
+                input = new Request(`${this.baseURL}${url}`, input);
+              }
             }
           } catch (e) {
             // fall through to original fetch
