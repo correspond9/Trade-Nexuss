@@ -2045,6 +2045,15 @@ class AuthoritativeOptionChainService:
                             self._notify_synthetic_prices(underlying, expiry, ce_synth + pe_synth)
                             
                             # Create skeleton
+                            old_strikes: Set[float] = set()
+                            existing_skeleton = None
+                            try:
+                                existing_skeleton = self.option_chain_cache.get(underlying, {}).get(expiry)
+                                if existing_skeleton:
+                                    old_strikes = set(existing_skeleton.strikes.keys())
+                            except Exception:
+                                old_strikes = set()
+
                             skeleton = OptionChainSkeleton(
                                 underlying=underlying,
                                 expiry=expiry,
@@ -2060,6 +2069,17 @@ class AuthoritativeOptionChainService:
                                 self.option_chain_cache[underlying] = {}
                             
                             self.option_chain_cache[underlying][expiry] = skeleton
+
+                            # Keep websocket Tier-B option subscriptions aligned with latest strike window.
+                            try:
+                                if is_market_open(self._get_exchange_for_underlying(underlying)):
+                                    new_strikes = set(strikes_dict.keys())
+                                    self._sync_tier_b_subscriptions(underlying, expiry, old_strikes, new_strikes)
+                            except Exception as sync_error:
+                                logger.warning(
+                                    f"⚠️ Failed to sync Tier-B subscriptions after populate for {underlying} {expiry}: {sync_error}"
+                                )
+
                             logger.info(f"    ✅ {underlying} {expiry}: {len(strikes_dict)} strikes cached (ATM: {atm_strike})")
                             
                         except Exception as e:
