@@ -1077,10 +1077,63 @@ class AuthoritativeOptionChainService:
         return list(self.option_chain_cache.keys())
     
     def get_available_expiries(self, underlying: str) -> List[str]:
-        """Get list of available expiries for an underlying"""
-        if underlying not in self.option_chain_cache:
+        """Get list of available expiries for an underlying.
+
+        Priority:
+        1) In-memory option chain cache (hot path)
+        2) Dhan security mapper CSV fallback
+        3) Instrument master registry fallback
+        """
+        symbol = str(underlying or "").strip().upper()
+        if not symbol:
             return []
-        return list(self.option_chain_cache[underlying].keys())
+
+        # 1) Cache path
+        cached_expiries = list((self.option_chain_cache.get(symbol) or {}).keys())
+        if cached_expiries:
+            selected = self._select_current_next_expiries(symbol, cached_expiries)
+            return selected or sorted(cached_expiries)
+
+        expiries: List[str] = []
+
+        # 2) Mapper fallback
+        try:
+            mapper_expiries = sorted({
+                data.get("expiry")
+                for data in self.security_mapper.csv_data.values()
+                if str(data.get("symbol") or "").strip().upper() == symbol and data.get("expiry")
+            })
+            expiries.extend(mapper_expiries)
+        except Exception as e:
+            logger.warning(f"⚠️ Expiry mapper fallback failed for {symbol}: {e}")
+
+        # 3) Instrument registry fallback
+        if not expiries:
+            try:
+                from app.market.instrument_master.registry import REGISTRY
+                if not REGISTRY.loaded:
+                    REGISTRY.load()
+
+                raw_expiries = REGISTRY.get_expiries_for_underlying(symbol) or []
+                for exp in raw_expiries:
+                    parsed = self._parse_expiry_date(exp)
+                    if parsed:
+                        expiries.append(parsed.isoformat())
+            except Exception as e:
+                logger.warning(f"⚠️ Expiry registry fallback failed for {symbol}: {e}")
+
+        # Normalize, deduplicate and apply business selection
+        normalized = sorted({
+            parsed.isoformat()
+            for exp in expiries
+            for parsed in [self._parse_expiry_date(exp)]
+            if parsed
+        })
+        if not normalized:
+            return []
+
+        selected = self._select_current_next_expiries(symbol, normalized)
+        return selected or normalized[:2]
     
     def get_atm_strike(self, underlying: str) -> Optional[float]:
         """Get ATM strike from registry"""
