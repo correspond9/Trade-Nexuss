@@ -66,7 +66,21 @@ def get_active_credentials():
     try:
         row = _get_active_credential(db)
         if not row:
+            # Defensive fallback: if DB row is missing but settings backup exists,
+            # try restoring once and re-reading.
+            try:
+                from app.storage.settings_manager import restore_settings_to_database
+                restore_settings_to_database()
+            except Exception:
+                pass
+            row = _get_active_credential(db)
+
+        if not row:
             return {"success": True, "message": "No credentials saved", "data": {"has_token": False}}
+
+        has_auth_token = bool((row.auth_token or "").strip())
+        has_daily_token = bool((row.daily_token or "").strip())
+        has_token = bool(has_auth_token or has_daily_token)
 
         return {
             "success": True,
@@ -75,7 +89,10 @@ def get_active_credentials():
                 "client_id": row.client_id or "",
                 "client_id_prefix": (row.client_id or "")[:8],
                 "auth_mode": row.auth_mode or "DAILY_TOKEN",
-                "has_token": bool((row.auth_token or "").strip() or (row.daily_token or "").strip()),
+                "has_token": has_token,
+                "has_auth_token": has_auth_token,
+                "has_daily_token": has_daily_token,
+                "token_masked": "****************" if has_token else "",
                 "last_updated": row.last_updated.isoformat() if row.last_updated else None,
             }
         }

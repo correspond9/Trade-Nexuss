@@ -58,18 +58,24 @@ export const useAuthSettings = () => {
     try {
       const result = await apiService.get('/credentials/active');
       const data = extractCredentialData(result);
+      const hasPersistedToken = Boolean(
+        data?.has_token ||
+        data?.has_auth_token ||
+        data?.has_daily_token ||
+        data?.token_masked
+      );
       
       // Check if we have valid credentials
-      if (data?.client_id || data?.client_id_prefix || data?.has_token) {
+      if (data?.client_id || data?.client_id_prefix || hasPersistedToken) {
         return {
           authMode: data.auth_mode || 'DAILY_TOKEN',
           clientId: data.client_id || (data.client_id_prefix ? `${data.client_id_prefix}****` : ''),
-          accessToken: data.has_token ? '****************' : '', // Masked token placeholder
+          accessToken: hasPersistedToken ? (data.token_masked || '****************') : '', // Masked token placeholder
           apiKey: '',
           clientSecret: '',
-          connected: data.has_token,
+          connected: hasPersistedToken,
           lastAuthTime: data.last_updated,
-          authStatus: data.has_token ? 'connected' : 'disconnected',
+          authStatus: hasPersistedToken ? 'connected' : 'disconnected',
           wsUrl: 'wss://api-feed.dhan.co?version=2&token=...&clientId=...&authType=2',
           _cachedCredentials: {
             DAILY_TOKEN: data,
