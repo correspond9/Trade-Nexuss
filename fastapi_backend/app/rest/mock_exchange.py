@@ -1821,6 +1821,36 @@ def admin_force_market(payload: dict, caller=Depends(get_current_user), db: Sess
     return {"status": "ok", "exchange": ex, "state": state}
 
 
+@router.get("/admin/market-config")
+def admin_get_market_config(caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    """Fetch editable market hours/day configuration for NSE/BSE/MCX."""
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
+    return {"status": "ok", "data": market_config.get()}
+
+
+@router.post("/admin/market-config")
+def admin_update_market_config(payload: dict, caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    """Update market hours/day configuration. payload: {config: {...}} or direct {...}"""
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
+    cfg = payload.get("config") if isinstance(payload, dict) else None
+    if not isinstance(cfg, dict):
+        cfg = payload if isinstance(payload, dict) else {}
+    market_config.update(cfg)
+    return {"status": "ok", "data": market_config.get()}
+
+
+@router.post("/admin/market-force")
+def admin_force_market_compat(payload: dict, caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    """Compatibility alias for frontend endpoint /admin/market-force."""
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
+    ex = payload.get("exchange")
+    state = payload.get("state")
+    if not ex or state not in {"open", "close", "none"}:
+        raise HTTPException(status_code=400, detail="exchange and valid state required")
+    market_config.set_force(ex, state)
+    return {"status": "ok", "exchange": ex, "state": state, "data": market_config.get()}
+
+
 @router.post("/admin/price/update")
 def admin_update_price(payload: dict, caller=Depends(get_current_user), db: Session = Depends(get_db)):
     """Update dashboard price for a symbol. payload: {symbol: 'NIFTY', price: 18000.5}"""
