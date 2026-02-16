@@ -113,8 +113,7 @@ class MarketDataOrchestrator:
                 return
             self._streams_started = True
         flag = (os.getenv("DISABLE_DHAN_WS") or os.getenv("BACKEND_OFFLINE") or os.getenv("DISABLE_MARKET_STREAMS") or "").strip().lower()
-        env = (os.getenv("ENVIRONMENT") or "").strip().lower()
-        if env != "production" and flag in ("1", "true", "yes", "on"):
+        if flag in ("1", "true", "yes", "on"):
             return
 
         self.start_equity_stream()

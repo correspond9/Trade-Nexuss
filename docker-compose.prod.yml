@@ -26,6 +26,9 @@ services:
       - DEBUG=false
       - STARTUP_LOAD_MASTER=false
       - STARTUP_LOAD_TIER_B=false
+      - STARTUP_START_STREAMS=false
+      - DISABLE_DHAN_WS=true
+      - DISABLE_MARKET_STREAMS=true
     env_file:
       - .env.production
     depends_on:

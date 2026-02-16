@@ -397,10 +397,14 @@ async def on_start():
         else:
             logger.warning("[STARTUP] Skipping Tier B preload (STARTUP_LOAD_TIER_B=false)")
 
-        logger.info("[STARTUP] Scheduling market data streams in background...")
-        from app.market_orchestrator import get_orchestrator
-        streams_task = asyncio.create_task(get_orchestrator().start_streams())
-        streams_task.add_done_callback(lambda t: _log_task_result(t, "start_streams"))
+        start_streams = _env_bool("STARTUP_START_STREAMS", default=not is_production)
+        if start_streams:
+            logger.info("[STARTUP] Scheduling market data streams in background...")
+            from app.market_orchestrator import get_orchestrator
+            streams_task = asyncio.create_task(get_orchestrator().start_streams())
+            streams_task.add_done_callback(lambda t: _log_task_result(t, "start_streams"))
+        else:
+            logger.warning("[STARTUP] Skipping automatic stream start (STARTUP_START_STREAMS=false)")
 
     loop = asyncio.get_running_loop()
 

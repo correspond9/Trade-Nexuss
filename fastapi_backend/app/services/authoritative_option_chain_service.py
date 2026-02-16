@@ -318,10 +318,7 @@ class AuthoritativeOptionChainService:
         """
         try:
             import os
-            env = (os.getenv("ENVIRONMENT") or "").strip().lower()
             offline = (os.getenv("DISABLE_DHAN_WS") or os.getenv("BACKEND_OFFLINE") or os.getenv("DISABLE_MARKET_STREAMS") or "").strip().lower() in ("1", "true", "yes", "on")
-            if env == "production":
-                offline = False
             from app.market.closing_prices import get_closing_prices
             
             logger.info("🚀 Starting market-aware cache population...")
