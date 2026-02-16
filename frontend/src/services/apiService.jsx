@@ -11,6 +11,20 @@ class ApiService {
       // ignore
     }
     rawBase = rawBase || import.meta.env.VITE_API_URL || '/api/v2';
+
+    // In browser production, prefer same-origin API path to avoid cross-origin/CORS/proxy drift.
+    try {
+      if (typeof window !== 'undefined' && window.location) {
+        const host = (window.location.hostname || '').toLowerCase();
+        const isProdHost = host === 'tradingnexus.pro' || host === 'www.tradingnexus.pro' || host === 'app.tradingnexus.pro';
+        if (isProdHost) {
+          rawBase = '/api/v2';
+        }
+      }
+    } catch (_e) {
+      // ignore and continue with configured base
+    }
+
     const normalizeBase = (value) => {
       const fallback = '/api/v2';
       try {
