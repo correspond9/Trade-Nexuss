@@ -735,10 +735,38 @@ def on_message_callback(feed, message):
     if not message:
         return
 
+    def _extract_security_id(payload: object) -> Optional[str]:
+        if isinstance(payload, dict):
+            for key in ("security_id", "securityId", "SecurityId", "sec_id", "token", "scrip_id", "scripId"):
+                value = payload.get(key)
+                if value is not None and str(value).strip() != "":
+                    return str(value).strip()
+
+            nested = payload.get("data")
+            if nested is not None:
+                nested_id = _extract_security_id(nested)
+                if nested_id:
+                    return nested_id
+
+        if isinstance(payload, list):
+            for item in payload:
+                nested_id = _extract_security_id(item)
+                if nested_id:
+                    return nested_id
+        return None
+
     def _extract_ltp(payload: Dict[str, object]) -> Optional[float]:
+        if isinstance(payload, list):
+            for item in payload:
+                val = _extract_ltp(item)
+                if val is not None:
+                    return val
+            return None
+
         if not isinstance(payload, dict):
             return None
-        for key in ("LTP", "ltp", "last_traded_price", "lastTradedPrice", "last_price", "lastPrice", "last"):
+
+        for key in ("LTP", "ltp", "Ltp", "last_traded_price", "lastTradedPrice", "last_price", "lastPrice", "last"):
             if key in payload and payload[key] is not None:
                 value = payload.get(key)
                 if isinstance(value, str):
@@ -748,9 +776,13 @@ def on_message_callback(feed, message):
                         continue
                 if isinstance(value, (int, float)):
                     return float(value)
-        data = payload.get("data")
-        if isinstance(data, dict):
-            return _extract_ltp(data)
+
+        for key in ("data", "payload", "tick"):
+            nested = payload.get(key)
+            if nested is not None:
+                val = _extract_ltp(nested)
+                if val is not None:
+                    return val
         return None
 
     def _extract_bid_ask(payload: Dict[str, object]) -> tuple[Optional[float], Optional[float]]:
@@ -829,7 +861,7 @@ def on_message_callback(feed, message):
     
     try:
         # Extract security_id from message
-        sec_id = message.get("security_id")
+        sec_id = _extract_security_id(message)
         if not sec_id:
             return
         
@@ -844,10 +876,18 @@ def on_message_callback(feed, message):
         option_meta = _security_id_subscription_map.get(sec_id_str)
         if option_meta:
             ltp = _extract_ltp(message)
+            bid, ask = _extract_bid_ask(message)
+            if (ltp is None or ltp == 0) and (bid is not None or ask is not None):
+                if bid is not None and ask is not None and bid > 0 and ask > 0:
+                    ltp = (bid + ask) / 2.0
+                elif bid is not None and bid > 0:
+                    ltp = bid
+                elif ask is not None and ask > 0:
+                    ltp = ask
+
             if ltp is None or ltp == 0:
                 return
 
-            bid, ask = _extract_bid_ask(message)
             depth = _extract_depth(message)
             
             # ✨ CRITICAL: Update market state with depth data for square-off functionality
