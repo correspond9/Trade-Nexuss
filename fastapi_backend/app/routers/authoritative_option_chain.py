@@ -60,6 +60,16 @@ async def get_option_chain_live(
                 option_chain = authoritative_option_chain_service.get_option_chain_from_cache(underlying, expiry)
 
             if option_chain is None:
+                try:
+                    from app.market.closing_prices import get_closing_prices
+                    closing_payload = get_closing_prices() or {}
+                    if closing_payload:
+                        authoritative_option_chain_service.populate_with_closing_prices_sync(closing_payload)
+                        option_chain = authoritative_option_chain_service.get_option_chain_from_cache(underlying, expiry)
+                except Exception as fallback_error:
+                    logger.warning(f"⚠️ Closing-price fallback failed for {underlying} {expiry}: {fallback_error}")
+
+            if option_chain is None:
                 raise HTTPException(
                     status_code=404,
                     detail=f"Option chain not found for {underlying} {expiry}"
