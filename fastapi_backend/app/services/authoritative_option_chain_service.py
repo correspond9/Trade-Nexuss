@@ -165,6 +165,7 @@ class AuthoritativeOptionChainService:
         self.cache_source: Dict[str, str] = {}  # {underlying: "LIVE" | "CLOSING"}
         self.last_market_check: Dict[str, datetime] = {}  # {underlying: datetime}
         self.cache_source_lock = asyncio.Lock()  # Thread-safe updates
+        self.instrument_master_lock = asyncio.Lock()
         
         # ========== PERMITTED INSTRUMENTS ONLY ==========
         # NSE INDEX OPTIONS
@@ -607,6 +608,10 @@ class AuthoritativeOptionChainService:
     
     async def _load_instrument_master_cache(self) -> None:
         """Load instrument master from DhanHQ REST API"""
+        index_symbols = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"]
+        async with self.instrument_master_lock:
+            if self.instrument_master_cache:
+                return
         try:
             logger.info("🔄 Loading instrument master from DhanHQ API...")
             
@@ -629,7 +634,6 @@ class AuthoritativeOptionChainService:
                 self.instrument_master_cache = {}
                 
                 # Load index options from registry
-                index_symbols = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"]
                 # Use DhanHQ index security IDs for REST quote/expiry API
                 index_mapping = {
                     "NIFTY": {"segment": "IDX_I", "security_id": 13},
@@ -1154,9 +1158,10 @@ class AuthoritativeOptionChainService:
 
         # 2) Mapper fallback
         try:
+            mapper_values = list(self.security_mapper.csv_data.values())
             mapper_expiries = sorted({
                 data.get("expiry")
-                for data in self.security_mapper.csv_data.values()
+                for data in mapper_values
                 if str(data.get("symbol") or "").strip().upper() == symbol and data.get("expiry")
             })
             expiries.extend(mapper_expiries)
@@ -1737,9 +1742,10 @@ class AuthoritativeOptionChainService:
                     if not market_data:
                         # Fallback: derive expiries from Dhan CSV mapper or registry
                         try:
+                            mapper_values = list(self.security_mapper.csv_data.values())
                             mapper_expiries = sorted({
                                 data.get("expiry")
-                                for data in self.security_mapper.csv_data.values()
+                                for data in mapper_values
                                 if data.get("symbol") == underlying
                             })
                             mapper_expiries = [e for e in mapper_expiries if e]
@@ -1832,7 +1838,8 @@ class AuthoritativeOptionChainService:
                             if use_mapper_only:
                                 try:
                                     # Prefer Dhan CSV mapper strikes (authoritative tokens)
-                                    for data in self.security_mapper.csv_data.values():
+                                    mapper_values = list(self.security_mapper.csv_data.values())
+                                    for data in mapper_values:
                                         if data.get("symbol") != underlying:
                                             continue
                                         if data.get("expiry") != expiry:
