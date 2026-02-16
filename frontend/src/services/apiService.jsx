@@ -782,7 +782,12 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    const url = endpoint.startsWith('http') ? endpoint : `${this.baseURL}${endpoint}`;
+    const isAbsoluteApiPath =
+      typeof endpoint === 'string' &&
+      (endpoint.startsWith('/api/v1') || endpoint.startsWith('/api/v2'));
+    const url = endpoint.startsWith('http')
+      ? endpoint
+      : (isAbsoluteApiPath ? endpoint : `${this.baseURL}${endpoint}`);
     const isLoginEndpoint = endpoint.includes('/auth/login');
     const headers = {
       'Content-Type': 'application/json',
