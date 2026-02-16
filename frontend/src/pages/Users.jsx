@@ -262,16 +262,25 @@ const Users = () => {
     if (quantityInput === null) return;
     const avgPriceInput = window.prompt('Average price:');
     if (avgPriceInput === null) return;
+    const productType = (window.prompt('Product type (default MIS):') ?? 'MIS').trim() || 'MIS';
+    const exchangeSegment = (window.prompt('Exchange segment (default NSE_EQ):') ?? 'NSE_EQ').trim() || 'NSE_EQ';
     const createdAt = window.prompt('Created at (optional ISO datetime, leave blank for now):') || '';
 
     const quantity = Number(quantityInput);
     const avgPrice = Number(avgPriceInput);
-    if (!Number.isFinite(quantity) || quantity === 0) {
-      setActionError('Quantity must be a non-zero number');
+    if (!symbol.trim()) {
+      setActionError('Symbol is required');
+      setTimeout(() => setActionError(null), 5000);
       return;
     }
-    if (!Number.isFinite(avgPrice) || avgPrice < 0) {
-      setActionError('Average price must be a valid number');
+    if (!Number.isFinite(quantity) || quantity === 0) {
+      setActionError('Quantity must be a non-zero number (positive or negative)');
+      setTimeout(() => setActionError(null), 5000);
+      return;
+    }
+    if (!Number.isFinite(avgPrice) || avgPrice <= 0) {
+      setActionError('Average price must be a positive number');
+      setTimeout(() => setActionError(null), 5000);
       return;
     }
 
@@ -283,8 +292,8 @@ const Users = () => {
         symbol: symbol.trim(),
         quantity,
         avg_price: avgPrice,
-        product_type: 'MIS',
-        exchange_segment: 'NSE_EQ',
+        product_type: productType,
+        exchange_segment: exchangeSegment,
         merge: true
       };
       if (createdAt.trim()) {
@@ -294,6 +303,7 @@ const Users = () => {
       alert(`Historic position added for ${targetUser.username || targetUser.id}`);
     } catch (error) {
       setActionError(error?.message || 'Failed to add historic position');
+      setTimeout(() => setActionError(null), 5000);
     } finally {
       setActionLoading(false);
     }
