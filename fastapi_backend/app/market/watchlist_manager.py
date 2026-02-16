@@ -11,6 +11,9 @@ from app.storage.models import Watchlist
 from app.market.subscription_manager import get_subscription_manager
 from app.market.atm_engine import get_atm_engine
 from app.market.instrument_master.registry import REGISTRY
+from app.market.instrument_master.tier_a_equity_symbols import get_tier_a_equity_symbols
+
+EQUITY_EXPIRY_MARKER = "EQ"
 
 class WatchlistManager:
     """
@@ -29,6 +32,23 @@ class WatchlistManager:
         self.lock = threading.RLock()
         self.sub_mgr = get_subscription_manager()
         self.atm_engine = get_atm_engine()
+
+    def _normalize_expiry(self, expiry: Optional[str], instrument_type: Optional[str]) -> str:
+        normalized_type = (instrument_type or "").upper()
+        expiry_text = (expiry or "").strip()
+        if normalized_type == "EQUITY":
+            return expiry_text or EQUITY_EXPIRY_MARKER
+        return expiry_text
+
+    def _get_live_ltp(self, symbol: Optional[str]) -> Optional[float]:
+        try:
+            from app.market.live_prices import get_price
+            value = get_price((symbol or "").upper())
+            if value is None:
+                return None
+            return float(value)
+        except Exception:
+            return None
     
     def add_to_watchlist(
         self,
@@ -51,6 +71,10 @@ class WatchlistManager:
         """
         with self.lock:
             try:
+                instrument_type = (instrument_type or "").upper()
+                symbol = (symbol or "").strip().upper()
+                expiry = self._normalize_expiry(expiry, instrument_type)
+
                 # Check if already in watchlist
                 existing = self.db.query(Watchlist).filter(
                     Watchlist.user_id == user_id,
@@ -59,6 +83,74 @@ class WatchlistManager:
                 ).first()
                 
                 if existing:
+                    existing_type = (existing.instrument_type or instrument_type or "").upper()
+                    if existing_type in ("STOCK_OPTION", "INDEX_OPTION"):
+                        ltp_value = underlying_ltp
+                        if ltp_value is None:
+                            try:
+                                from app.market.live_prices import get_price
+                                ltp_value = get_price((symbol or "").upper())
+                            except Exception:
+                                ltp_value = None
+
+                        if ltp_value is not None:
+                            chain = self.atm_engine.generate_chain(
+                                symbol=symbol,
+                                expiry=expiry,
+                                underlying_ltp=ltp_value,
+                                force_recalc=True
+                            )
+                            strikes = chain.get("strikes", [])
+                            subscribed = 0
+                            for strike in strikes:
+                                token_ce = f"{symbol}_{expiry}_{strike:.0f}CE"
+                                success_ce, _msg_ce, _ws_id_ce = self.sub_mgr.subscribe(
+                                    token=token_ce,
+                                    symbol=symbol,
+                                    expiry=expiry,
+                                    strike=strike,
+                                    option_type="CE",
+                                    tier="TIER_A"
+                                )
+                                if success_ce:
+                                    subscribed += 1
+
+                                token_pe = f"{symbol}_{expiry}_{strike:.0f}PE"
+                                success_pe, _msg_pe, _ws_id_pe = self.sub_mgr.subscribe(
+                                    token=token_pe,
+                                    symbol=symbol,
+                                    expiry=expiry,
+                                    strike=strike,
+                                    option_type="PE",
+                                    tier="TIER_A"
+                                )
+                                if success_pe:
+                                    subscribed += 1
+
+                            return {
+                                "success": True,
+                                "message": f"{symbol} already in watchlist for {expiry}; ensured subscriptions",
+                                "error": "DUPLICATE",
+                                "strikes_subscribed": subscribed
+                            }
+
+                    if existing_type == "EQUITY":
+                        token_eq = f"EQUITY_{symbol.upper()}"
+                        self.sub_mgr.subscribe(
+                            token=token_eq,
+                            symbol=symbol,
+                            expiry=None,
+                            strike=None,
+                            option_type=None,
+                            tier="TIER_A"
+                        )
+                        return {
+                            "success": True,
+                            "message": f"{symbol} already in watchlist; ensured equity subscription",
+                            "error": "DUPLICATE",
+                            "token": token_eq
+                        }
+
                     return {
                         "success": False,
                         "message": f"{symbol} already in watchlist for {expiry}",
@@ -66,16 +158,15 @@ class WatchlistManager:
                     }
                 
                 # Enforce Tier-A/Tier-B-only universe
+                if not REGISTRY.loaded:
+                    REGISTRY.load()
                 allowed_indices = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
-                equities = set()
+                allowed_equities = set()
                 try:
-                    for r in REGISTRY.get_equity_stocks_nse(limit=2000):
-                        sym = (r.get("UNDERLYING_SYMBOL") or r.get("SYMBOL") or "").strip().upper()
-                        if sym:
-                            equities.add(sym)
+                    allowed_equities = get_tier_a_equity_symbols()
                 except Exception:
-                    pass
-                allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | equities
+                    allowed_equities = set()
+                allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | allowed_equities
                 if symbol.upper() not in allowed_symbols:
                     return {
                         "success": False,
@@ -193,10 +284,15 @@ class WatchlistManager:
                         "message": f"Added {symbol} equity to watchlist",
                         "instrument_type": "EQUITY",
                         "token": token_eq,
-                        "ws_id": ws_id
+                        "ws_id": ws_id,
+                        "ltp": self._get_live_ltp(symbol),
                     }
             
             except Exception as e:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
                 return {
                     "success": False,
                     "message": f"Error adding to watchlist: {str(e)}",
@@ -207,12 +303,22 @@ class WatchlistManager:
         """Remove from watchlist and unsubscribe all related chains"""
         with self.lock:
             try:
+                symbol = (symbol or "").strip().upper()
+                expiry_text = (expiry or "").strip()
+
                 # Find watchlist entry
-                entry = self.db.query(Watchlist).filter(
+                query = self.db.query(Watchlist).filter(
                     Watchlist.user_id == user_id,
                     Watchlist.symbol == symbol,
-                    Watchlist.expiry_date == expiry
-                ).first()
+                )
+
+                if expiry_text:
+                    entry = query.filter(Watchlist.expiry_date == expiry_text).first()
+                else:
+                    entry = query.first()
+
+                if not entry and expiry_text != EQUITY_EXPIRY_MARKER:
+                    entry = query.filter(Watchlist.expiry_date == EQUITY_EXPIRY_MARKER).first()
                 
                 if not entry:
                     return {
@@ -242,6 +348,10 @@ class WatchlistManager:
                 }
             
             except Exception as e:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
                 return {
                     "success": False,
                     "message": f"Error removing from watchlist: {str(e)}"
@@ -253,18 +363,21 @@ class WatchlistManager:
             entries = self.db.query(Watchlist).filter(
                 Watchlist.user_id == user_id
             ).order_by(Watchlist.added_at.desc()).all()
-            
-            return [
-                {
-                    "id": e.id,
-                    "symbol": e.symbol,
-                    "expiry_date": e.expiry_date,
-                    "instrument_type": e.instrument_type,
-                    "added_at": e.added_at.isoformat(),
-                    "added_order": e.added_order
-                }
-                for e in entries
-            ]
+
+            rows = []
+            for e in entries:
+                rows.append(
+                    {
+                        "id": e.id,
+                        "symbol": e.symbol,
+                        "expiry_date": None if (e.instrument_type or "").upper() == "EQUITY" and e.expiry_date == EQUITY_EXPIRY_MARKER else e.expiry_date,
+                        "instrument_type": e.instrument_type,
+                        "added_at": e.added_at.isoformat(),
+                        "added_order": e.added_order,
+                        "ltp": self._get_live_ltp(e.symbol),
+                    }
+                )
+            return rows
     
     def clear_all_user_watchlist(self, user_id: int) -> Dict:
         """Clear entire user watchlist (used at EOD)"""
@@ -327,6 +440,10 @@ class WatchlistManager:
                 }
             
             except Exception as e:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
                 return {
                     "success": False,
                     "message": f"Error clearing watchlist: {str(e)}"

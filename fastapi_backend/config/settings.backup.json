@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-02-12T20:50:09.458939",
+  "timestamp": "2026-02-16T07:42:04.913322",
   "version": "1.0",
-  "client_id": "11003537****",
+  "client_id": "1100353799",
   "auth_mode": "DAILY_TOKEN",
   "api_key": "",
   "api_secret": "",
-  "daily_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzcxMDE1NzgxLCJpYXQiOjE3NzA5MjkzODEsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwMzUzNzk5In0.Ip1D8loIoDcA9tK6H47u9GF4l7U2kQrSRn8NuZ7bhkyXhMVEp88XnKJ5HoIHuxwiTZum8tWqyIamZKjjSDhAfg",
+  "daily_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzcxMjcxNzI0LCJpYXQiOjE3NzExODUzMjQsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwMzUzNzk5In0.hGF38i1FMbdXcOLYWBh7g_bE7_rqaxf2MONvezanvZT9pt1c9HJ4waPUZ-GA44Etx-GbNki2Bm-q2lgi6KJhDw",
   "notes": "This backup now includes the token for auto-restore in production.",
   "locked": true
 }

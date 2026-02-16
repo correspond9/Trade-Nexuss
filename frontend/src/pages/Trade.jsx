@@ -23,6 +23,12 @@ const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
   try {
     // Convert display name to symbol
     const symbol = normalizeUnderlying(selectedIndex);
+
+    const underlyingsData = await apiService.get('/options/available/underlyings');
+    const availableUnderlyings = Array.isArray(underlyingsData?.data) ? underlyingsData.data : [];
+    if (!availableUnderlyings.includes(symbol)) {
+      console.warn('[TRADE] Underlying not listed in available/underlyings, trying direct expiry fetch:', symbol);
+    }
     
     console.log('[TRADE] Fetching expiries from authoritative API for', symbol);
     const data = await apiService.get('/options/available/expiries', { underlying: symbol });
@@ -50,7 +56,28 @@ const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
       currentIndex = 0;
     }
     
-    const selected = sorted.slice(currentIndex, currentIndex + 2);
+    const probeStart = Math.max(0, currentIndex - 1);
+    const probeEnd = Math.min(sorted.length, currentIndex + 6);
+    const probeCandidates = sorted.slice(probeStart, probeEnd);
+
+    const probeResults = await Promise.all(
+      probeCandidates.map(async (expIso) => {
+        try {
+          const response = await apiService.get('/options/live', { underlying: symbol, expiry: expIso });
+          if (response?.status === 'success') {
+            return expIso;
+          }
+        } catch {
+          // Ignore miss for this expiry candidate
+        }
+        return null;
+      })
+    );
+
+    const validExpiries = probeResults.filter(Boolean);
+    const selected = (validExpiries.length > 0
+      ? validExpiries
+      : sorted.slice(currentIndex, currentIndex + 2)).slice(0, 2);
     
     console.log('[TRADE] Selected indices:', currentIndex, 'to', currentIndex + 2);
     console.log('[TRADE] Selected expiries (ISO):', selected);

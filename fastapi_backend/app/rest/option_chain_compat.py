@@ -3,6 +3,7 @@ from typing import Optional, Dict, Any, List
 import logging
 
 from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+from app.market.instrument_master.registry import REGISTRY
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -144,7 +145,10 @@ def search_strikes(q: str, limit: int = Query(20), underlying: Optional[str] = Q
     """
     try:
         text = (q or "").strip().upper()
+        terms = [t for t in text.split() if t]
         results: List[Dict[str, Any]] = []
+
+        seen_tokens = set()
 
         # Iterate relevant underlyings only (filter if provided)
         underlyings = [underlying] if underlying else authoritative_option_chain_service.get_available_underlyings()
@@ -167,8 +171,15 @@ def search_strikes(q: str, limit: int = Query(20), underlying: Optional[str] = Q
                         opt = s_data.get(opt_type) or {}
                         symbol = opt.get("token") or f"{opt_type}_{u}_{strike_val}_{exp}"
                         display = f"{u} {exp} {int(strike_val)} {opt_type}"
-                        # Match if query appears in symbol or display
-                        if text in (str(symbol).upper()) or text in display:
+                        searchable = f"{str(symbol).upper()} {display}"
+                        matched = True
+                        if terms:
+                            matched = all(term in searchable for term in terms)
+                        if matched:
+                            token = str(opt.get("token") or symbol)
+                            if token in seen_tokens:
+                                continue
+                            seen_tokens.add(token)
                             results.append({
                                 "token": str(opt.get("token") or symbol),
                                 "symbol": u,
@@ -179,6 +190,55 @@ def search_strikes(q: str, limit: int = Query(20), underlying: Optional[str] = Q
                             })
                             if len(results) >= limit:
                                 return {"results": results}
+
+        # Fallback/augmentation: include full registry options (covers unsubscribed instruments)
+        if not REGISTRY.loaded:
+            REGISTRY.load()
+
+        text = (q or "").strip().upper()
+        target_underlying = (underlying or "").strip().upper() if underlying else None
+
+        for row in REGISTRY.instruments:
+            option_type = (row.get("OPTION_TYPE") or "").strip().upper()
+            if option_type not in ("CE", "PE"):
+                continue
+
+            row_underlying = (row.get("UNDERLYING_SYMBOL") or row.get("SYMBOL_NAME") or "").strip().upper()
+            if target_underlying and row_underlying != target_underlying:
+                continue
+
+            expiry = (row.get("SM_EXPIRY_DATE") or "").strip()
+            strike_raw = row.get("STRIKE_PRICE")
+            try:
+                strike_val = float(strike_raw)
+            except (TypeError, ValueError):
+                continue
+
+            token = str(row.get("SECURITY_ID") or f"{option_type}_{row_underlying}_{strike_val}_{expiry}").strip()
+            display = f"{row_underlying} {expiry} {int(strike_val) if strike_val.is_integer() else strike_val} {option_type}"
+            searchable = f"{token.upper()} {display}"
+            if terms and not all(term in searchable for term in terms):
+                continue
+
+            if token in seen_tokens:
+                continue
+            seen_tokens.add(token)
+
+            exch = (row.get("EXCH_ID") or "NSE").strip().upper()
+            exch_name = "BSE" if exch == "BSE" else ("MCX" if exch == "MCX" else "NSE")
+
+            results.append(
+                {
+                    "token": token,
+                    "symbol": row_underlying,
+                    "option_type": option_type,
+                    "expiry": expiry,
+                    "strike": strike_val,
+                    "exchange": exch_name,
+                }
+            )
+            if len(results) >= limit:
+                break
 
         return {"results": results}
     except Exception as e:

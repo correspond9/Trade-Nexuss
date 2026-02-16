@@ -16,6 +16,8 @@ from app.market.security_ids import EXCHANGE_CODE_MCX
 
 logger = logging.getLogger(__name__)
 
+FEED_MODE_QUOTE = 17
+
 
 def _resolve_dhan_feed_class():
     try:
@@ -115,6 +117,7 @@ class CommodityWebSocketManager:
         self.connections: List[_CommodityWSConnection] = []
         self.token_index: Dict[str, Dict[str, object]] = {}
         self.last_quotes: Dict[str, Dict[str, object]] = {}
+        self.last_tick_time: Optional[float] = None
         self.credentials: Optional[Dict[str, str]] = None
         self._lock = threading.RLock()
         self._block_until = 0.0
@@ -138,11 +141,11 @@ class CommodityWebSocketManager:
         self.token_index.update(commodity_option_chain_service.token_map)
         self.token_index.update(commodity_futures_service.token_map)
 
-    def _chunk_instruments(self, tokens: List[str]) -> List[List[Tuple[int, str]]]:
-        chunks: List[List[Tuple[int, str]]] = []
-        current: List[Tuple[int, str]] = []
+    def _chunk_instruments(self, tokens: List[str]) -> List[List[Tuple[int, str, int]]]:
+        chunks: List[List[Tuple[int, str, int]]] = []
+        current: List[Tuple[int, str, int]] = []
         for token in tokens:
-            current.append((EXCHANGE_CODE_MCX, str(token)))
+            current.append((EXCHANGE_CODE_MCX, str(token), FEED_MODE_QUOTE))
             if len(current) >= self.max_per_connection:
                 chunks.append(current)
                 current = []
@@ -183,6 +186,7 @@ class CommodityWebSocketManager:
         if not sec_id:
             return
         sec_id_str = str(sec_id)
+        self.last_tick_time = time.time()
         self.last_quotes[sec_id_str] = message
 
         meta = self.token_index.get(sec_id_str)
@@ -202,12 +206,73 @@ class CommodityWebSocketManager:
                 return _extract(data, keys)
             return None
 
+        def _extract_depth(payload: Dict[str, object]) -> Optional[Dict[str, List[Dict[str, float]]]]:
+            if not isinstance(payload, dict):
+                return None
+
+            depth = payload.get("depth") or payload.get("market_depth") or payload.get("depth_data")
+            if isinstance(depth, dict):
+                bids_raw = depth.get("bids") or depth.get("bid") or depth.get("buy") or []
+                asks_raw = depth.get("asks") or depth.get("ask") or depth.get("sell") or []
+            else:
+                bids_raw = payload.get("bids") or payload.get("bid") or payload.get("buy") or []
+                asks_raw = payload.get("asks") or payload.get("ask") or payload.get("sell") or []
+
+            def _normalize(levels: object) -> List[Dict[str, float]]:
+                if not isinstance(levels, list):
+                    return []
+                normalized: List[Dict[str, float]] = []
+                for level in levels[:5]:
+                    if isinstance(level, dict):
+                        price = level.get("price") or level.get("rate") or level.get("p")
+                        qty = level.get("qty") or level.get("quantity") or level.get("q")
+                    elif isinstance(level, (list, tuple)) and len(level) >= 2:
+                        price, qty = level[0], level[1]
+                    else:
+                        continue
+                    try:
+                        price_f = float(price)
+                    except (TypeError, ValueError):
+                        continue
+                    try:
+                        qty_f = float(qty) if qty is not None else 0.0
+                    except (TypeError, ValueError):
+                        qty_f = 0.0
+                    normalized.append({"price": price_f, "qty": qty_f})
+                return normalized
+
+            bids = _normalize(bids_raw)
+            asks = _normalize(asks_raw)
+            if not bids and not asks:
+                data = payload.get("data")
+                if isinstance(data, dict):
+                    return _extract_depth(data)
+                return None
+            return {"bids": bids, "asks": asks}
+
         ltp = _extract(message, ["LTP", "ltp", "last", "last_price", "lastPrice"])
-        bid = _extract(message, ["bid", "best_bid", "bestBid"])
-        ask = _extract(message, ["ask", "best_ask", "bestAsk"])
+        prev_close = _extract(message, ["prev_close", "previous_close", "close", "prevClose"])
+        bid = _extract(message, ["BID", "bid", "best_bid", "best_bid_price", "bid_price", "bidPrice", "bestBid", "bp1"])
+        ask = _extract(message, ["ASK", "ask", "best_ask", "best_ask_price", "ask_price", "askPrice", "bestAsk", "ap1"])
         oi = _extract(message, ["oi", "open_interest", "openInterest"])
         volume = _extract(message, ["volume", "vol", "traded_volume"])
         iv = _extract(message, ["iv", "implied_volatility"])
+        depth = _extract_depth(message)
+
+        if (bid is None or bid <= 0) and depth and depth.get("bids"):
+            first_bid = depth["bids"][0]
+            bid = float(first_bid.get("price")) if first_bid.get("price") is not None else bid
+        if (ask is None or ask <= 0) and depth and depth.get("asks"):
+            first_ask = depth["asks"][0]
+            ask = float(first_ask.get("price")) if first_ask.get("price") is not None else ask
+
+        try:
+            from app.market.market_state import state
+            symbol_for_depth = str(meta.get("symbol") or "").upper()
+            if symbol_for_depth and depth and (depth.get("bids") or depth.get("asks")):
+                state.setdefault("depth", {})[symbol_for_depth] = depth
+        except Exception:
+            pass
 
         if meta.get("option_type"):
             commodity_option_chain_service.update_option_tick(
@@ -227,6 +292,7 @@ class CommodityWebSocketManager:
                 symbol=str(meta.get("symbol")),
                 expiry=str(meta.get("expiry")),
                 ltp=ltp,
+                prev_close=prev_close,
                 bid=bid,
                 ask=ask,
                 oi=oi,
@@ -269,6 +335,7 @@ class CommodityWebSocketManager:
             "total_subscriptions": total_instruments or len(self.token_index),
             "connected_connections": connected,
             "total_connections": len(self.connections),
+            "last_tick_time": self.last_tick_time,
             "per_connection": connections,
             "cooldown_active": time.time() < self._block_until,
             "cooldown_until": self._block_until if self._block_until else None,

@@ -66,7 +66,10 @@ const OrdersTab = () => {
     const createdAt = order.created_at || order.createdAt || order.updated_at || new Date().toISOString();
     const updatedAt = order.updated_at || order.updatedAt || createdAt;
     const qty = Number(order.quantity ?? order.qty ?? 0);
-    const price = Number(order.price ?? order.execution_price ?? order.executionPrice ?? 0);
+    const executedQty = Number(order.filled_qty ?? order.executedQty ?? qty);
+    const pendingQty = Math.max(0, qty - executedQty);
+    const executionPrice = Number(order.execution_price ?? order.executionPrice ?? order.avg_execution_price ?? order.price ?? 0);
+    const displayPrice = Number(order.price ?? executionPrice ?? 0);
     const statusRaw = String(order.status || 'PENDING');
     const status = statusRaw.toUpperCase();
     return enrichOrder({
@@ -78,14 +81,15 @@ const OrdersTab = () => {
       orderMode: order.order_type || order.orderMode || 'MARKET',
       productType: order.product_type || order.productType || 'MIS',
       qty,
-      price,
+      price: displayPrice,
       status,
       rejectionReason: order.remarks || order.rejection_reason || order.reason || '',
       triggerPrice: order.trigger_price ?? order.triggerPrice ?? 0,
       target: order.target_price ?? order.target ?? 0,
       stopLoss: order.stop_loss_price ?? order.stopLoss ?? 0,
-      executedQty: order.filled_qty ?? order.executedQty ?? qty,
-      executionPrice: order.execution_price ?? order.executionPrice ?? price,
+      executedQty,
+      pendingQty,
+      executionPrice,
       orderDateTime: formatDateTime(createdAt),
       exchangeTime: formatDateTime(updatedAt),
       executionTime: formatDateTime(updatedAt)
@@ -306,6 +310,7 @@ const OrdersTab = () => {
     const base = { fontWeight: 600 };
     const normalized = String(status || '').toUpperCase();
     if (normalized === "EXECUTED") return { ...base, color: "#16a34a" };
+    if (normalized === "PARTIAL") return { ...base, color: "#d97706" };
     if (normalized === "REJECTED") return { ...base, color: "#dc2626" };
     return { ...base, color: "#111827" }; // Pending/others
   };
@@ -427,10 +432,16 @@ const OrdersTab = () => {
                         {o.productType}
                       </span>
                     </td>
-                    <td style={tdRight}>{o.qty.toLocaleString("en-IN")}</td>
+                    <td style={tdRight}>
+                      {o.status === 'PARTIAL'
+                        ? `${o.executedQty.toLocaleString("en-IN")} / ${o.qty.toLocaleString("en-IN")}`
+                        : o.qty.toLocaleString("en-IN")}
+                    </td>
                     <td style={tdRight}>{o.price.toFixed(2)}</td>
                     <td style={tdStyle}>
-                      <span style={statusStyle(o.status)}>{o.status}</span>
+                      <span style={statusStyle(o.status)}>
+                        {o.status === 'PARTIAL' && o.pendingQty > 0 ? `PARTIAL (PENDING ${o.pendingQty})` : o.status}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -500,6 +511,10 @@ const OrdersTab = () => {
             {renderDetailsRow(
               "Executed Quantity",
               selectedOrder.executedQty.toLocaleString("en-IN")
+            )}
+            {renderDetailsRow(
+              "Pending Quantity",
+              Number(selectedOrder.pendingQty || 0).toLocaleString("en-IN")
             )}
             {renderDetailsRow(
               "Execution Price",

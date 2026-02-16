@@ -11,6 +11,10 @@ export const useWebSocket = (url) => {
 
   const connect = useCallback(() => {
     try {
+      const lowerUrl = String(url || '').toLowerCase();
+      if (lowerUrl.includes('dhan.co')) {
+        throw new Error('Frontend direct Dhan WebSocket connections are disabled. Use backend websocket endpoints only.');
+      }
       ws.current = new WebSocket(url);
       
       ws.current.onopen = () => {

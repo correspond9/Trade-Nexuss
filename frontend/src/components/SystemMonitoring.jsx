@@ -17,36 +17,71 @@ const SystemMonitoring = () => {
   useEffect(() => {
     const fetchSystemStatus = async () => {
       try {
-        const [healthData, streamData] = await Promise.all([
+        const [healthData, streamData, etfData] = await Promise.all([
           apiService.get('/health').catch(() => ({})),
-          apiService.get('/market/stream-status').catch(() => ({}))
+          apiService.get('/market/stream-status').catch(() => ({})),
+          apiService.get('/market/etf-tierb-status').catch(() => ({}))
         ]);
         const data = healthData;
         const streamPayload = streamData?.data || streamData || {};
+        const etfPayload = etfData?.data || {};
 
         const wsStatus = streamPayload?.equity_ws || data?.websocket_status || {};
         const mcxWsStatus = streamPayload?.mcx_ws || data?.mcx_websocket_status || {};
         const wsConnected = (wsStatus.connected_connections ?? 0) > 0;
         const mcxWsConnected = (mcxWsStatus.connected_connections ?? 0) > 0;
         const liveFeed = streamPayload?.live_feed || {};
+        const marketOpen = streamPayload?.market_open || {};
+        const marketTime = streamPayload?.market_time || new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+        const database = streamPayload?.database || {};
+        const dhanApi = streamPayload?.dhan_api || {};
+        const apiHealthy = String(data?.status || '').toLowerCase() === 'ok';
+
+        const wsMessage = wsConnected
+          ? `${wsStatus.connected_connections || 0} connection(s), ${wsStatus.total_subscriptions || 0} subscriptions`
+          : (liveFeed.cooldown_active ? 'Cooldown active' : 'No active connections');
+
+        const mcxMessage = mcxWsConnected
+          ? `${mcxWsStatus.connected_connections || 0} connection(s), ${mcxWsStatus.total_subscriptions || 0} subscriptions`
+          : (mcxWsStatus.cooldown_active ? 'Cooldown active' : 'No active connections');
 
         const normalized = {
           services: {
-            database: { status: 'unknown', response_time: 'N/A' },
-            authentication: { status: data?.status || 'unknown', response_time: 'OK' },
-            dhan_api: { status: 'unknown', message: 'Not checked' },
+            database: {
+              status: database?.status || 'unknown',
+              response_time: database?.message || 'Not checked'
+            },
+            authentication: {
+              status: apiHealthy ? 'healthy' : 'error',
+              response_time: apiHealthy ? 'API responding' : 'API unavailable'
+            },
+            dhan_api: {
+              status: dhanApi?.status || 'unknown',
+              message: dhanApi?.message || 'Not checked'
+            },
             websocket: {
-              status: wsConnected ? 'healthy' : 'offline',
-              message: wsConnected ? 'Connections active' : (liveFeed.cooldown_active ? 'Cooldown active' : 'No active connections'),
+              status: wsConnected ? 'healthy' : (liveFeed.cooldown_active ? 'warning' : 'offline'),
+              message: wsMessage,
               connections: wsStatus.connected_connections || 0
             },
             mcx_websocket: {
-              status: mcxWsConnected ? 'healthy' : 'offline',
-              message: mcxWsConnected ? 'Connections active' : (mcxWsStatus.cooldown_active ? 'Cooldown active' : 'No active connections'),
+              status: mcxWsConnected ? 'healthy' : (mcxWsStatus.cooldown_active ? 'warning' : 'offline'),
+              message: mcxMessage,
               connections: mcxWsStatus.connected_connections || 0
             },
+            etf_tier_b: {
+              status: etfPayload?.service_status || 'unknown',
+              message: etfPayload?.message || 'ETF Tier-B status unavailable',
+              expected_count: etfPayload?.expected_count || 0,
+              subscribed_count: etfPayload?.subscribed_count || 0,
+              missing_count: etfPayload?.missing_count || 0,
+            },
+            market_session: {
+              status: Object.values(marketOpen || {}).some(Boolean) ? 'active' : 'offline',
+              message: `NSE: ${marketOpen?.NSE ? 'Open' : 'Closed'} | BSE: ${marketOpen?.BSE ? 'Open' : 'Closed'} | MCX: ${marketOpen?.MCX ? 'Open' : 'Closed'}`,
+              time: marketTime,
+            },
           },
-          system_metrics: {}
         };
 
         setSystemData(normalized);
@@ -57,7 +92,7 @@ const SystemMonitoring = () => {
     };
 
     fetchSystemStatus();
-    const interval = setInterval(fetchSystemStatus, 1000); // Poll every second for live feedback
+    const interval = setInterval(fetchSystemStatus, 5000); // production-safe polling cadence
     
     return () => clearInterval(interval);
   }, []);
@@ -157,8 +192,6 @@ const SystemMonitoring = () => {
   };
 
   const services = systemData.services || {};
-  const metrics = systemData.system_metrics || {};
-
   return (
     <div className="space-y-6">
       {/* Live Quotes - Data Flow Indicators */}
@@ -261,62 +294,39 @@ const SystemMonitoring = () => {
             {services.mcx_websocket?.message || 'Checking connection...'}
           </p>
         </div>
-      </div>
 
-      {/* System Metrics */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-md font-semibold text-gray-800 mb-4">Performance Metrics</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <p className="text-sm text-gray-500">CPU Usage</p>
-            <p className="text-lg font-semibold text-gray-900">
-              {metrics.cpu_percent ? `${metrics.cpu_percent.toFixed(1)}%` : 'N/A'}
-            </p>
+        {/* ETF Tier-B Status */}
+        <div className="bg-white rounded-lg shadow p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-medium text-gray-900">ETF Tier-B</h3>
+            <AlertCircle className="w-4 h-4 text-gray-400" />
           </div>
-          <div>
-            <p className="text-sm text-gray-500">Memory Usage</p>
-            <p className="text-lg font-semibold text-gray-900">
-              {metrics.memory_percent ? `${metrics.memory_percent.toFixed(1)}%` : 'N/A'}
-            </p>
+          <div className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(services.etf_tier_b?.status || 'checking')}`}>
+            {getStatusText(services.etf_tier_b?.status || 'checking')}
           </div>
-          <div>
-            <p className="text-sm text-gray-500">Disk Usage</p>
-            <p className="text-lg font-semibold text-gray-900">
-              {metrics.disk_percent ? `${metrics.disk_percent.toFixed(1)}%` : 'N/A'}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Uptime</p>
-            <p className="text-lg font-semibold text-gray-900">
-              {metrics.uptime || 'N/A'}
-            </p>
-          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            {services.etf_tier_b?.message || 'Checking ETF Tier-B coverage...'}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {`${services.etf_tier_b?.subscribed_count || 0}/${services.etf_tier_b?.expected_count || 0} subscribed`}
+          </p>
         </div>
-        
-        {/* Additional Details */}
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-gray-600">Memory Available</p>
-            <p className="font-medium">{metrics.memory_available_gb ? `${metrics.memory_available_gb.toFixed(2)} GB` : 'N/A'}</p>
+
+        {/* Market Session */}
+        <div className="bg-white rounded-lg shadow p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-medium text-gray-900">Market Session</h3>
+            <AlertCircle className="w-4 h-4 text-gray-400" />
           </div>
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-gray-600">Disk Free</p>
-            <p className="font-medium">{metrics.disk_free_gb ? `${metrics.disk_free_gb.toFixed(2)} GB` : 'N/A'}</p>
+          <div className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(services.market_session?.status || 'checking')}`}>
+            {getStatusText(services.market_session?.status || 'checking')}
           </div>
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-gray-600">Equity WS Connections</p>
-            <p className="font-medium">{services.websocket?.connections || 0}</p>
-          </div>
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-gray-600">MCX WS Connections</p>
-            <p className="font-medium">{services.mcx_websocket?.connections || 0}</p>
-          </div>
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-gray-600">Dhan API Status</p>
-            <p className={`font-medium ${services.dhan_api?.status === 'healthy' ? 'text-green-600' : services.dhan_api?.status === 'error' ? 'text-red-600' : 'text-yellow-600'}`}>
-              {services.dhan_api?.status === 'healthy' ? 'Connected' : services.dhan_api?.status === 'error' ? 'Disconnected' : 'Checking...'}
-            </p>
-          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            {services.market_session?.message || 'Checking market sessions...'}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            Market Time: {services.market_session?.time || '—'}
+          </p>
         </div>
       </div>
 

@@ -63,6 +63,30 @@ class CommodityOptionChainService:
             pass
         return None
 
+    def _available_option_expiries(self, symbol: str) -> List[str]:
+        symbol_upper = symbol.upper()
+        expiries = set()
+        for row in REGISTRY.by_underlying.get(symbol_upper, []):
+            exchange = (row.get("EXCH_ID") or "").strip().upper()
+            if exchange != "MCX":
+                continue
+            option_type = (row.get("OPTION_TYPE") or "").strip().upper()
+            if option_type not in ("CE", "PE"):
+                continue
+            parsed = self._normalize_expiry(row.get("SM_EXPIRY_DATE", ""))
+            if parsed:
+                expiries.add(parsed.isoformat())
+        return sorted(expiries)
+
+    async def get_available_expiries(self, symbol: str) -> List[str]:
+        option_expiries = self._available_option_expiries(symbol)
+        selected = commodity_expiry_service.select_current_next(option_expiries)
+        if selected:
+            return selected
+
+        expiries = await commodity_expiry_service.fetch_expiry_list(symbol)
+        return commodity_expiry_service.select_current_next(expiries)
+
     def _build_strikes(self, atm: float, strike_interval: float) -> List[float]:
         strikes = []
         for i in range(-25, 26):
@@ -70,6 +94,53 @@ class CommodityOptionChainService:
             if strike > 0:
                 strikes.append(round(strike, 6))
         return strikes
+
+    def _available_strikes_for_expiry(self, symbol: str, expiry: str) -> List[float]:
+        symbol_upper = symbol.upper()
+        target_expiry = self._normalize_expiry(expiry)
+        if not target_expiry:
+            return []
+
+        available = set()
+        for row in REGISTRY.by_underlying.get(symbol_upper, []):
+            exchange = (row.get("EXCH_ID") or "").strip().upper()
+            if exchange != "MCX":
+                continue
+            row_expiry = self._normalize_expiry(row.get("SM_EXPIRY_DATE", ""))
+            if row_expiry != target_expiry:
+                continue
+            row_opt = (row.get("OPTION_TYPE") or "").strip().upper()
+            if row_opt not in ("CE", "PE"):
+                continue
+            try:
+                strike_value = float(row.get("STRIKE_PRICE"))
+            except (TypeError, ValueError):
+                continue
+            if strike_value > 0:
+                available.add(round(strike_value, 6))
+
+        return sorted(available)
+
+    def _select_display_strikes(self, available: List[float], atm: float, count_each_side: int = 25) -> List[float]:
+        if not available:
+            return []
+
+        window_size = (count_each_side * 2) + 1
+        center = min(range(len(available)), key=lambda idx: abs(available[idx] - atm))
+        start = max(0, center - count_each_side)
+        end = min(len(available), center + count_each_side + 1)
+
+        # Keep a full ATM-centered 51-strike window when possible.
+        current_size = end - start
+        if len(available) >= window_size and current_size < window_size:
+            deficit = window_size - current_size
+            shift_left = min(start, deficit)
+            start -= shift_left
+            deficit -= shift_left
+            if deficit > 0:
+                end = min(len(available), end + deficit)
+
+        return available[start:end]
 
     def _build_skeleton(
         self,
@@ -133,8 +204,7 @@ class CommodityOptionChainService:
         }
 
     async def build_for_underlying(self, symbol: str, ltp: float) -> Dict[str, Dict]:
-        expiries = await commodity_expiry_service.fetch_expiry_list(symbol)
-        selected = commodity_expiry_service.select_current_next(expiries)
+        selected = await self.get_available_expiries(symbol)
         if not selected:
             return {}
 
@@ -146,8 +216,14 @@ class CommodityOptionChainService:
 
         built = {}
         for expiry in selected:
-            atm = round(ltp / strike_interval) * strike_interval
-            strikes = self._build_strikes(atm, strike_interval)
+            raw_atm = round(ltp / strike_interval) * strike_interval
+            available = self._available_strikes_for_expiry(symbol, expiry)
+            if available:
+                atm = min(available, key=lambda strike: abs(strike - raw_atm))
+                strikes = self._select_display_strikes(available, atm, 25)
+            else:
+                atm = raw_atm
+                strikes = self._build_strikes(atm, strike_interval)
             skeleton = self._build_skeleton(symbol, expiry, lot_size, strike_interval, atm, strikes)
 
             if symbol not in self.option_chain_cache:
@@ -175,14 +251,21 @@ class CommodityOptionChainService:
         volume: Optional[float] = None,
         iv: Optional[float] = None,
     ) -> None:
-        updates = {
-            "ltp": ltp,
-            "bid": bid,
-            "ask": ask,
-            "oi": oi,
-            "volume": volume,
-            "iv": iv,
-        }
+        updates = {}
+        if ltp is not None:
+            updates["ltp"] = ltp
+        if bid is not None:
+            updates["bid"] = bid
+        if ask is not None:
+            updates["ask"] = ask
+        if oi is not None:
+            updates["oi"] = oi
+        if volume is not None:
+            updates["volume"] = volume
+        if iv is not None:
+            updates["iv"] = iv
+        if not updates:
+            return
         update_option_leg("MCX", symbol, expiry, strike, option_type, updates)
 
 

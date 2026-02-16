@@ -123,7 +123,7 @@ class ApiService {
         const rawUser = localStorage.getItem('authUser') || localStorage.getItem('user');
         if (rawUser) {
           const parsed = JSON.parse(rawUser);
-          const xUser = (parsed?.username || parsed?.user_id || parsed?.mobile || '').toString().trim();
+          const xUser = (parsed?.user_id || parsed?.mobile || parsed?.username || '').toString().trim();
           if (xUser) {
             headers['X-USER'] = xUser;
           }
@@ -791,14 +791,31 @@ class ApiService {
     const url = endpoint.startsWith('http')
       ? endpoint
       : (isAbsoluteApiPath ? endpoint : `${this.baseURL}${endpoint}`);
+    const lowerUrl = String(url || '').toLowerCase();
+    if (lowerUrl.includes('api.dhan.co') || lowerUrl.includes('images.dhan.co')) {
+      throw new Error('Frontend direct Dhan REST calls are disabled. Use backend API endpoints only.');
+    }
     const isLoginEndpoint = endpoint.includes('/auth/login');
+    let body = options.body;
+    const isFormDataBody = typeof FormData !== 'undefined' && body instanceof FormData;
     const headers = {
-      'Content-Type': 'application/json',
       ...this.getAuthHeaders(),
       ...options.headers,
     };
 
-    let body = options.body;
+    if (isFormDataBody) {
+      Object.keys(headers).forEach((key) => {
+        if (key.toLowerCase() === 'content-type') {
+          delete headers[key];
+        }
+      });
+    } else {
+      const hasContentType = Object.keys(headers).some((key) => key.toLowerCase() === 'content-type');
+      if (!hasContentType) {
+        headers['Content-Type'] = 'application/json';
+      }
+    }
+
     if (body && typeof body === 'object' && !(body instanceof FormData)) {
       // Pass the endpoint URL to sanitizeBody so exceptions can be made
       // Fix: Use the relative endpoint for checking exceptions, not the full URL if possible
@@ -853,9 +870,15 @@ class ApiService {
     const skipCache =
       endpoint.includes('/market/dhan/instruments') ||
       endpoint.includes('/search/search') ||
+      endpoint.includes('/options/live') ||
+      endpoint.includes('/commodities/') ||
       endpoint.includes('/trading/orders') ||
       endpoint.includes('/portfolio/positions') ||
       endpoint.includes('/trading/basket-orders');
+
+    if (skipCache) {
+      this.cache.delete(cacheKey);
+    }
 
     // Check cache first (unless skipping cache)
     if (!skipCache && this.cache.has(cacheKey)) {

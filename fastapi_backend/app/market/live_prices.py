@@ -25,22 +25,18 @@ def _normalize_symbol(symbol: str) -> str:
 def update_price(symbol: str, price: float):
     """Update price for a symbol"""
     with _lock:
-        # ✨ NEW: Handle both underlying and option symbols
-        # Extract underlying symbol from option tokens (e.g., CE_NIFTY_... -> NIFTY)
+        # Handle both underlying and option symbols.
         if "_" in symbol:
-            # This is an option token, extract underlying
             parts = symbol.split("_")
             if len(parts) >= 2:
-                underlying = _normalize_symbol(parts[1])  # NIFTY from CE_NIFTY_...
-                if underlying in _DASHBOARD_SYMBOLS:
-                    prices[underlying] = price
-                    logger.debug("[PRICE] Updated %s from option %s: %s", underlying, symbol, price)
-        else:
-            # This is a direct underlying symbol
-            normalized = _normalize_symbol(symbol)
-            if normalized in _DASHBOARD_SYMBOLS:
-                prices[normalized] = price
-                logger.debug("[PRICE] Updated %s: %s", normalized, price)
+                underlying = _normalize_symbol(parts[1])
+                prices[underlying] = price
+                logger.debug("[PRICE] Updated %s from option %s: %s", underlying, symbol, price)
+            return
+
+        normalized = _normalize_symbol(symbol)
+        prices[normalized] = price
+        logger.debug("[PRICE] Updated %s: %s", normalized, price)
 
 def get_prices():
     """Get all dashboard prices"""
@@ -55,4 +51,5 @@ def get_dashboard_symbols():
 def get_price(symbol: str):
     """Get price for a specific symbol"""
     with _lock:
-        return prices.get(symbol)
+        normalized = _normalize_symbol(symbol)
+        return prices.get(normalized)

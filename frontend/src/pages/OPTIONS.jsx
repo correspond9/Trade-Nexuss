@@ -37,6 +37,11 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
     return fromChain && fromChain > 0 ? fromChain : configured;
   }, [symbol, chainData?.lot_size]);
 
+  useEffect(() => {
+    setUnderlyingPrice(null);
+    didInitialScroll.current = false;
+  }, [symbol, expiry]);
+
   // Use underlying LTP from authoritative /options/live response.
   useEffect(() => {
     const ltp = chainData?.underlying_ltp;

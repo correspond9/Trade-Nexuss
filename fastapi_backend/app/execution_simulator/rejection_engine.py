@@ -1,6 +1,7 @@
 """Order rejection rules for execution simulation."""
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from app.ems.exchange_clock import is_market_open
@@ -11,12 +12,26 @@ class RejectionEngine:
     def __init__(self, config: ExecutionConfig) -> None:
         self.config = config
 
-    def validate(self, exchange: str, order_type: str, side: str, price: Optional[float], quantity: int, snapshot: dict) -> Optional[str]:
+    def validate(
+        self,
+        exchange: str,
+        order_type: str,
+        side: str,
+        price: Optional[float],
+        quantity: int,
+        snapshot: dict,
+        lot_step: int = 1,
+    ) -> Optional[str]:
         if not is_market_open(exchange):
             return "MARKET_CLOSED"
 
         cfg = self.config.for_exchange(exchange)
-        if quantity > cfg.max_order_size:
+        lot_step = int(lot_step or 1)
+        if lot_step > 1 and quantity % lot_step != 0:
+            return "INVALID_LOT_SIZE"
+
+        comparable_qty = quantity if lot_step <= 1 else math.ceil(quantity / lot_step)
+        if comparable_qty > cfg.max_order_size:
             return "ORDER_SIZE_TOO_LARGE"
 
         if order_type == "LIMIT" and (price is None or price <= 0):

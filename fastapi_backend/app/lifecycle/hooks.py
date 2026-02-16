@@ -29,7 +29,7 @@ def get_scheduler():
 
 def eod_cleanup():
     """
-    End-of-Day (3:30 PM IST) cleanup task
+    End-of-Day (4:00 PM IST) cleanup task
     - Unsubscribe all Tier A (user watchlist) subscriptions
     - Preserve Tier B (always-on) subscriptions
     - Reset system for next trading session
@@ -39,7 +39,7 @@ def eod_cleanup():
         from app.storage.db import SessionLocal
         
         print("\n" + "="*70)
-        print("[EOD] Starting End-of-Day cleanup (3:30 PM IST)")
+        print("[EOD] Starting End-of-Day cleanup (4:00 PM IST)")
         print("="*70)
         
         # Get subscription stats before cleanup
@@ -176,12 +176,47 @@ def _find_next_expiry(symbol: str, exchange_id: Optional[int] = None) -> Optiona
     return target[1]
 
 
+def ensure_tier_b_etf_subscriptions() -> tuple[int, int]:
+    """Tier-B equity preload disabled. Equity symbols are Tier-A watchlist-only."""
+    return 0, 0
+
+
+def purge_tier_b_equity_subscriptions() -> tuple[int, int]:
+    """Remove legacy always-on Tier-B equity subscriptions (EQUITY_* tokens)."""
+    try:
+        from app.market.subscription_manager import SUBSCRIPTION_MGR
+
+        active_tier_b = SUBSCRIPTION_MGR.list_active_subscriptions(tier="TIER_B")
+        targets = [
+            row for row in active_tier_b
+            if str(row.get("token") or "").upper().startswith("EQUITY_")
+            and not row.get("option_type")
+        ]
+
+        removed = 0
+        failed = 0
+        for row in targets:
+            token = str(row.get("token") or "")
+            ok, _msg = SUBSCRIPTION_MGR.unsubscribe(token, reason="EQUITY_LIST_TIERA_MIGRATION")
+            if ok:
+                removed += 1
+            else:
+                failed += 1
+
+        if targets:
+            SUBSCRIPTION_MGR.sync_to_db()
+        return removed, failed
+    except Exception:
+        return 0, 0
+
+
 async def load_tier_b_chains():
     """
     PHASE 3: Pre-load Tier B subscriptions at startup
     
     Tier B includes:
     - Index options (NIFTY50, BANKNIFTY, SENSEX) from option chain service
+    - ETF equities from MW-ETF source list (always-on)
     - MCX futures and options (CRUDEOIL, NATURALGAS) from fallback
     
     Total: ~612 subscriptions from option chains + MCX contracts
@@ -191,6 +226,7 @@ async def load_tier_b_chains():
         from app.market.atm_engine import ATM_ENGINE
         from app.market.live_prices import get_prices
         from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+        from app.market.instrument_master.tier_b_etf_symbols import get_tier_b_etf_symbols
 
         print("\n" + "="*70)
         print("[STARTUP-PHASE3] Loading Tier B Subscriptions from Option Chain Service")
@@ -300,6 +336,8 @@ async def load_tier_b_chains():
                             else:
                                 total_failed += 1
 
+        # Tier-B equity preload intentionally disabled.
+
         # Print summary
         stats = SUBSCRIPTION_MGR.get_ws_stats()
         print("\n" + "="*70)
@@ -350,8 +388,8 @@ async def on_start():
             scheduler.add_job(
                 eod_cleanup,
                 'cron',
-                hour=15,
-                minute=30,
+                hour=16,
+                minute=0,
                 id='eod_cleanup',
                 name='End-of-Day Cleanup',
                 replace_existing=True,
@@ -389,6 +427,10 @@ async def on_start():
         await asyncio.to_thread(SUBSCRIPTION_MGR._load_from_database)
         logger.info("[STARTUP] Subscriptions loaded from database")
 
+        # Ensure legacy Tier-B equity subscriptions are removed at startup.
+        eq_removed, eq_failed = await asyncio.to_thread(purge_tier_b_equity_subscriptions)
+        logger.info("[STARTUP] Tier-B EQUITY purge complete (removed=%s, failed=%s)", eq_removed, eq_failed)
+
         load_tier_b = _env_bool("STARTUP_LOAD_TIER_B", default=not is_production)
         if load_tier_b:
             logger.info("[STARTUP] Scheduling Tier B pre-load in background...")
@@ -397,7 +439,7 @@ async def on_start():
         else:
             logger.warning("[STARTUP] Skipping Tier B preload (STARTUP_LOAD_TIER_B=false)")
 
-        start_streams = _env_bool("STARTUP_START_STREAMS", default=not is_production)
+        start_streams = _env_bool("STARTUP_START_STREAMS", default=True)
         if start_streams:
             logger.info("[STARTUP] Scheduling market data streams in background...")
             from app.market_orchestrator import get_orchestrator

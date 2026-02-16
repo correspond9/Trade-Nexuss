@@ -55,20 +55,50 @@ const LiveQuotes = () => {
     let intervalId;
     const fetchPrices = async () => {
       try {
+        let mcxFuturesPriceMap = {};
+        try {
+          const futuresPayload = await apiService.get('/commodities/futures', { tab: 'current' });
+          const futuresRows = Array.isArray(futuresPayload?.data) ? futuresPayload.data : [];
+          mcxFuturesPriceMap = futuresRows.reduce((acc, row) => {
+            const symbol = String(row?.symbol || '').toUpperCase();
+            const price = Number(row?.display_price ?? row?.ltp ?? 0);
+            if (symbol && Number.isFinite(price) && price > 0) {
+              acc[symbol] = price;
+            }
+            return acc;
+          }, {});
+        } catch (_error) {
+          mcxFuturesPriceMap = {};
+        }
+
         const entries = await Promise.all(
-          CORE_INSTRUMENTS.map(async ({ key }) => {
-            const payload = await apiService.get(`/market/underlying-ltp/${key}`);
-            const price = payload?.ltp;
-            const source = 'live_cache';
-            return [key, typeof price === 'number' ? price : null, source];
+          CORE_INSTRUMENTS.map(async ({ key, exchange }) => {
+            try {
+              if (exchange === 'MCX') {
+                const mcxPrice = mcxFuturesPriceMap[key];
+                if (Number.isFinite(mcxPrice) && mcxPrice > 0) {
+                  return [key, mcxPrice, 'commodity_futures', null];
+                }
+              }
+
+              const payload = await apiService.get(`/market/underlying-ltp/${key}`);
+              const rawPrice = payload?.ltp;
+              const price = Number(rawPrice);
+              const source = 'live_cache';
+              return [key, Number.isFinite(price) && price > 0 ? price : null, source, null];
+            } catch (error) {
+              return [key, null, 'unknown', error];
+            }
           })
         );
 
         setQuotes(prev => {
           const updated = { ...prev };
-          entries.forEach(([key, price]) => {
+          entries.forEach(([key, price, _source, error]) => {
             if (price && price > 0) {
               updated[key] = { ...updated[key], price, status: 'success' };
+            } else if (error) {
+              updated[key] = { ...updated[key], status: 'error' };
             } else {
               updated[key] = { ...updated[key], status: 'no_data' };
             }
@@ -137,6 +167,8 @@ const LiveQuotes = () => {
 
   const getSourceBadge = () => {
     switch (marketDataSource) {
+      case 'commodity_futures':
+        return { text: 'MCX CURRENT FUT', classes: 'bg-purple-100 text-purple-800' };
       case 'live_cache':
         return { text: 'LIVE CACHE', classes: 'bg-green-100 text-green-800' };
       case 'snapshot':

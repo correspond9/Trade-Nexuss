@@ -31,6 +31,7 @@ class OptionType(Enum):
 class OptionData:
     token: str
     ltp: Optional[float] = None
+    source: str = "UNKNOWN"
     bid: Optional[float] = None
     ask: Optional[float] = None
     oi: Optional[int] = None
@@ -166,6 +167,8 @@ class AuthoritativeOptionChainService:
         self.last_market_check: Dict[str, datetime] = {}  # {underlying: datetime}
         self.cache_source_lock = asyncio.Lock()  # Thread-safe updates
         self.instrument_master_lock = asyncio.Lock()
+        self._snapshot_bootstrap_attempted = False
+        self._snapshot_bootstrap_completed = False
         
         # ========== PERMITTED INSTRUMENTS ONLY ==========
         # NSE INDEX OPTIONS
@@ -1037,7 +1040,18 @@ class AuthoritativeOptionChainService:
             return None
 
         text = str(expiry).strip().upper()
-        for fmt in ("%Y-%m-%d", "%d%b%Y", "%d%b%y", "%d%B%Y"):
+        for fmt in (
+            "%Y-%m-%d",
+            "%d%b%Y",
+            "%d%b%y",
+            "%d%B%Y",
+            "%d-%b-%Y",
+            "%d-%b-%y",
+            "%d-%B-%Y",
+            "%d %b %Y",
+            "%d %B %Y",
+            "%d/%m/%Y",
+        ):
             try:
                 return datetime.strptime(text, fmt).date()
             except ValueError:
@@ -1235,6 +1249,9 @@ class AuthoritativeOptionChainService:
             
             updated_count = 0
             strike_interval = self.index_options[symbol]["strike_interval"]
+            prev_ltp = self.atm_registry.atm_strikes.get(symbol)
+            if prev_ltp is None or prev_ltp <= 0:
+                prev_ltp = ltp
 
             # For index chains with WebSocket option ticks, do NOT overwrite CE/PE premiums here.
             # We still update the ATM marker using rounded LTP (universal rule), and if the
@@ -1242,7 +1259,7 @@ class AuthoritativeOptionChainService:
             # with estimated premiums so UI stays relevant.
             if symbol in {"NIFTY", "BANKNIFTY", "SENSEX"}:
                 new_atm = round(ltp / strike_interval) * strike_interval
-                for expiry in self.option_chain_cache[symbol]:
+                for expiry in list(self.option_chain_cache[symbol].keys()):
                     skeleton = self.option_chain_cache[symbol][expiry]
                     strike_prices = list(skeleton.strikes.keys())
                     if strike_prices:
@@ -1281,12 +1298,14 @@ class AuthoritativeOptionChainService:
                                 ce_data = OptionData(
                                     token=str(ce_id) if ce_id else ce_key,
                                     ltp=0.0,
+                                    source="SYNTHETIC",
                                     bid=0.0,
                                     ask=0.0,
                                 )
                                 pe_data = OptionData(
                                     token=str(pe_id) if pe_id else pe_key,
                                     ltp=0.0,
+                                    source="SYNTHETIC",
                                     bid=0.0,
                                     ask=0.0,
                                 )
@@ -1308,14 +1327,47 @@ class AuthoritativeOptionChainService:
                             except Exception as sync_e:
                                 logger.warning(f"⚠️ Failed to sync Tier B subscriptions for {symbol} {expiry}: {sync_e}")
 
+                    for strike_data in skeleton.strikes.values():
+                        strike_price = float(strike_data.strike_price)
+
+                        ce_source = str(getattr(strike_data.CE, "source", "UNKNOWN") or "UNKNOWN").upper()
+                        pe_source = str(getattr(strike_data.PE, "source", "UNKNOWN") or "UNKNOWN").upper()
+
+                        current_ce = float(strike_data.CE.ltp or 0.0)
+                        current_pe = float(strike_data.PE.ltp or 0.0)
+
+                        prev_intrinsic_ce = max(float(prev_ltp) - strike_price, 0.0)
+                        prev_intrinsic_pe = max(strike_price - float(prev_ltp), 0.0)
+
+                        ce_extrinsic = max(current_ce - prev_intrinsic_ce, 0.0)
+                        pe_extrinsic = max(current_pe - prev_intrinsic_pe, 0.0)
+
+                        new_ce = current_ce if ce_source == "WEBSOCKET" else max(max(float(ltp) - strike_price, 0.0) + ce_extrinsic, 0.0)
+                        new_pe = current_pe if pe_source == "WEBSOCKET" else max(max(strike_price - float(ltp), 0.0) + pe_extrinsic, 0.0)
+
+                        if ce_source != "WEBSOCKET":
+                            strike_data.CE.ltp = new_ce
+                            strike_data.CE.source = "SYNTHETIC"
+                        if pe_source != "WEBSOCKET":
+                            strike_data.PE.ltp = new_pe
+                            strike_data.PE.source = "SYNTHETIC"
+
+                        if ce_source != "WEBSOCKET":
+                            strike_data.CE.bid = max(0.0, new_ce * 0.99)
+                            strike_data.CE.ask = new_ce * 1.01 if new_ce > 0 else 0.0
+                        if pe_source != "WEBSOCKET":
+                            strike_data.PE.bid = max(0.0, new_pe * 0.99)
+                            strike_data.PE.ask = new_pe * 1.01 if new_pe > 0 else 0.0
+                        updated_count += 2
+
                     skeleton.atm_strike = new_atm
                     skeleton.last_updated = datetime.now()
 
                 self.atm_registry.atm_strikes[symbol] = ltp
                 self.atm_registry.last_updated[symbol] = datetime.now()
-                return 0
+                return updated_count
 
-            for expiry in self.option_chain_cache[symbol]:
+            for expiry in list(self.option_chain_cache[symbol].keys()):
                 skeleton = self.option_chain_cache[symbol][expiry]
                 new_atm = round(ltp / strike_interval) * strike_interval
 
@@ -1333,12 +1385,14 @@ class AuthoritativeOptionChainService:
                         ce_data = OptionData(
                             token=f"CE_{symbol}_{strike_price}_{expiry}",
                             ltp=0.0,
+                            source="SYNTHETIC",
                             bid=0.0,
                             ask=0.0,
                         )
                         pe_data = OptionData(
                             token=f"PE_{symbol}_{strike_price}_{expiry}",
                             ltp=0.0,
+                            source="SYNTHETIC",
                             bid=0.0,
                             ask=0.0,
                         )
@@ -1407,6 +1461,7 @@ class AuthoritativeOptionChainService:
                 return 0
 
             target.ltp = ltp
+            target.source = "WEBSOCKET"
             target.bid = bid if bid is not None else ltp * 0.99
             target.ask = ask if ask is not None else ltp * 1.01
             if depth:
@@ -1635,7 +1690,10 @@ class AuthoritativeOptionChainService:
 
             leg = strikes[strike].CE if option_type == "CE" else strikes[strike].PE
             if leg:
+                if str(getattr(leg, "source", "UNKNOWN") or "UNKNOWN").upper() == "WEBSOCKET":
+                    continue
                 leg.ltp = float(max(price, 0.0))
+                leg.source = "SYNTHETIC"
                 if leg.bid in (None, 0):
                     leg.bid = leg.ltp
                 if leg.ask in (None, 0):
@@ -1722,10 +1780,24 @@ class AuthoritativeOptionChainService:
         Called during backend startup and periodically for updates
         """
         try:
-            logger.info("📊 Populating option chain with live data from DhanHQ API...")
-            
-            # Get permitted underlyings from index_options configuration
             permitted_underlyings = list(self.index_options.keys())
+            missing_underlyings = [
+                symbol for symbol in permitted_underlyings
+                if not (self.option_chain_cache.get(symbol) and len(self.option_chain_cache.get(symbol) or {}) > 0)
+            ]
+
+            if self._snapshot_bootstrap_attempted and self.option_chain_cache and not missing_underlyings:
+                logger.info("📌 Skipping Dhan REST snapshot fetch (bootstrap already attempted and cache has all configured underlyings). Using WebSocket-driven cache updates only.")
+                return
+
+            if self._snapshot_bootstrap_attempted and missing_underlyings:
+                logger.info("♻️ Snapshot bootstrap retry for missing underlyings: %s", ", ".join(missing_underlyings))
+
+            if self._snapshot_bootstrap_attempted and not self.option_chain_cache:
+                logger.warning("⚠️ Previous Dhan REST snapshot attempt left cache empty; retrying bootstrap fetch.")
+
+            self._snapshot_bootstrap_attempted = True
+            logger.info("📊 Populating option chain with live data from DhanHQ API...")
 
             from app.market.live_prices import get_prices
             live_prices = get_prices()
@@ -1837,9 +1909,11 @@ class AuthoritativeOptionChainService:
                                     # Prefer Dhan CSV mapper strikes (authoritative tokens)
                                     mapper_values = list(self.security_mapper.csv_data.values())
                                     for data in mapper_values:
-                                        if data.get("symbol") != underlying:
+                                        if str(data.get("symbol") or "").strip().upper() != underlying:
                                             continue
-                                        if data.get("expiry") != expiry:
+                                        mapper_expiry = self._parse_expiry_date(str(data.get("expiry") or ""))
+                                        target_expiry = self._parse_expiry_date(expiry)
+                                        if not mapper_expiry or not target_expiry or mapper_expiry != target_expiry:
                                             continue
                                         try:
                                             strike_val = float(data.get("strike"))
@@ -1851,10 +1925,13 @@ class AuthoritativeOptionChainService:
                                             continue
                                         registry_strike_tokens.setdefault(strike_val, {})[opt_type] = str(sec_id)
 
-                                    # Fallback to instrument master if mapper is empty
+                                    # If mapper has no strike-token pairs, still proceed with synthetic token ids.
                                     if not registry_strike_tokens:
-                                        continue
-                                    registry_strike_tokens.setdefault(strike_val, {})[opt_type] = str(sec_id)
+                                        logger.warning(
+                                            "    ⚠️ Mapper provided no strike tokens for %s %s; using synthetic strike tokens",
+                                            underlying,
+                                            expiry,
+                                        )
 
                                     # Build display strikes from registry strikes around ATM
                                     available_strikes = sorted(registry_strike_tokens.keys())
@@ -1877,7 +1954,10 @@ class AuthoritativeOptionChainService:
                                 if use_mapper_only:
                                     token_pair = registry_strike_tokens.get(strike_price) or registry_strike_tokens.get(float(strike_price))
                                     if not token_pair:
-                                        continue
+                                        token_pair = {
+                                            "CE": f"CE_{underlying}_{strike_price}_{expiry}",
+                                            "PE": f"PE_{underlying}_{strike_price}_{expiry}",
+                                        }
                                     ce_token = token_pair.get("CE")
                                     pe_token = token_pair.get("PE")
                                     if not ce_token or not pe_token:
@@ -2014,6 +2094,7 @@ class AuthoritativeOptionChainService:
                                 ce_data = OptionData(
                                     token=ce_token,
                                     ltp=ce_ltp,
+                                    source="REST_SNAPSHOT" if not use_mapper_only else "SYNTHETIC",
                                     bid=ce_bid,
                                     ask=ce_ask,
                                     oi=ce_oi,
@@ -2030,6 +2111,7 @@ class AuthoritativeOptionChainService:
                                 pe_data = OptionData(
                                     token=pe_token,
                                     ltp=pe_ltp,
+                                    source="REST_SNAPSHOT" if not use_mapper_only else "SYNTHETIC",
                                     bid=pe_bid,
                                     ask=pe_ask,
                                     oi=pe_oi,
@@ -2100,9 +2182,13 @@ class AuthoritativeOptionChainService:
                     continue
             
             total_expiries = sum(len(expiries) for expiries in self.option_chain_cache.values())
+            self._snapshot_bootstrap_completed = total_expiries > 0
             logger.info(f"✅ Option chain populated with {total_expiries} expiries from DhanHQ API")
             
         except Exception as e:
+            if not self.option_chain_cache:
+                self._snapshot_bootstrap_attempted = False
+                self._snapshot_bootstrap_completed = False
             logger.error(f"❌ Failed to populate option chain with live data: {e}")
             raise
 
@@ -2149,6 +2235,7 @@ class AuthoritativeOptionChainService:
                         ce_data = OptionData(
                             token=f"CE_{underlying}_{strike}_{expiry}",
                             ltp=ce_ltp,
+                            source="CLOSING",
                             bid=0.0,
                             ask=0.0,
                             iv=prices.get("IV", 0.0),
@@ -2163,6 +2250,7 @@ class AuthoritativeOptionChainService:
                         pe_data = OptionData(
                             token=f"PE_{underlying}_{strike}_{expiry}",
                             ltp=pe_ltp,
+                            source="CLOSING",
                             bid=0.0,
                             ask=0.0,
                             iv=prices.get("IV", 0.0),

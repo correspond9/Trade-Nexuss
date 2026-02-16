@@ -170,6 +170,57 @@ class ExecutionEngine:
         prefix = (exchange_segment or "").split("_")[0].upper()
         return prefix or "NSE"
 
+    def _normalize_underlying(self, text: str) -> str:
+        value = (text or "").strip().upper()
+        if value in {"NIFTY 50", "NIFTY50"}:
+            return "NIFTY"
+        if value in {"BANK NIFTY", "NIFTY BANK", "BANKNIFTY"}:
+            return "BANKNIFTY"
+        if value in {"BSE SENSEX", "S&P BSE SENSEX", "SENSEX 50"}:
+            return "SENSEX"
+        return value
+
+    def _extract_underlying_from_symbol(self, symbol: str) -> str:
+        parts = (symbol or "").strip().upper().split()
+        if len(parts) >= 3 and parts[-1] in {"CE", "PE"}:
+            return self._normalize_underlying(" ".join(parts[:-2]))
+        if parts:
+            return self._normalize_underlying(parts[0])
+        return ""
+
+    def _resolve_lot_step(self, order: models.MockOrder) -> int:
+        try:
+            segment = (order.exchange_segment or "").upper()
+            symbol_text = (order.symbol or "").upper()
+            is_derivative = (
+                "FNO" in segment or "NFO" in segment or "MCX" in segment or symbol_text.endswith(" CE") or symbol_text.endswith(" PE")
+            )
+            if not is_derivative:
+                return 1
+
+            underlying = self._extract_underlying_from_symbol(symbol_text)
+            if not underlying:
+                return 1
+
+            try:
+                from app.services.dhan_security_id_mapper import dhan_security_mapper
+                lot = dhan_security_mapper.get_lot_size(underlying)
+                if lot and int(lot) > 1:
+                    return int(lot)
+            except Exception:
+                pass
+
+            try:
+                from app.services.span_parameters_service import span_parameters_service
+                lot = span_parameters_service.get_lot_size(underlying, fallback=1)
+                if lot and int(lot) > 1:
+                    return int(lot)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return 1
+
     def _log_event(self, db: Session, order: models.MockOrder, event_type: str, decision_price: Optional[float], fill_price: Optional[float], fill_qty: Optional[int], reason: Optional[str], latency_ms: Optional[int], slippage: Optional[float]) -> None:
         event = models.ExecutionEvent(
             order_id=order.id if order else None,
@@ -186,7 +237,18 @@ class ExecutionEngine:
         db.add(event)
 
     def _apply_fill(self, db: Session, order: models.MockOrder, fill_price: float, fill_qty: int) -> None:
-        order.filled_qty += fill_qty
+        previous_filled_qty = int(order.filled_qty or 0)
+        new_filled_qty = previous_filled_qty + int(fill_qty)
+        order.filled_qty = new_filled_qty
+
+        existing_price = float(order.price or 0.0)
+        if order.order_type == "MARKET" or existing_price <= 0:
+            if previous_filled_qty <= 0:
+                order.price = float(fill_price)
+            else:
+                weighted_avg = ((existing_price * previous_filled_qty) + (float(fill_price) * int(fill_qty))) / max(1, new_filled_qty)
+                order.price = float(weighted_avg)
+
         if order.filled_qty >= order.quantity:
             order.status = "EXECUTED"
         else:
@@ -315,7 +377,16 @@ class ExecutionEngine:
                 order.status = "PENDING"
                 return
 
-        reason = self.rejection_engine.validate(exchange, effective_type, order.transaction_type, order.price, order.quantity, snapshot)
+        lot_step = self._resolve_lot_step(order)
+        reason = self.rejection_engine.validate(
+            exchange,
+            effective_type,
+            order.transaction_type,
+            order.price,
+            order.quantity,
+            snapshot,
+            lot_step=lot_step,
+        )
         if reason:
             order.status = "REJECTED"
             order.remarks = reason
@@ -336,11 +407,12 @@ class ExecutionEngine:
         bid_qty = snapshot.get("bid_qty") or self.config.default_bid_qty
         ask_qty = snapshot.get("ask_qty") or self.config.default_ask_qty
         spread = (ask - bid) if ask is not None and bid is not None else 0.0
+        lot_step = self._resolve_lot_step(order)
 
         if effective_type == "MARKET":
             top_price = ask if order.transaction_type == "BUY" else bid
             top_qty = ask_qty if order.transaction_type == "BUY" else bid_qty
-            fills = self.fill_engine.compute_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread)
+            fills = self.fill_engine.compute_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread, lot_step=lot_step)
             if not fills:
                 return
             for fill in fills:
@@ -361,7 +433,7 @@ class ExecutionEngine:
                 order.status = "PENDING"
                 return
 
-            fills = self.fill_engine.compute_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread)
+            fills = self.fill_engine.compute_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread, lot_step=lot_step)
             if not fills:
                 return
             for fill in fills:
@@ -402,6 +474,7 @@ class ExecutionEngine:
                 continue
 
             spread = ask - bid
+            lot_step = self._resolve_lot_step(order)
             effective_type = order.order_type
             trigger = order.trigger_price
             if order.order_type in {"SL-M", "SL-L", "TRIGGER", "GTT"} and trigger is not None:
@@ -425,7 +498,7 @@ class ExecutionEngine:
                 else:
                     continue
 
-            fills = self.fill_engine.compute_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread)
+            fills = self.fill_engine.compute_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread, lot_step=lot_step)
             if not fills:
                 continue
             latency_ms = self.latency_model.sample_latency_ms(exchange, order.user_id)

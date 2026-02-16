@@ -88,6 +88,41 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     }
   }, []);
 
+  const fetchOptionLegLtp = useCallback(async (symbol, expiry, strike, optionType) => {
+    try {
+      if (!symbol || !expiry || strike === null || strike === undefined || !optionType) {
+        return null;
+      }
+      const payload = await apiService.get('/options/live', { underlying: symbol, expiry });
+      const strikes = payload?.data?.strikes || {};
+      const strikeKey = Number(strike).toString();
+      const altKey = Number(strike).toFixed(1);
+      const leg = (strikes[strikeKey] || strikes[altKey] || strikes[String(strike)] || {})[String(optionType).toUpperCase()];
+      const ltp = Number(leg?.ltp);
+      if (Number.isFinite(ltp) && ltp > 0) {
+        return ltp;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const getUnderlyingLtpWithRetry = useCallback(async (symbol, attempts = 6, delayMs = 400) => {
+    for (let index = 0; index < attempts; index++) {
+      const ltp = await getUnderlyingLtp(symbol);
+      if (ltp !== null && ltp !== undefined && Number.isFinite(Number(ltp)) && Number(ltp) > 0) {
+        return Number(ltp);
+      }
+      if (index < attempts - 1) {
+        await sleep(delayMs);
+      }
+    }
+    return null;
+  }, [getUnderlyingLtp]);
+
   // Add instrument to current watchlist (subscribe if on-demand)
   const addToWatchlist = useCallback(async (instrument) => {
     const currentList = watchlists[selectedWatchlist] || [];
@@ -135,52 +170,74 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
         setTimeout(() => setError(''), 2000);
         return;
       }
-      // If already subscribed (Tier B), just add locally
-      if (instrument.isSubscribed) {
-        setWatchlists(prev => ({
-          ...prev,
-          [selectedWatchlist]: [...currentList, instrument]
-        }));
-        setShowSuggestions(false);
+      const normalizedType = (instrument.instrumentType || '').toUpperCase();
+      let payload;
+      if (normalizedType === 'EQUITY') {
+        payload = {
+          user_id: userId,
+          symbol: instrument.symbol,
+          expiry: instrument.expiry || null,
+          instrument_type: 'EQUITY',
+          underlying_ltp: null
+        };
       } else {
         if (!instrument.expiry) {
           throw new Error('No expiry available for this instrument');
         }
         const instrumentType = isIndexSymbol(instrument.symbol) ? 'INDEX_OPTION' : 'STOCK_OPTION';
         const underlyingLtp = await getUnderlyingLtp(instrument.symbol);
-
-        const payload = {
+        payload = {
           user_id: userId,
           symbol: instrument.symbol,
           expiry: instrument.expiry,
           instrument_type: instrumentType,
           underlying_ltp: underlyingLtp
         };
-
-        const result = await apiService.post('/watchlist/add', payload);
-        if (!result || !result.success) {
-          throw new Error((result && result.detail) || 'Failed to add to watchlist');
-        }
-
-        let enriched = instrument;
-        if (instrument.instrumentType === 'FUT' && instrument.expiry) {
-          const fut = await fetchFutureQuote(instrument.symbol, instrument.expiry, instrument.exchange || 'NSE');
-          if (fut) {
-            enriched = {
-              ...instrument,
-              ltp: fut.ltp || 0,
-              change: fut.change || 0,
-              changePercent: fut.changePercent || 0,
-              lotSize: fut.lot_size || instrument.lotSize || 1
-            };
-          }
-        }
-        setWatchlists(prev => ({
-          ...prev,
-          [selectedWatchlist]: [...currentList, enriched]
-        }));
-        setShowSuggestions(false);
       }
+
+      const result = await apiService.post('/watchlist/add', payload);
+      if (!result || (!result.success && result.error !== 'DUPLICATE')) {
+        throw new Error((result && (result.detail || result.message)) || 'Failed to add to watchlist');
+      }
+
+      let enriched = instrument;
+      if (instrument.instrumentType === 'FUT' && instrument.expiry) {
+        const fut = await fetchFutureQuote(instrument.symbol, instrument.expiry, instrument.exchange || 'NSE');
+        if (fut) {
+          enriched = {
+            ...instrument,
+            ltp: fut.ltp || 0,
+            change: fut.change || 0,
+            changePercent: fut.changePercent || 0,
+            lotSize: fut.lot_size || instrument.lotSize || 1
+          };
+        }
+      } else if (instrument.instrumentType === 'CE' || instrument.instrumentType === 'PE') {
+        const optLtp = await fetchOptionLegLtp(instrument.symbol, instrument.expiry, instrument.strike, instrument.instrumentType);
+        if (optLtp !== null) {
+          enriched = {
+            ...instrument,
+            ltp: optLtp,
+          };
+        }
+      } else {
+        let liveLtp = Number(result?.ltp);
+        if (!Number.isFinite(liveLtp) || liveLtp <= 0) {
+          const fallback = await getUnderlyingLtpWithRetry(instrument.symbol);
+          liveLtp = Number(fallback);
+        }
+        if (Number.isFinite(liveLtp) && liveLtp > 0) {
+          enriched = {
+            ...instrument,
+            ltp: liveLtp,
+          };
+        }
+      }
+      setWatchlists(prev => ({
+        ...prev,
+        [selectedWatchlist]: [...currentList, enriched]
+      }));
+      setShowSuggestions(false);
 
       // Clear search after adding
       setSearchTerm('');
@@ -194,7 +251,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       setError(err.message || 'Failed to add instrument to watchlist');
       setTimeout(() => setError(''), 2000);
     }
-  }, [watchlists, selectedWatchlist, user, fetchFutureQuote, getUnderlyingLtp]);
+  }, [watchlists, selectedWatchlist, user, fetchFutureQuote, fetchOptionLegLtp, getUnderlyingLtp, getUnderlyingLtpWithRetry]);
 
   // Remove instrument from watchlist
   const removeFromWatchlist = useCallback(async (instrumentId, exchange) => {
@@ -336,7 +393,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
           primaryDisplay,
           subtext,
           tier: 'TIER_B',
-          isSubscribed: true,
+          isSubscribed: sub.is_subscribed !== false,
         };
       });
     } catch (err) {
@@ -372,7 +429,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
           primaryDisplay,
           subtext,
           tier: 'TIER_A',
-          isSubscribed: true,
+          isSubscribed: sub.is_subscribed !== false,
         };
       });
     } catch (err) {
@@ -417,8 +474,64 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     }
   }, []);
 
+  const fetchEquitySuggestions = useCallback(async (searchText) => {
+    try {
+      const endpoint = `/instruments/search?q=${encodeURIComponent(searchText)}&limit=20`;
+      const data = await apiService.get(endpoint).catch(() => null);
+      if (!data) return [];
+      return (data.results || [])
+      .filter((row) => Boolean(row?.is_equity || row?.is_etf))
+      .map((row) => {
+        const instrument = {
+          symbol: row.symbol,
+          instrumentType: 'EQUITY',
+          expiry: null,
+          strike: null,
+        };
+        const { primaryDisplay, subtext } = formatInstrumentDisplay(instrument);
+        return {
+          id: `EQUITY_${row.symbol}`,
+          symbol: row.symbol,
+          exchange: 'NSE',
+          instrumentType: 'EQUITY',
+          expiry: null,
+          strike: null,
+          lotSize: 1,
+          ltp: 0,
+          change: 0,
+          changePercent: 0,
+          primaryDisplay,
+          subtext,
+          tier: row.f_o_eligible ? 'TIER_A' : 'TIER_B',
+          isSubscribed: false,
+        };
+      });
+    } catch (err) {
+      console.warn('[WATCHLIST] Equity suggestion fetch failed:', err);
+      return [];
+    }
+  }, []);
+
   const handleRefresh = useCallback(async () => {
     const currentList = watchlists[selectedWatchlist] || [];
+    const optionChainCache = {};
+
+    const getOptionChain = async (symbol, expiry) => {
+      const cacheKey = `${symbol}_${expiry}`;
+      if (optionChainCache[cacheKey]) {
+        return optionChainCache[cacheKey];
+      }
+      try {
+        const payload = await apiService.get('/options/live', { underlying: symbol, expiry });
+        const strikes = payload?.data?.strikes || {};
+        optionChainCache[cacheKey] = strikes;
+        return strikes;
+      } catch {
+        optionChainCache[cacheKey] = {};
+        return {};
+      }
+    };
+
     const updatedList = await Promise.all(currentList.map(async (item) => {
       if (item.instrumentType === 'FUT' && item.expiry) {
         const fut = await fetchFutureQuote(item.symbol, item.expiry, item.exchange || 'NSE');
@@ -429,6 +542,18 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
             change: fut.change || item.change || 0,
             changePercent: fut.changePercent || item.changePercent || 0,
             lotSize: fut.lot_size || item.lotSize || 1
+          };
+        }
+      } else if ((item.instrumentType === 'CE' || item.instrumentType === 'PE') && item.expiry && item.strike !== null && item.strike !== undefined) {
+        const strikes = await getOptionChain(item.symbol, item.expiry);
+        const strikeKey = Number(item.strike).toString();
+        const altKey = Number(item.strike).toFixed(1);
+        const leg = (strikes[strikeKey] || strikes[altKey] || strikes[String(item.strike)] || {})[item.instrumentType];
+        const ltp = Number(leg?.ltp);
+        if (Number.isFinite(ltp) && ltp > 0) {
+          return {
+            ...item,
+            ltp,
           };
         }
       } else {
@@ -456,11 +581,12 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
     setLoading(true);
     try {
-      const [tierB, tierASubs, futures, optionStrikes] = await Promise.all([
+      const [tierB, tierASubs, futures, optionStrikes, equities] = await Promise.all([
         fetchTierBSuggestions(searchText),
         fetchTierASubscriptionSuggestions(searchText),
         fetchFuturesSuggestions(searchText),
-        fetchOptionStrikeSuggestions(searchText)
+        fetchOptionStrikeSuggestions(searchText),
+        fetchEquitySuggestions(searchText)
       ]);
 
       const isOptionIntent = /\b(CE|PE)\b/i.test(searchText) || /\d/.test(searchText);
@@ -474,12 +600,14 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
           ...onlyOptions(tierASubs),
           ...onlyOptions(tierB),
           ...onlyFutures(futures),
+          ...equities,
           ...other(tierASubs),
           ...other(tierB),
         ].slice(0, 20);
       } else {
         merged = [
           ...onlyFutures(futures),
+          ...equities,
           ...onlyOptions(optionStrikes),
           ...tierASubs,
           ...tierB,
@@ -493,7 +621,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     } finally {
       setLoading(false);
     }
-  }, [fetchTierBSuggestions, fetchTierASubscriptionSuggestions, fetchFuturesSuggestions, fetchOptionStrikeSuggestions]);
+  }, [fetchTierBSuggestions, fetchTierASubscriptionSuggestions, fetchFuturesSuggestions, fetchOptionStrikeSuggestions, fetchEquitySuggestions]);
 
   // Do not auto-load any default watchlist data on mount
   useEffect(() => {
@@ -502,7 +630,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
         if (!user?.id) return;
         const data = await apiService.get(`/watchlist/${user.id}`).catch(() => null);
         if (!data) return;
-        const entries = data.watchlist || [];
+        const entries = data.watchlist || data.data || [];
         const mapped = await Promise.all(entries.map(async (e) => {
           const instrument = {
             id: `${e.symbol}_${e.expiry_date}`,
@@ -517,7 +645,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
             changePercent: 0,
             ...formatInstrumentDisplay({
               symbol: e.symbol,
-              instrumentType: e.instrument_type in ['CE','PE'] ? e.instrument_type : 'CE',
+              instrumentType: ['CE', 'PE'].includes(e.instrument_type) ? e.instrument_type : 'CE',
               expiry: e.expiry_date,
               strike: null
             })
@@ -530,6 +658,16 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
               instrument.changePercent = fut.changePercent || 0;
               instrument.lotSize = fut.lot_size || 1;
             }
+          } else {
+            const ltp = Number(e?.ltp);
+            if (Number.isFinite(ltp) && ltp > 0) {
+              instrument.ltp = ltp;
+            } else {
+              const liveLtp = await getUnderlyingLtp(instrument.symbol);
+              if (liveLtp !== null && liveLtp !== undefined) {
+                instrument.ltp = Number(liveLtp) || 0;
+              }
+            }
           }
           return instrument;
         }));
@@ -539,7 +677,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       }
     };
     load();
-  }, [user, fetchFutureQuote]);
+  }, [user, fetchFutureQuote, getUnderlyingLtp]);
 
   // Handle search with debouncing
   useEffect(() => {
@@ -554,6 +692,19 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
     return () => clearTimeout(timeoutId);
   }, [searchTerm, searchAllExchanges]);
+
+  useEffect(() => {
+    const currentList = watchlists[selectedWatchlist] || [];
+    if (!currentList.length) {
+      return undefined;
+    }
+
+    const intervalId = setInterval(() => {
+      handleRefresh();
+    }, 1500);
+
+    return () => clearInterval(intervalId);
+  }, [watchlists, selectedWatchlist, handleRefresh]);
 
   useEffect(() => {
     const handler = (e) => {

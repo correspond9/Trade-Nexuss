@@ -18,10 +18,23 @@ class FillEngine:
     def __init__(self, slippage_model: SlippageModel) -> None:
         self.slippage_model = slippage_model
 
-    def compute_fills(self, exchange: str, side: str, order_qty: int, top_price: float, top_qty: int, spread: float) -> List[FillResult]:
+    def compute_fills(
+        self,
+        exchange: str,
+        side: str,
+        order_qty: int,
+        top_price: float,
+        top_qty: int,
+        spread: float,
+        lot_step: int = 1,
+    ) -> List[FillResult]:
         if order_qty <= 0 or top_qty <= 0:
             return []
-        fill_qty = min(order_qty, top_qty)
+        step = max(1, int(lot_step or 1))
+        raw_fill_qty = min(order_qty, top_qty)
+        fill_qty = (raw_fill_qty // step) * step
+        if fill_qty <= 0:
+            return []
         slippage = self.slippage_model.compute_slippage(exchange, order_qty, top_qty, spread, top_price)
         price = top_price + slippage if side == "BUY" else top_price - slippage
         return [FillResult(fill_price=price, fill_quantity=fill_qty, slippage=slippage)]

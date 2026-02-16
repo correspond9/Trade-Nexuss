@@ -11,6 +11,8 @@ from app.storage.db import SessionLocal
 from app.storage.models import Subscription, SubscriptionLog
 from app.storage.migrations import init_db
 from app.market.instrument_master.registry import REGISTRY
+from app.market.instrument_master.tier_b_etf_symbols import get_tier_b_etf_symbols
+from app.market.instrument_master.tier_a_equity_symbols import get_tier_a_equity_symbols
 from app.market_orchestrator import get_orchestrator
 from app.market.security_ids import (
     canonical_symbol,
@@ -146,6 +148,33 @@ def _resolve_security_metadata(
             "symbol": canonical,
         }
 
+    # Equity fallback: by_symbol index can miss some NSE cash rows (e.g., TCS).
+    # For non-option subscriptions, explicitly resolve from NSE equity registry.
+    if not opt_type:
+        try:
+            for row in REGISTRY.get_equity_stocks_nse(limit=12000):
+                row_symbol = (row.get("UNDERLYING_SYMBOL") or row.get("SYMBOL") or row.get("SYMBOL_NAME") or "").strip().upper()
+                if row_symbol != canonical:
+                    continue
+
+                inst_type = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
+                if inst_type not in {"ES", "ETF"}:
+                    continue
+
+                security_id = row.get("SECURITY_ID") or row.get("SecurityId")
+                if not security_id:
+                    continue
+
+                exchange = _determine_exchange(row.get("EXCH_ID"), canonical)
+                return {
+                    "security_id": str(security_id).strip(),
+                    "exchange": exchange,
+                    "segment": row.get("SEGMENT") or "NSE_EQ",
+                    "symbol": canonical,
+                }
+        except Exception:
+            pass
+
     # Fallback: try DhanHQ security ID mapper for options
     if opt_type and normalized_expiry and strike_val is not None:
         try:
@@ -239,16 +268,15 @@ class SubscriptionManager:
         with self.lock:
             try:
                 from app.market.security_ids import mcx_watch_symbols
+                if not REGISTRY.loaded:
+                    REGISTRY.load()
                 allowed_indices = {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}
-                equities = set()
+                allowed_equities = set()
                 try:
-                    for r in REGISTRY.get_equity_stocks_nse(limit=2000):
-                        sym = (r.get("UNDERLYING_SYMBOL") or r.get("SYMBOL") or "").strip().upper()
-                        if sym:
-                            equities.add(sym)
+                    allowed_equities = get_tier_a_equity_symbols()
                 except Exception:
-                    pass
-                allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | set(mcx_watch_symbols().keys()) | equities
+                    allowed_equities = set()
+                allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | set(mcx_watch_symbols().keys()) | allowed_equities
                 if canonical_symbol(symbol) not in allowed_symbols:
                     return (False, "NOT_ALLOWED", None)
             except Exception:
@@ -318,6 +346,13 @@ class SubscriptionManager:
             
             # Log to DB
             self._log_subscription("SUBSCRIBE", token, f"Added to {tier}")
+
+            # Push dynamic watchlist changes to live feed immediately (don't wait periodic sync).
+            try:
+                from app.dhan.live_feed import sync_subscriptions_with_watchlist
+                sync_subscriptions_with_watchlist()
+            except Exception:
+                pass
             
             return (True, f"Subscribed to {tier} on WS-{ws_id}", ws_id)
     
@@ -349,6 +384,13 @@ class SubscriptionManager:
             
             # Log to DB
             self._log_subscription("UNSUBSCRIBE", token, reason)
+
+            # Push dynamic watchlist changes to live feed immediately.
+            try:
+                from app.dhan.live_feed import sync_subscriptions_with_watchlist
+                sync_subscriptions_with_watchlist()
+            except Exception:
+                pass
             
             return (True, f"Unsubscribed: {token}")
     

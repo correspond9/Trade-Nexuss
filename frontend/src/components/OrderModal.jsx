@@ -428,6 +428,11 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
       ? Number(limitPrice || orderData?.ltp || 0)
       : 0;
 
+    if (priceType === 'Limit' && (!Number.isFinite(resolvedPrice) || resolvedPrice <= 0)) {
+      setMarginError('Valid limit price is required for LIMIT orders');
+      return;
+    }
+
     const marginExceeded = margin != null && availableMargin != null && margin > availableMargin;
     if (marginExceeded) {
       const warning = 'Required margin exceeds available margin. Please adjust positions or pay-in for margin call.';
@@ -445,6 +450,13 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
           return;
         }
 
+        const target = Number(targetPrice);
+        const stopLoss = Number(stopLossPrice);
+        if (!Number.isFinite(target) || target <= 0 || !Number.isFinite(stopLoss) || stopLoss <= 0) {
+          setMarginError('Target and stop-loss must be valid positive prices');
+          return;
+        }
+
         const superOrderPayload = {
           symbol: orderData.symbol,
           security_id: orderData.security_id || orderData.id || null,
@@ -455,8 +467,8 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
           product_type: productType,
           price: priceType === 'Market' ? 0 : resolvedPrice,
           is_super: true,
-          target_price: parseFloat(targetPrice),
-          stop_loss_price: parseFloat(stopLossPrice),
+          target_price: target,
+          stop_loss_price: stopLoss,
           trailing_jump: parseFloat(trailingJump || 0)
         };
 
@@ -492,6 +504,11 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
               price: legPrice
             };
           });
+
+          if (priceType === 'Limit' && legs.some((leg) => !Number.isFinite(leg.price) || leg.price <= 0)) {
+            setMarginError('All basket legs require valid positive limit prices');
+            return;
+          }
 
           if (basketType === 'existing') {
             if (!selectedBasket) {
@@ -542,6 +559,10 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
             const legPrice = priceType === 'Market'
               ? 0
               : Number(leg?.ltp ?? resolvedPrice);
+            if (priceType === 'Limit' && (!Number.isFinite(legPrice) || legPrice <= 0)) {
+              setMarginError('All multi-leg orders require valid positive limit prices');
+              return;
+            }
             responses.push(await apiService.post('/trading/orders', {
               user_id: user?.id || null,
               symbol: leg.symbol,

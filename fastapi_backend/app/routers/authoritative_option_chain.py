@@ -32,6 +32,14 @@ async def get_option_chain_live(
     """
     try:
         logger.info(f"📊 Serving option chain from cache: {underlying} {expiry}")
+
+        try:
+            from app.market.live_prices import get_price
+            latest_ltp = get_price(underlying)
+            if latest_ltp is not None and float(latest_ltp) > 0:
+                authoritative_option_chain_service.update_option_price_from_websocket(underlying, float(latest_ltp))
+        except Exception:
+            pass
         
         # Get from central cache
         option_chain = authoritative_option_chain_service.get_option_chain_from_cache(underlying, expiry)

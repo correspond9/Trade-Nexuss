@@ -13,6 +13,19 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+
+MCX_LOT_SIZE_OVERRIDES = {
+    "CRUDEOIL": 100,
+    "NATURALGAS": 1250,
+    "COPPER": 2500,
+    "GOLD": 1,
+    "GOLDM": 100,
+    "SILVER": 30,
+    "SILVERM": 5,
+    "SILVERMIC": 1,
+    "ALUMINIUM": 5000,
+}
+
 class DhanSecurityIdMapper:
     """Maps option tokens to real DhanHQ security IDs"""
     
@@ -167,7 +180,10 @@ class DhanSecurityIdMapper:
         """Get lot size for an underlying symbol (stocks, indices, MCX) from CSV"""
         if not underlying:
             return None
-        return self.lot_size_by_underlying.get(underlying.strip().upper())
+        key = underlying.strip().upper()
+        if key in MCX_LOT_SIZE_OVERRIDES:
+            return MCX_LOT_SIZE_OVERRIDES[key]
+        return self.lot_size_by_underlying.get(key)
     
     def get_statistics(self) -> Dict:
         """Get loading statistics"""

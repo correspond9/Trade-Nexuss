@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import asyncio
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, Request, Header, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,10 @@ from app.rms.mcx_margin_calculator import (
 )
 from app.services.dhan_margin_service import dhan_margin_service
 from app.market.watchlist_manager import get_watchlist_manager
+from app.market.subscription_manager import get_subscription_manager
+from app.market.instrument_master.registry import REGISTRY
+from app.market.instrument_master.tier_b_etf_symbols import get_tier_b_etf_symbols
+from app.market.instrument_master.tier_a_equity_symbols import get_tier_a_equity_symbols
 from app.ems.market_config import market_config
 from app.market.market_state import state as market_state
 from app.oms.order_ids import generate as generate_order_id
@@ -505,6 +509,21 @@ class OrderRequest(BaseModel):
     is_super: Optional[bool] = False
 
 
+def _validate_order_request(req: OrderRequest):
+    order_type = (req.order_type or "").upper()
+    price = req.price
+
+    if order_type in {"LIMIT", "SL-L", "GTT"}:
+        if price is None or not isinstance(price, (int, float)) or price <= 0:
+            raise HTTPException(status_code=400, detail="Valid positive price is required for LIMIT-type orders")
+
+    if bool(req.is_super):
+        if req.target_price is None or req.target_price <= 0:
+            raise HTTPException(status_code=400, detail="Valid positive target_price is required for super orders")
+        if req.stop_loss_price is None or req.stop_loss_price <= 0:
+            raise HTTPException(status_code=400, detail="Valid positive stop_loss_price is required for super orders")
+
+
 class BasketLegRequest(BaseModel):
     symbol: str
     security_id: Optional[str] = None
@@ -538,6 +557,8 @@ class UserRequest(BaseModel):
     margin_multiplier: Optional[float] = 5.0
     brokerage_plan_id: Optional[int] = None
 def _place_order_core(req: OrderRequest, db: Session, user: models.UserAccount):
+    _validate_order_request(req)
+
     def _reject_order(reason: str):
         order = models.MockOrder(
             order_ref=generate_order_id(),
@@ -732,6 +753,210 @@ def list_orders(user_id: Optional[int] = None, db: Session = Depends(get_db)):
 
 
 # ---------- Watchlist Endpoints (Tier A) ----------
+@router.get("/subscriptions/search")
+def api_subscriptions_search(
+    q: str = Query("", min_length=0),
+    tier: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=200),
+):
+    """Search active subscriptions (compat endpoint used by watchlist UI)."""
+    try:
+        sub_mgr = get_subscription_manager()
+        active = sub_mgr.list_active_subscriptions(tier=tier)
+        text = (q or "").strip().upper()
+        terms = [t for t in text.split() if t]
+
+        def _match(row: dict) -> bool:
+            if not terms:
+                return True
+            symbol = str(row.get("symbol") or "").upper()
+            expiry = str(row.get("expiry") or "").upper()
+            strike = str(row.get("strike") or "").upper()
+            option_type = str(row.get("option_type") or "").upper()
+            token = str(row.get("token") or "").upper()
+            haystack = f"{symbol} {expiry} {strike} {option_type} {token}"
+            return all(term in haystack for term in terms)
+
+        results = []
+        for row in active:
+            if not _match(row):
+                continue
+            results.append(
+                {
+                    "token": row.get("token"),
+                    "symbol": row.get("symbol"),
+                    "expiry": row.get("expiry"),
+                    "strike": row.get("strike"),
+                    "option_type": row.get("option_type"),
+                    "exchange": row.get("exchange") or "NSE",
+                    "lot_size": 1,
+                    "tier": row.get("tier") or "TIER_A",
+                    "is_subscribed": True,
+                }
+            )
+            if len(results) >= limit:
+                break
+
+        return {"query": q, "tier": tier, "count": len(results), "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search subscriptions: {str(e)}")
+
+
+@router.get("/instruments/futures/search")
+def api_instruments_futures_search(
+    q: str = Query("", min_length=0),
+    limit: int = Query(20, ge=1, le=200),
+):
+    """Search futures contracts from instrument master (subscribed or not)."""
+    try:
+        if not REGISTRY.loaded:
+            REGISTRY.load()
+
+        sub_mgr = get_subscription_manager()
+        active = sub_mgr.list_active_subscriptions()
+        subscribed_fut = {
+            (
+                str(s.get("symbol") or "").upper(),
+                str(s.get("expiry") or "").upper(),
+                str(s.get("option_type") or "").upper(),
+            )
+            for s in active
+            if not s.get("option_type")
+        }
+
+        text = (q or "").strip().upper()
+        results = []
+        seen = set()
+        for row in REGISTRY.instruments:
+            inst_type = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
+            option_type = (row.get("OPTION_TYPE") or "").strip().upper()
+            if inst_type not in ("FUTSTK", "FUTIDX", "FUTCOM", "FUTCUR") and option_type not in ("", "XX"):
+                continue
+
+            symbol = (row.get("UNDERLYING_SYMBOL") or row.get("SYMBOL_NAME") or row.get("SYMBOL") or "").strip().upper()
+            expiry = (row.get("SM_EXPIRY_DATE") or "").strip()
+            if not symbol or not expiry:
+                continue
+
+            display = f"{symbol} {expiry} FUT"
+            if text and text not in display and text not in symbol:
+                continue
+
+            token = f"FUT_{symbol}_{expiry}"
+            if token in seen:
+                continue
+            seen.add(token)
+
+            exch = (row.get("EXCH_ID") or "NSE").strip().upper()
+            exch_name = "MCX" if exch == "MCX" else ("BSE" if exch == "BSE" else "NSE")
+            tier_hint = "TIER_B" if symbol in {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "COPPER", "ZINC", "ALUMINIUM"} else "TIER_A"
+            is_sub = (symbol, expiry.upper(), "") in subscribed_fut or (symbol, expiry.upper(), "XX") in subscribed_fut
+
+            lot = row.get("LOT_SIZE") or row.get("MARKET_LOT") or 1
+            try:
+                lot = int(float(lot))
+            except Exception:
+                lot = 1
+
+            results.append(
+                {
+                    "token": token,
+                    "symbol": symbol,
+                    "expiry": expiry,
+                    "strike": None,
+                    "option_type": "FUT",
+                    "exchange": exch_name,
+                    "lot_size": lot,
+                    "tier": tier_hint,
+                    "is_subscribed": bool(is_sub),
+                }
+            )
+            if len(results) >= limit:
+                break
+
+        return {"query": q, "count": len(results), "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search futures instruments: {str(e)}")
+
+
+@router.get("/instruments/search")
+def api_instruments_search(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Search instrument universe across Tier A and Tier B (subscribed or not)."""
+    try:
+        if not REGISTRY.loaded:
+            REGISTRY.load()
+
+        text = (q or "").strip().upper()
+        stats = {}
+
+        def _match_score(symbol_value: str) -> int:
+            sym = (symbol_value or "").upper()
+            if not text or not sym:
+                return 0
+            if sym == text:
+                return 3
+            if sym.startswith(text):
+                return 2
+            if text in sym:
+                return 1
+            return 0
+
+        def _bump(symbol_value: str, *, is_equity: bool = False, is_etf: bool = False) -> None:
+            sym = (symbol_value or "").strip().upper()
+            if not sym:
+                return
+            score = _match_score(sym)
+            if score <= 0:
+                return
+            item = stats.get(sym)
+            if not item:
+                item = {"count": 0, "score": 0, "is_equity": False, "is_etf": False}
+                stats[sym] = item
+            item["count"] += 1
+            item["score"] = max(int(item["score"]), score)
+            item["is_equity"] = bool(item["is_equity"] or is_equity)
+            item["is_etf"] = bool(item["is_etf"] or is_etf)
+
+        # Derivatives universe from instrument master
+        for row in REGISTRY.instruments:
+            inst_type = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
+            if inst_type not in {"OPTSTK", "OPTIDX", "FUTSTK", "FUTIDX", "FUTCOM", "FUTCUR"}:
+                continue
+            symbol = (row.get("UNDERLYING_SYMBOL") or "").strip().upper()
+            if not symbol:
+                continue
+            _bump(symbol)
+
+        # Tier-A equity universe from curated EQUITY_LIST.csv
+        try:
+            for symbol in get_tier_a_equity_symbols():
+                _bump(symbol, is_equity=True, is_etf=False)
+        except Exception:
+            pass
+
+        ranked = sorted(
+            stats.items(),
+            key=lambda kv: (-int(kv[1].get("score", 0)), -int(kv[1].get("count", 0)), kv[0]),
+        )[:limit]
+        results = [
+            {
+                "symbol": sym,
+                "count": int(meta.get("count", 0)),
+                "match_score": int(meta.get("score", 0)),
+                "f_o_eligible": bool(sym in set(REGISTRY.f_o_stocks) or sym in {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"}),
+                "is_equity": bool(meta.get("is_equity", False)),
+                "is_etf": bool(meta.get("is_etf", False)),
+            }
+            for sym, meta in ranked
+        ]
+        return {"query": q, "count": len(results), "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search instruments: {str(e)}")
+
+
 @router.post("/watchlist/add")
 def api_watchlist_add(payload: dict, db: Session = Depends(get_db)):
     mgr = get_watchlist_manager()
@@ -795,6 +1020,8 @@ async def place_order(
         user = db.query(models.UserAccount).filter(models.UserAccount.id == (req.user_id or 1)).first()
     if not user:
         user = _get_or_create_admin(db)
+
+    _validate_order_request(req)
 
     def _reject_order(reason: str):
         order = models.MockOrder(

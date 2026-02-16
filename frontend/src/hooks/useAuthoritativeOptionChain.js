@@ -35,16 +35,19 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
     return `/options/live?underlying=${underlying}&expiry=${expiry}`;
   }, [underlying, expiry]);
 
+  // Clear stale data immediately when selection changes
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    setTimestamp(null);
+    setCacheStats(null);
+    setRetryCount(0);
+  }, [underlying, expiry]);
+
   // Fetch function
   const fetchChain = useCallback(async () => {
     if (!underlying || !expiry) {
       console.warn('[useAuthoritativeOptionChain] Missing underlying or expiry');
-      return null;
-    }
-
-    // Prevent infinite loops if error persists
-    if (retryCount > 3) {
-      console.warn('[useAuthoritativeOptionChain] Max retries reached, pausing auto-refresh');
       return null;
     }
 
@@ -86,7 +89,7 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       const errorMsg = err.message || 'Failed to fetch option chain';
       console.error('[useAuthoritativeOptionChain] ❌', errorMsg);
       setError(errorMsg);
-      setData(null);
+      // Keep last known good chain on transient failures
       
       // Increment retry count
       setRetryCount(prev => prev + 1);
@@ -96,11 +99,11 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
     } finally {
       setLoading(false);
     }
-  }, [underlying, expiry, apiUrl, retryCount]);
+  }, [underlying, expiry, apiUrl]);
 
   // Auto-refresh effect
   useEffect(() => {
-    if (!autoRefresh || !underlying || !expiry || retryCount > 3) {
+    if (!autoRefresh || !underlying || !expiry) {
       return;
     }
 
@@ -114,7 +117,7 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
 
     return () => clearInterval(interval);
 
-  }, [underlying, expiry, autoRefresh, refreshInterval, fetchChain, retryCount]);
+  }, [underlying, expiry, autoRefresh, refreshInterval, fetchChain]);
 
   // Manual refresh function
   const refresh = useCallback(() => {

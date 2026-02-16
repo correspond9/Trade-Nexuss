@@ -179,7 +179,12 @@ const SuperAdmin = () => {
       const data = await apiService.get('/admin/market-config');
       setMarketConfig(data?.data || null);
     } catch (e) {
-      setMcError('Failed to load market config');
+      const message = String(e?.message || '');
+      if (message.toLowerCase().includes('invalid or inactive user')) {
+        setMcError('Failed to load market config: session user mismatch. Please logout and login again.');
+      } else {
+        setMcError('Failed to load market config');
+      }
       setTimeout(() => setMcError(null), 5000);
     }
   }, []);

@@ -87,6 +87,7 @@ class CommodityFuturesService:
             "expiry": expiry,
             "token": security_id or None,
             "ltp": None,
+            "prev_close": None,
             "bid": None,
             "ask": None,
             "volume": None,
@@ -138,19 +139,25 @@ class CommodityFuturesService:
         symbol: str,
         expiry: str,
         ltp: Optional[float] = None,
+        prev_close: Optional[float] = None,
         bid: Optional[float] = None,
         ask: Optional[float] = None,
         oi: Optional[float] = None,
         volume: Optional[float] = None,
     ) -> None:
-        updates = {
-            "ltp": ltp,
-            "bid": bid,
-            "ask": ask,
-            "oi": oi,
-            "volume": volume,
-            "last_updated": datetime.utcnow().isoformat(),
-        }
+        updates = {"last_updated": datetime.utcnow().isoformat()}
+        if ltp is not None:
+            updates["ltp"] = ltp
+        if prev_close is not None:
+            updates["prev_close"] = prev_close
+        if bid is not None:
+            updates["bid"] = bid
+        if ask is not None:
+            updates["ask"] = ask
+        if oi is not None:
+            updates["oi"] = oi
+        if volume is not None:
+            updates["volume"] = volume
         update_future("MCX", symbol, expiry, updates)
 
 

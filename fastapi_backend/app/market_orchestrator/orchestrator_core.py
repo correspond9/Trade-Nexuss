@@ -104,7 +104,19 @@ class MarketDataOrchestrator:
         start_live_feed()
 
     async def start_mcx_stream(self) -> None:
+        from app.commodity_engine.commodity_futures_service import commodity_futures_service, MCX_FUTURES_SYMBOLS
         from app.commodity_engine.commodity_ws_manager import commodity_ws_manager
+
+        # Ensure token maps are populated before starting MCX websocket manager.
+        # In production cold-starts, token_map can be empty if commodity refresh has not run yet.
+        if not commodity_ws_manager.token_index:
+            for symbol in MCX_FUTURES_SYMBOLS:
+                try:
+                    await commodity_futures_service.build_for_symbol(symbol)
+                except Exception:
+                    continue
+            commodity_ws_manager.build_token_index()
+
         await commodity_ws_manager.start()
 
     async def start_streams(self) -> None:

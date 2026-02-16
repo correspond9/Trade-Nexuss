@@ -97,6 +97,12 @@ class CommodityEngine:
             ltp = commodity_ws_manager.get_ltp(str(meta["security_id"]))
             if ltp is not None:
                 return ltp
+        # Fallback to already-streaming MCX futures cache for same underlying
+        futures_for_symbol = commodity_futures_service.futures_cache.get(symbol, {})
+        for entry in futures_for_symbol.values():
+            ltp = entry.get("ltp")
+            if isinstance(ltp, (int, float)):
+                return float(ltp)
         for attempt in range(3):
             ltp = await self._fetch_ltp_rest(symbol)
             if ltp is not None:
@@ -277,6 +283,105 @@ class CommodityEngine:
             await commodity_ws_manager.start()
 
         logger.info("[MCX] Option chain refresh complete")
+
+    async def ensure_option_chain(self, symbol: str, expiry: Optional[str] = None) -> Optional[Dict]:
+        symbol_upper = (symbol or "").upper()
+        if symbol_upper not in MCX_UNDERLYINGS:
+            return None
+
+        def _has_priced_legs(chain_obj: Optional[Dict]) -> bool:
+            if not chain_obj:
+                return False
+            strikes = chain_obj.get("strikes") or {}
+            for strike_row in strikes.values():
+                ce = strike_row.get("CE") or {}
+                pe = strike_row.get("PE") or {}
+                if ce.get("ltp") is not None or pe.get("ltp") is not None:
+                    return True
+            return False
+
+        async def _seed_from_optionchain_api(target_symbol: str, target_expiry: str) -> None:
+            try:
+                from app.services.authoritative_option_chain_service import authoritative_option_chain_service
+
+                raw = await authoritative_option_chain_service._fetch_option_chain_from_api(target_symbol, target_expiry)
+                if not raw:
+                    return
+
+                for item in raw.get("strikes", []):
+                    if not isinstance(item, dict):
+                        continue
+                    strike = item.get("strike_price")
+                    try:
+                        strike_val = float(strike)
+                    except (TypeError, ValueError):
+                        continue
+
+                    ce = item.get("ce") or {}
+                    pe = item.get("pe") or {}
+
+                    ce_ltp = ce.get("ltp") if isinstance(ce, dict) else None
+                    pe_ltp = pe.get("ltp") if isinstance(pe, dict) else None
+
+                    if ce_ltp is not None:
+                        commodity_option_chain_service.update_option_tick(
+                            symbol=target_symbol,
+                            expiry=target_expiry,
+                            strike=strike_val,
+                            option_type="CE",
+                            ltp=float(ce_ltp),
+                        )
+                    if pe_ltp is not None:
+                        commodity_option_chain_service.update_option_tick(
+                            symbol=target_symbol,
+                            expiry=target_expiry,
+                            strike=strike_val,
+                            option_type="PE",
+                            ltp=float(pe_ltp),
+                        )
+            except Exception:
+                return
+
+        selected_expiry = expiry
+        if selected_expiry and commodity_option_chain_service.get_chain(symbol_upper, selected_expiry):
+            existing = commodity_option_chain_service.get_chain(symbol_upper, selected_expiry)
+            if _has_priced_legs(existing):
+                return existing
+
+        ltp = await self._get_underlying_ltp(symbol_upper)
+        if ltp is None:
+            return None
+
+        await commodity_option_chain_service.build_for_underlying(symbol_upper, ltp)
+        commodity_ws_manager.build_token_index()
+        try:
+            from app.market_orchestrator import get_orchestrator
+            await get_orchestrator().start_mcx_stream()
+        except Exception:
+            await commodity_ws_manager.start()
+
+        if selected_expiry:
+            chain = commodity_option_chain_service.get_chain(symbol_upper, selected_expiry)
+            if not _has_priced_legs(chain):
+                await self.populate_closing_snapshot_from_rest()
+                chain = commodity_option_chain_service.get_chain(symbol_upper, selected_expiry)
+            if not _has_priced_legs(chain):
+                await _seed_from_optionchain_api(symbol_upper, selected_expiry)
+                chain = commodity_option_chain_service.get_chain(symbol_upper, selected_expiry)
+            return chain
+
+        exp_map = commodity_option_chain_service.option_chain_cache.get(symbol_upper, {})
+        if not exp_map:
+            return None
+        first_expiry = sorted(exp_map.keys())[0]
+        chain = exp_map.get(first_expiry)
+        if not _has_priced_legs(chain):
+            await self.populate_closing_snapshot_from_rest()
+            chain = commodity_option_chain_service.option_chain_cache.get(symbol_upper, {}).get(first_expiry)
+        if not _has_priced_legs(chain):
+            await _seed_from_optionchain_api(symbol_upper, first_expiry)
+            chain = commodity_option_chain_service.option_chain_cache.get(symbol_upper, {}).get(first_expiry)
+        return chain
 
     async def _check_expiry_rollover(self) -> bool:
         changed = False
