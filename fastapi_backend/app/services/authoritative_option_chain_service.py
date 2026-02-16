@@ -1560,7 +1560,33 @@ class AuthoritativeOptionChainService:
         Always use rounded underlying LTP to nearest strike interval.
         Example: BANKNIFTY step=100, SENSEX step=100, NIFTY step=50.
         """
-        return round(fallback_price / strike_interval) * strike_interval
+        try:
+            if strike_interval <= 0:
+                strike_interval = 1
+
+            if fallback_price and fallback_price > 0:
+                return round(fallback_price / strike_interval) * strike_interval
+
+            strike_values: List[float] = []
+            for row in strikes or []:
+                if not isinstance(row, dict):
+                    continue
+                raw = row.get("strike_price") or row.get("strike")
+                try:
+                    strike = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if strike > 0:
+                    strike_values.append(strike)
+
+            if strike_values:
+                strike_values.sort()
+                mid = strike_values[len(strike_values) // 2]
+                return round(mid / strike_interval) * strike_interval
+
+            return 0.0
+        except Exception:
+            return 0.0
 
 
     def _find_nearest_closing_expiry(self, closing_prices: Dict[str, Any], target_expiry: str) -> Optional[str]:

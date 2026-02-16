@@ -798,17 +798,6 @@ class ApiService {
   }
 
   async get(endpoint, params = {}) {
-    // Use local mock for snapshot optionchain irrespective of useMockData flag
-    if (endpoint === '/optionchain' && params.symbol) {
-      try {
-        const mock = this.getMockData(endpoint, params);
-        if (mock && (Array.isArray(mock) ? mock.length : mock.data)) {
-          return mock;
-        }
-      } catch (error) {
-        console.warn('Mock optionchain fallback failed:', error);
-      }
-    }
     const cacheKey = `${endpoint}?${JSON.stringify(params)}`;
 
     // Skip cache for search endpoints to always get fresh data
@@ -849,11 +838,6 @@ class ApiService {
 
       return data;
     } catch (error) {
-      // Fallback to mock for optionchain snapshot if server errors
-      if (endpoint === '/optionchain' && params.symbol) {
-        const mock = this.getMockData(endpoint, params);
-        return mock;
-      }
       throw error;
     }
   }

@@ -86,17 +86,6 @@ const StraddleMatrix = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expi
   useEffect(() => {
     const loadSnapshot = async () => {
       try {
-        // Try v1-style snapshot: /optionchain
-        const res1 = await apiService.get('/optionchain', { symbol, expiry: expiry || 'current' });
-        const payload1 = res1?.data ?? res1;
-        const series1 = Array.isArray(payload1)
-          ? payload1
-          : payload1?.[symbol]?.current || payload1?.current || [];
-        if (Array.isArray(series1) && series1.length) {
-          setSnapshotStrikes(series1);
-          console.log('[STRADDLE] Loaded snapshot from /optionchain', symbol, series1.length);
-          return;
-        }
         // Try v2-style builder: /option-chain/{symbol}?expiry=...&underlying_ltp=...
         if (underlyingPrice) {
           const res2 = await apiService.get(`/option-chain/${symbol}`, {
