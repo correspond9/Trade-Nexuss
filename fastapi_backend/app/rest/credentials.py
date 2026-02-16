@@ -75,7 +75,7 @@ def get_active_credentials():
                 "client_id": row.client_id or "",
                 "client_id_prefix": (row.client_id or "")[:8],
                 "auth_mode": row.auth_mode or "DAILY_TOKEN",
-                "has_token": bool(row.auth_token),
+                "has_token": bool((row.auth_token or "").strip() or (row.daily_token or "").strip()),
                 "last_updated": row.last_updated.isoformat() if row.last_updated else None,
             }
         }
