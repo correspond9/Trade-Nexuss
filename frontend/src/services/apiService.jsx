@@ -17,8 +17,11 @@ class ApiService {
       if (typeof window !== 'undefined' && window.location) {
         const host = (window.location.hostname || '').toLowerCase();
         const isProdHost = host === 'tradingnexus.pro' || host === 'www.tradingnexus.pro' || host === 'app.tradingnexus.pro';
+        const isLocalHost = host === 'localhost' || host === '127.0.0.1';
         if (isProdHost) {
           rawBase = '/api/v2';
+        } else if (isLocalHost && (!rawBase || rawBase === '/api/v2' || rawBase === '/api' || rawBase === '/api/v1')) {
+          rawBase = 'http://127.0.0.1:8000/api/v2';
         }
       }
     } catch (_e) {
