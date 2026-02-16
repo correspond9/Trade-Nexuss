@@ -25,7 +25,31 @@ const LiveQuotes = () => {
   );
   const [lastUpdate, setLastUpdate] = useState(null);
   const [dataFlowStatus, setDataFlowStatus] = useState('checking');
+  const [marketDataSource, setMarketDataSource] = useState('unknown');
   const [expiryMap, setExpiryMap] = useState({});
+
+  const detectPayloadSource = (payload) => {
+    const explicitSource = String(payload?.source || payload?.data?.source || '').toLowerCase();
+    if (explicitSource.includes('snapshot')) return 'snapshot';
+    if (explicitSource.includes('live') || explicitSource.includes('cache')) return 'live_cache';
+
+    const strikeMap = payload?.data?.strikes || payload?.strikes || {};
+    let hasSnapshot = false;
+    let hasLive = false;
+
+    Object.values(strikeMap).forEach((strike) => {
+      const ceSource = String(strike?.CE?.source || strike?.ce?.source || '').toLowerCase();
+      const peSource = String(strike?.PE?.source || strike?.pe?.source || '').toLowerCase();
+      const sourceCombined = `${ceSource}|${peSource}`;
+      if (sourceCombined.includes('snapshot')) hasSnapshot = true;
+      if (sourceCombined.includes('live') || sourceCombined.includes('cache')) hasLive = true;
+    });
+
+    if (hasSnapshot && hasLive) return 'mixed';
+    if (hasSnapshot) return 'snapshot';
+    if (hasLive) return 'live_cache';
+    return 'unknown';
+  };
 
   useEffect(() => {
     const loadExpiries = async () => {
@@ -62,11 +86,12 @@ const LiveQuotes = () => {
           CORE_INSTRUMENTS.map(async ({ key }) => {
             const expiry = expiryMap[key];
             if (!expiry) {
-              return [key, null];
+              return [key, null, 'unknown'];
             }
             const payload = await apiService.get('/options/live', { underlying: key, expiry });
             const price = payload?.underlying_ltp || payload?.data?.underlying_ltp;
-            return [key, typeof price === 'number' ? price : null];
+            const source = detectPayloadSource(payload);
+            return [key, typeof price === 'number' ? price : null, source];
           })
         );
 
@@ -81,6 +106,16 @@ const LiveQuotes = () => {
           });
           return updated;
         });
+
+        const sourceSet = new Set(entries.map(([, , source]) => source).filter(Boolean));
+        if (sourceSet.size === 0) {
+          setMarketDataSource('unknown');
+        } else if (sourceSet.size === 1) {
+          setMarketDataSource([...sourceSet][0]);
+        } else {
+          const onlyUnknown = [...sourceSet].every((value) => value === 'unknown');
+          setMarketDataSource(onlyUnknown ? 'unknown' : 'mixed');
+        }
 
         const activeCount = entries.filter(([, price]) => price && price > 0).length;
         setDataFlowStatus(activeCount > 0 ? 'active' : 'waiting');
@@ -129,7 +164,21 @@ const LiveQuotes = () => {
     return typeof price === 'number' ? price.toFixed(2) : price;
   };
 
+  const getSourceBadge = () => {
+    switch (marketDataSource) {
+      case 'live_cache':
+        return { text: 'LIVE CACHE', classes: 'bg-green-100 text-green-800' };
+      case 'snapshot':
+        return { text: 'SNAPSHOT', classes: 'bg-yellow-100 text-yellow-800' };
+      case 'mixed':
+        return { text: 'MIXED', classes: 'bg-blue-100 text-blue-800' };
+      default:
+        return { text: 'UNKNOWN', classes: 'bg-gray-100 text-gray-700' };
+    }
+  };
+
   const dataFlowIndicator = getDataFlowIndicator();
+  const sourceBadge = getSourceBadge();
 
   return (
     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow-sm border border-blue-200 p-4 mb-6">
@@ -138,7 +187,12 @@ const LiveQuotes = () => {
         <div className="flex items-center space-x-3">
           <Activity className="w-5 h-5 text-blue-600" />
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Market Data Stream</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900">Market Data Stream</h3>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${sourceBadge.classes}`}>
+                {sourceBadge.text}
+              </span>
+            </div>
             <p className="text-xs text-gray-600">Real-time instrument prices</p>
           </div>
         </div>
