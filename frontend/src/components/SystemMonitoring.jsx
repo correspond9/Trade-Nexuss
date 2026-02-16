@@ -22,12 +22,13 @@ const SystemMonitoring = () => {
           apiService.get('/market/stream-status').catch(() => ({}))
         ]);
         const data = healthData;
+        const streamPayload = streamData?.data || streamData || {};
 
-        const wsStatus = streamData?.equity_ws || data?.websocket_status || {};
-        const mcxWsStatus = streamData?.mcx_ws || data?.mcx_websocket_status || {};
+        const wsStatus = streamPayload?.equity_ws || data?.websocket_status || {};
+        const mcxWsStatus = streamPayload?.mcx_ws || data?.mcx_websocket_status || {};
         const wsConnected = (wsStatus.connected_connections ?? 0) > 0;
         const mcxWsConnected = (mcxWsStatus.connected_connections ?? 0) > 0;
-        const liveFeed = streamData?.live_feed || {};
+        const liveFeed = streamPayload?.live_feed || {};
 
         const normalized = {
           services: {

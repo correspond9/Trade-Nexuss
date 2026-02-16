@@ -75,7 +75,48 @@ def market_stream_status():
         except Exception:
             # If orchestrator exists but method fails, still return minimal info
             status = {"ok": False, "error": "failed to fetch orchestrator status"}
-        return {"status": "success", "data": status}
+
+        equity_ws = {}
+        mcx_ws = {}
+        live_feed = {}
+        try:
+            from app.market.ws_manager import get_ws_manager
+            equity_ws = get_ws_manager().get_status()
+        except Exception:
+            equity_ws = {"connected_connections": 0, "total_subscriptions": 0}
+
+        try:
+            from app.commodity_engine.commodity_ws_manager import commodity_ws_manager
+            mcx_ws = commodity_ws_manager.get_status()
+        except Exception:
+            mcx_ws = {"connected_connections": 0, "total_subscriptions": 0}
+
+        try:
+            from app.dhan.live_feed import get_live_feed_status
+            live_feed = get_live_feed_status()
+        except Exception:
+            live_feed = {}
+
+        try:
+            from app.ems.exchange_clock import is_market_open
+            market_open = {
+                "NSE": bool(is_market_open("NSE")),
+                "BSE": bool(is_market_open("BSE")),
+                "MCX": bool(is_market_open("MCX")),
+            }
+        except Exception:
+            market_open = {}
+
+        return {
+            "status": "success",
+            "data": {
+                "orchestrator": status,
+                "equity_ws": equity_ws,
+                "mcx_ws": mcx_ws,
+                "live_feed": live_feed,
+                "market_open": market_open,
+            },
+        }
     except Exception as e:
         logging.exception("Failed to fetch market stream status: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
