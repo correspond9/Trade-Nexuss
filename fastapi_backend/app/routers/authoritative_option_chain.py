@@ -60,6 +60,12 @@ async def get_option_chain_live(
                     detail=f"Option chain not found for {underlying} {expiry}"
                 )
         
+        try:
+            from app.market.live_prices import get_price
+            underlying_ltp = get_price(underlying)
+        except Exception:
+            underlying_ltp = None
+
         # Add metadata
         response = {
             "status": "success",
@@ -67,7 +73,7 @@ async def get_option_chain_live(
             "source": "central_cache",
             "timestamp": datetime.now().isoformat(),
             "cache_stats": authoritative_option_chain_service.get_cache_statistics(),
-            "underlying_ltp": authoritative_option_chain_service.atm_registry.atm_strikes.get(underlying)
+            "underlying_ltp": underlying_ltp,
         }
         
         logger.info(f"✅ Served option chain for {underlying} {expiry}")

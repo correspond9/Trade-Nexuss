@@ -1849,11 +1849,27 @@ class AuthoritativeOptionChainService:
                                 else:
                                     # Extract CE data from nested structure
                                     ce_obj = strike_data.get("ce", {}) or strike_data.get("CE", {}) or {}
-                                    ce_ltp = float(ce_obj.get("ltp") or ce_obj.get("lastPrice") or strike_data.get("ce_ltp") or 0)
+                                    ce_ltp = float(
+                                        ce_obj.get("ltp")
+                                        or ce_obj.get("lastPrice")
+                                        or ce_obj.get("last_price")
+                                        or ce_obj.get("lastTradedPrice")
+                                        or ce_obj.get("LTP")
+                                        or strike_data.get("ce_ltp")
+                                        or strike_data.get("ce_last_price")
+                                        or 0
+                                    )
                                     
                                     # Fallback: if LTP is 0 (market closed/no volume), use Closing Price
                                     if ce_ltp <= 0:
-                                        ce_ltp = float(ce_obj.get("close") or ce_obj.get("previous_close") or ce_obj.get("prev_close") or 0)
+                                        ce_ltp = float(
+                                            ce_obj.get("close")
+                                            or ce_obj.get("closePrice")
+                                            or ce_obj.get("close_price")
+                                            or ce_obj.get("previous_close")
+                                            or ce_obj.get("prev_close")
+                                            or 0
+                                        )
                                     
                                     ce_bid = float(ce_obj.get("bid") or ce_obj.get("bidPrice") or strike_data.get("ce_bid") or 0)
                                     ce_ask = float(ce_obj.get("ask") or ce_obj.get("askPrice") or strike_data.get("ce_ask") or 0)
@@ -1872,11 +1888,27 @@ class AuthoritativeOptionChainService:
 
                                     # Extract PE data from nested structure
                                     pe_obj = strike_data.get("pe", {}) or strike_data.get("PE", {}) or {}
-                                    pe_ltp = float(pe_obj.get("ltp") or pe_obj.get("lastPrice") or strike_data.get("pe_ltp") or 0)
+                                    pe_ltp = float(
+                                        pe_obj.get("ltp")
+                                        or pe_obj.get("lastPrice")
+                                        or pe_obj.get("last_price")
+                                        or pe_obj.get("lastTradedPrice")
+                                        or pe_obj.get("LTP")
+                                        or strike_data.get("pe_ltp")
+                                        or strike_data.get("pe_last_price")
+                                        or 0
+                                    )
                                     
                                     # Fallback: if LTP is 0 (market closed/no volume), use Closing Price
                                     if pe_ltp <= 0:
-                                        pe_ltp = float(pe_obj.get("close") or pe_obj.get("previous_close") or pe_obj.get("prev_close") or 0)
+                                        pe_ltp = float(
+                                            pe_obj.get("close")
+                                            or pe_obj.get("closePrice")
+                                            or pe_obj.get("close_price")
+                                            or pe_obj.get("previous_close")
+                                            or pe_obj.get("prev_close")
+                                            or 0
+                                        )
                                     
                                     pe_bid = float(pe_obj.get("bid") or pe_obj.get("bidPrice") or strike_data.get("pe_bid") or 0)
                                     pe_ask = float(pe_obj.get("ask") or pe_obj.get("askPrice") or strike_data.get("pe_ask") or 0)

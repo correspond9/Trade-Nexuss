@@ -37,23 +37,22 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
     return fromChain && fromChain > 0 ? fromChain : configured;
   }, [symbol, chainData?.lot_size]);
 
-  // Fetch underlying price for display
+  // Use underlying LTP from authoritative /options/live response.
   useEffect(() => {
-    const fetchPrice = async () => {
-      try {
-        const data = await apiService.get(`/market/underlying-ltp/${symbol}`);
-        if (data && (data.ltp || data.data?.ltp)) {
-          setUnderlyingPrice(data.ltp || data.data?.ltp);
-        }
-      } catch (err) {
-        console.warn(`[OPTIONS] Could not fetch underlying price for ${symbol}:`, err);
-      }
-    };
-
-    if (symbol) {
-      fetchPrice();
+    const ltp = chainData?.underlying_ltp;
+    if (typeof ltp === 'number' && ltp > 0) {
+      setUnderlyingPrice(ltp);
     }
-  }, [symbol]);
+  }, [chainData?.underlying_ltp]);
+
+  const effectiveAtmStrike = React.useMemo(() => {
+    const interval = Number(chainData?.strike_interval || 0);
+    const ltp = Number(underlyingPrice || 0);
+    if (interval > 0 && ltp > 0) {
+      return Math.round(ltp / interval) * interval;
+    }
+    return getATMStrike();
+  }, [chainData?.strike_interval, underlyingPrice, getATMStrike]);
 
   // Convert authoritative chain data to strike format
   const strikes = React.useMemo(() => {
@@ -61,14 +60,12 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
       return [];
     }
 
-    const atmStrike = getATMStrike();
-
     return Object.entries(chainData.strikes)
       .map(([strikeStr, strikeData]) => {
         const strike = parseFloat(strikeStr);
         return {
           strike,
-          isATM: atmStrike && strike === atmStrike,
+          isATM: effectiveAtmStrike && strike === effectiveAtmStrike,
           ltpCE: strikeData.CE?.ltp || 0,
           ltpPE: strikeData.PE?.ltp || 0,
           bidCE: strikeData.CE?.bid || 0,
@@ -87,9 +84,9 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
         };
       })
       .sort((a, b) => a.strike - b.strike);
-  }, [chainData, getATMStrike, lotSize]);
+  }, [chainData, effectiveAtmStrike, lotSize]);
 
-  const atmStrike = getATMStrike();
+  const atmStrike = effectiveAtmStrike;
 
   const displayedStrikes = React.useMemo(() => {
     if (!strikes.length) return [];

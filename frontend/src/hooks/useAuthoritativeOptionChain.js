@@ -67,7 +67,10 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       setRetryCount(0);
 
       // Extract data
-      const chainData = result.data;
+      const chainData = {
+        ...(result.data || {}),
+        underlying_ltp: result.underlying_ltp ?? result.data?.underlying_ltp ?? null,
+      };
       
       setData(chainData);
       setTimestamp(new Date(result.timestamp));
