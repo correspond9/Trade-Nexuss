@@ -16,10 +16,20 @@ class ApiService {
       try {
         const text = String(value || '').trim();
         if (!text) return fallback;
-        if (text.startsWith('/')) return text.replace(/\/+$/, '');
+        if (text.startsWith('/')) {
+          const trimmed = text.replace(/\/+$/, '');
+          if (trimmed === '/api' || trimmed === '/api/v1' || trimmed === '/api/v2') {
+            return '/api/v2';
+          }
+          return trimmed;
+        }
         const url = new URL(text);
         const path = (url.pathname || '/').replace(/\/+$/, '');
         if (!path || path === '/') {
+          url.pathname = '/api/v2';
+          return url.toString().replace(/\/+$/, '');
+        }
+        if (path === '/api' || path === '/api/v1' || path === '/api/v2') {
           url.pathname = '/api/v2';
           return url.toString().replace(/\/+$/, '');
         }
