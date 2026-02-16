@@ -781,6 +781,10 @@ class AuthoritativeOptionChainService:
             if await self.rate_limiter.is_blocked_async("quote"):
                 return None
             await self._enforce_rest_rate_limit("quote")
+
+            # Lazy-load instrument metadata cache when startup preload is disabled.
+            if not self.instrument_master_cache:
+                await self._load_instrument_master_cache()
             
             creds = await self._fetch_dhanhq_credentials()
             if not creds:
@@ -888,6 +892,10 @@ class AuthoritativeOptionChainService:
             if await self.rate_limiter.is_blocked_async("data"):
                 return None
             await self._enforce_rest_rate_limit("data")
+
+            # Lazy-load instrument metadata cache when startup preload is disabled.
+            if not self.instrument_master_cache:
+                await self._load_instrument_master_cache()
             
             creds = await self._fetch_dhanhq_credentials()
             if not creds:

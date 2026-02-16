@@ -146,6 +146,17 @@ app.include_router(option_chain_router, prefix=API_PREFIX + "/options")
 app.include_router(admin_router, prefix=API_PREFIX)
 from app.rest.option_chain_compat import router as option_chain_compat_router
 app.include_router(option_chain_compat_router, prefix=API_PREFIX)
+
+# Compatibility for stale clients accidentally calling /api/v2/api/v2/*
+DOUBLE_API_PREFIX = API_PREFIX + API_PREFIX
+app.include_router(market_router, prefix=DOUBLE_API_PREFIX)
+app.include_router(credentials_router, prefix=DOUBLE_API_PREFIX)
+app.include_router(settings_router, prefix=DOUBLE_API_PREFIX)
+app.include_router(ws_router, prefix=DOUBLE_API_PREFIX)
+app.include_router(commodity_router, prefix=DOUBLE_API_PREFIX)
+app.include_router(option_chain_compat_router, prefix=DOUBLE_API_PREFIX)
+app.include_router(option_chain_router, prefix=DOUBLE_API_PREFIX + "/options")
+app.include_router(admin_router, prefix=DOUBLE_API_PREFIX)
 # Backward compatibility for older frontend calls (v1)
 import os as _os
 _disable_v1 = (_os.getenv("DISABLE_V1_COMPAT") or "").strip().lower() in ("1","true","yes","on")
