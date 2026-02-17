@@ -118,6 +118,9 @@ const PositionsUserwise = () => {
     const ids = selectedByUser[userId] || [];
     if (!ids.length) return;
 
+    const proceed = window.confirm(`Exit ${ids.length} selected position(s) for User ID ${userId}?`);
+    if (!proceed) return;
+
     setExitingUsers((prev) => {
       const next = new Set(prev);
       next.add(userId);
