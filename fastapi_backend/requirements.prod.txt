@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+sqlalchemy
+websocket-client
+dhanhq
+requests
+apscheduler
+aiohttp
+python-dotenv
+python-multipart
+psycopg2-binary
+redis

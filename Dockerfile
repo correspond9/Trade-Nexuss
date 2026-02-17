@@ -10,10 +10,10 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY fastapi_backend/requirements.txt .
+COPY fastapi_backend/requirements.prod.txt ./requirements.txt
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --disable-pip-version-check --progress-bar off -r requirements.txt
 
 # Copy application code
 COPY fastapi_backend/ .
