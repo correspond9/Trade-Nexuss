@@ -295,8 +295,8 @@ const Profile = () => {
       </div>
 
       <div className="bg-white rounded-lg shadow">
-        <div className="border-b border-gray-200 px-6">
-          <div className="flex space-x-6">
+        <div className="border-b border-gray-200 px-6 py-3">
+          <div className="flex flex-wrap gap-2">
             {[
               { id: 'profile', label: 'Profile' },
               { id: 'ledger', label: 'Ledger' },
@@ -307,10 +307,11 @@ const Profile = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`py-4 text-sm font-medium border-b-2 ${
+                style={{ boxShadow: 'none' }}
+                className={`inline-flex items-center justify-center whitespace-nowrap min-h-[40px] px-4 py-2 text-sm font-medium rounded-md border transition-colors ${
                   activeTab === tab.id
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:text-gray-800 hover:bg-gray-50'
                 }`}
               >
                 {tab.label}
