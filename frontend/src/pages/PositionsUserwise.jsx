@@ -7,6 +7,8 @@ const PositionsUserwise = () => {
   const [userPositions, setUserPositions] = useState([]);
   const [expandedUsers, setExpandedUsers] = useState(new Set());
   const [sortBy, setSortBy] = useState('UserId(asc)');
+  const [selectedByUser, setSelectedByUser] = useState({});
+  const [exitingUsers, setExitingUsers] = useState(new Set());
 
   useEffect(() => {
     loadUserPositions();
@@ -84,6 +86,59 @@ const PositionsUserwise = () => {
       newExpanded.add(userId);
     }
     setExpandedUsers(newExpanded);
+  };
+
+  const togglePositionSelection = (userId, positionId) => {
+    setSelectedByUser((prev) => {
+      const next = { ...prev };
+      const userSet = new Set(next[userId] || []);
+      if (userSet.has(positionId)) userSet.delete(positionId);
+      else userSet.add(positionId);
+      next[userId] = Array.from(userSet);
+      return next;
+    });
+  };
+
+  const toggleSelectAllForUser = (userId, positions, checked) => {
+    setSelectedByUser((prev) => {
+      const next = { ...prev };
+      if (!checked) {
+        next[userId] = [];
+        return next;
+      }
+      const openIds = positions
+        .filter((position) => position.type === 'OPEN')
+        .map((position) => position.id);
+      next[userId] = openIds;
+      return next;
+    });
+  };
+
+  const handleExitSelected = async (userId) => {
+    const ids = selectedByUser[userId] || [];
+    if (!ids.length) return;
+
+    setExitingUsers((prev) => {
+      const next = new Set(prev);
+      next.add(userId);
+      return next;
+    });
+
+    try {
+      for (const positionId of ids) {
+        await apiService.post(`/admin/users/${userId}/positions/${positionId}/squareoff`, {});
+      }
+      setSelectedByUser((prev) => ({ ...prev, [userId]: [] }));
+      await loadUserPositions();
+    } catch (error) {
+      console.error('Error exiting selected positions:', error);
+    } finally {
+      setExitingUsers((prev) => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+    }
   };
 
   const handleSort = (sortOption) => {
@@ -273,13 +328,33 @@ const PositionsUserwise = () => {
                       <tr>
                         <td colSpan="9" className="px-0 py-0 bg-gray-50">
                           <div className="px-6 py-4">
-                            <div className="text-sm font-medium text-gray-900 mb-3">
-                              Positions for {user.userName} (User ID: {user.userId})
+                            <div className="flex items-center justify-between mb-3 gap-2">
+                              <div className="text-sm font-medium text-gray-900">
+                                Positions for {user.userName} (User ID: {user.userId})
+                              </div>
+                              <button
+                                onClick={() => handleExitSelected(user.userId)}
+                                disabled={(selectedByUser[user.userId] || []).length === 0 || exitingUsers.has(user.userId)}
+                                className="px-3 py-1.5 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                              >
+                                {exitingUsers.has(user.userId) ? 'Exiting...' : 'EXIT Selected'}
+                              </button>
                             </div>
                             <div className="overflow-x-auto">
                               <table className="min-w-full divide-y divide-gray-200 border border-gray-200">
                                 <thead className="bg-gray-100">
                                   <tr>
+                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                      <input
+                                        type="checkbox"
+                                        checked={
+                                          user.positions.filter((position) => position.type === 'OPEN').length > 0 &&
+                                          (selectedByUser[user.userId] || []).length === user.positions.filter((position) => position.type === 'OPEN').length
+                                        }
+                                        onChange={(e) => toggleSelectAllForUser(user.userId, user.positions, e.target.checked)}
+                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                      />
+                                    </th>
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Symbol</th>
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Exchange</th>
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
@@ -293,6 +368,15 @@ const PositionsUserwise = () => {
                                 <tbody className="bg-white divide-y divide-gray-200">
                                   {user.positions.map((position) => (
                                     <tr key={position.id} className="hover:bg-gray-50">
+                                      <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                                        <input
+                                          type="checkbox"
+                                          checked={(selectedByUser[user.userId] || []).includes(position.id)}
+                                          onChange={() => togglePositionSelection(user.userId, position.id)}
+                                          disabled={position.type !== 'OPEN'}
+                                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                                        />
+                                      </td>
                                       <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
                                         {position.symbol}
                                       </td>
