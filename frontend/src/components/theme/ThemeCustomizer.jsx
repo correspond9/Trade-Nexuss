@@ -24,7 +24,8 @@ export default function ThemeCustomizer() {
     componentSettings,
     setComponentSettings,
     themes,
-    applyThemeGlobally
+    applyThemeGlobally,
+    getThemePreset
   } = useThemeLogic();
 
   const fontOptions = [
@@ -94,10 +95,14 @@ export default function ThemeCustomizer() {
   }, []);
 
   const applyTheme = (themeName) => {
-    const theme = themes[themeName];
-    if (theme) {
-      setThemeConfig(theme);
+    const preset = getThemePreset ? getThemePreset(themeName) : null;
+    if (preset?.config) {
+      setThemeConfig(preset.config);
+      if (preset.componentSettings) {
+        setComponentSettings(preset.componentSettings);
+      }
       setSelectedTheme(themeName);
+      setThemeName(themeName);
       showNotification(`${themeName} theme applied successfully!`);
     }
   };
