@@ -642,7 +642,7 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
     option_symbols = {"NIFTY", "BANKNIFTY", "SENSEX"}
     try:
         from app.services.dhan_security_id_mapper import dhan_security_mapper
-        for _, sub_info in SUBSCRIPTION_MGR.subscriptions.items():
+        for token, sub_info in SUBSCRIPTION_MGR.subscriptions.items():
             symbol = (sub_info.get("symbol_canonical") or sub_info.get("symbol") or "").upper()
             option_type = (sub_info.get("option_type") or "").upper()
             if symbol not in option_symbols:

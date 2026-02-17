@@ -509,8 +509,50 @@ class SubscriptionManager:
     
     def _log_subscription(self, action: str, token: str, reason: str):
         """Log subscription event to database"""
-        # Disabled temporarily due to database locking issues
-        pass
+        session = None
+        try:
+            from app.storage.db import SessionLocal
+            from app.storage.models import Subscription, SubscriptionLog
+
+            session = SessionLocal()
+            log = SubscriptionLog(action=action, instrument_token=token, reason=reason)
+            session.add(log)
+
+            if action == "SUBSCRIBE":
+                sub_state = self.subscriptions.get(token)
+                if sub_state:
+                    row = session.query(Subscription).filter(Subscription.instrument_token == token).first()
+                    if not row:
+                        row = Subscription(instrument_token=token)
+                        session.add(row)
+
+                    row.symbol = sub_state.get("symbol")
+                    row.expiry_date = sub_state.get("expiry")
+                    row.strike_price = sub_state.get("strike")
+                    row.option_type = sub_state.get("option_type")
+                    row.tier = sub_state.get("tier") or "TIER_A"
+                    row.subscribed_at = sub_state.get("subscribed_at") or datetime.utcnow()
+                    row.ws_connection_id = sub_state.get("ws_id")
+                    row.active = True
+            else:
+                row = session.query(Subscription).filter(Subscription.instrument_token == token).first()
+                if row:
+                    row.active = False
+
+            session.commit()
+        except Exception as e:
+            try:
+                if session:
+                    session.rollback()
+            except Exception:
+                pass
+            print(f"[WARN] Failed to persist subscription log/state for {token}: {e}")
+        finally:
+            try:
+                if session:
+                    session.close()
+            except Exception:
+                pass
     
     def _load_from_database(self):
         """Load existing subscriptions from database (called explicitly by startup hook)"""
