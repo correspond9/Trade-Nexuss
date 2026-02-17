@@ -9,6 +9,7 @@ const PositionsUserwise = () => {
   const [sortBy, setSortBy] = useState('UserId(asc)');
   const [selectedByUser, setSelectedByUser] = useState({});
   const [exitingUsers, setExitingUsers] = useState(new Set());
+  const [exitQtyByPosition, setExitQtyByPosition] = useState({});
 
   useEffect(() => {
     loadUserPositions();
@@ -38,15 +39,19 @@ const PositionsUserwise = () => {
         const user = entry.user || {};
         const fund = Number(user.wallet_balance || 0);
         const positionsList = entry.positions.map((pos) => {
-          const ltp = pos.quantity ? pos.avg_price + (pos.mtm / pos.quantity) : pos.avg_price;
-          const pnl = (pos.mtm || 0) + (pos.realizedPnl || 0);
+          const quantity = Number(pos.quantity ?? pos.qty ?? 0);
+          const avgPrice = Number(pos.avg_price ?? pos.avgEntry ?? 0);
+          const mtm = Number(pos.mtm ?? 0);
+          const realizedPnl = Number(pos.realizedPnl ?? pos.realized_pnl ?? 0);
+          const ltp = quantity !== 0 ? avgPrice + (mtm / quantity) : avgPrice;
+          const pnl = mtm + realizedPnl;
           return {
             id: pos.id,
             symbol: pos.symbol,
             exchange: pos.exchange_segment,
             product: pos.product_type,
-            quantity: pos.quantity,
-            avgPrice: pos.avg_price,
+            quantity,
+            avgPrice,
             ltp: ltp,
             pnl: pnl,
             type: pos.status
@@ -71,6 +76,18 @@ const PositionsUserwise = () => {
       });
 
       setUserPositions(mapped);
+
+      setExitQtyByPosition((prev) => {
+        const next = { ...prev };
+        mapped.forEach((userRow) => {
+          userRow.positions.forEach((position) => {
+            if ((position.type === 'OPEN') && (next[position.id] === undefined || next[position.id] === null)) {
+              next[position.id] = Math.max(1, Math.abs(Number(position.quantity || 0)));
+            }
+          });
+        });
+        return next;
+      });
     } catch (error) {
       console.error('Error loading user positions:', error);
     } finally {
@@ -114,6 +131,30 @@ const PositionsUserwise = () => {
     });
   };
 
+  const getQtyOptions = (quantity) => {
+    const absQty = Math.abs(Number(quantity || 0));
+    if (!Number.isFinite(absQty) || absQty <= 0) return [];
+    if (absQty <= 200) {
+      return Array.from({ length: absQty }, (_, idx) => idx + 1);
+    }
+    const options = new Set([1, 5, 10, 25, 50, 75, 100, 150, 200, absQty]);
+    const step = Math.max(1, Math.floor(absQty / 10));
+    for (let value = step; value < absQty; value += step) {
+      options.add(value);
+    }
+    return Array.from(options)
+      .filter((value) => value > 0 && value <= absQty)
+      .sort((a, b) => a - b);
+  };
+
+  const handleQtyChange = (positionId, quantity) => {
+    const parsed = Number(quantity);
+    setExitQtyByPosition((prev) => ({
+      ...prev,
+      [positionId]: Number.isFinite(parsed) && parsed > 0 ? parsed : prev[positionId]
+    }));
+  };
+
   const handleExitSelected = async (userId) => {
     const ids = selectedByUser[userId] || [];
     if (!ids.length) return;
@@ -129,7 +170,11 @@ const PositionsUserwise = () => {
 
     try {
       for (const positionId of ids) {
-        await apiService.post(`/admin/users/${userId}/positions/${positionId}/squareoff`, {});
+        const selectedQty = Number(exitQtyByPosition[positionId]);
+        const payload = Number.isFinite(selectedQty) && selectedQty > 0
+          ? { quantity: selectedQty }
+          : {};
+        await apiService.post(`/admin/users/${userId}/positions/${positionId}/squareoff`, payload);
       }
       setSelectedByUser((prev) => ({ ...prev, [userId]: [] }));
       await loadUserPositions();
@@ -144,6 +189,13 @@ const PositionsUserwise = () => {
     }
   };
 
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      loadUserPositions();
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, []);
   const handleSort = (sortOption) => {
     setSortBy(sortOption);
     // Apply sorting logic here
@@ -179,7 +231,7 @@ const PositionsUserwise = () => {
               <h1 className="text-xl font-semibold text-gray-900">All Positions Userwise</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <button className="p-2 text-gray-500 hover:text-gray-700">
+              <button onClick={loadUserPositions} className="p-2 text-gray-500 hover:text-gray-700" title="Refresh">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
@@ -365,6 +417,7 @@ const PositionsUserwise = () => {
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Avg Price</th>
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">LTP</th>
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">P&L</th>
+                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Exit Qty</th>
                                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                                   </tr>
                                 </thead>
@@ -408,6 +461,18 @@ const PositionsUserwise = () => {
                                         <div className={`font-medium ${position.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                           {formatCurrency(position.pnl)}
                                         </div>
+                                      </td>
+                                      <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                                        <select
+                                          value={exitQtyByPosition[position.id] ?? Math.max(1, Math.abs(Number(position.quantity || 0)))}
+                                          onChange={(e) => handleQtyChange(position.id, e.target.value)}
+                                          disabled={position.type !== 'OPEN'}
+                                          className="border border-gray-300 rounded px-2 py-1 text-xs disabled:opacity-50"
+                                        >
+                                          {getQtyOptions(position.quantity).map((qty) => (
+                                            <option key={`${position.id}-${qty}`} value={qty}>{qty}</option>
+                                          ))}
+                                        </select>
                                       </td>
                                       <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
                                         <span className={`px-2 py-1 text-xs rounded-full ${
