@@ -12,14 +12,17 @@ class ApiService {
     }
     rawBase = rawBase || import.meta.env.VITE_API_URL || '/api/v2';
 
-    // In browser production, prefer same-origin API path to avoid cross-origin/CORS/proxy drift.
+    // In browser production, prefer explicit API host from runtime/env; if missing, default to api subdomain.
     try {
       if (typeof window !== 'undefined' && window.location) {
         const host = (window.location.hostname || '').toLowerCase();
         const isProdHost = host === 'tradingnexus.pro' || host === 'www.tradingnexus.pro' || host === 'app.tradingnexus.pro';
         const isLocalHost = host === 'localhost' || host === '127.0.0.1';
         if (isProdHost) {
-          rawBase = '/api/v2';
+          const hasExplicitApi = typeof rawBase === 'string' && /^https?:\/\//i.test(rawBase);
+          if (!hasExplicitApi || rawBase === '/api/v2' || rawBase === '/api' || rawBase === '/api/v1') {
+            rawBase = 'https://api.tradingnexus.pro/api/v2';
+          }
         } else if (isLocalHost && (!rawBase || rawBase === '/api/v2' || rawBase === '/api' || rawBase === '/api/v1')) {
           rawBase = 'http://127.0.0.1:8000/api/v2';
         }
