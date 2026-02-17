@@ -58,6 +58,8 @@ FEED_MODE_QUOTE = 17
 _REST_CLIENT_LOCK = threading.Lock()
 _REST_CLIENT: Optional[DhanHQClient] = None
 _LAST_CLOSE_CACHE: Dict[str, Dict[str, object]] = {}
+_LAST_TICK_CACHE: Dict[str, str] = {}
+_LAST_DEPTH_CACHE: Dict[str, str] = {}
 logger = logging.getLogger("trading_nexus.dhan.live_feed")
 
 
@@ -206,6 +208,92 @@ def get_live_feed_status() -> Dict[str, object]:
         "cooldown_active": bool(
             _last_cooldown_start and (datetime.now() - _last_cooldown_start).total_seconds() < _cooldown_period
         ),
+    }
+
+
+def get_live_feed_debug_snapshot(symbols: Optional[list[str]] = None, limit: int = 120) -> Dict[str, object]:
+    symbol_filter = {
+        str(s).strip().upper()
+        for s in (symbols or [])
+        if str(s).strip()
+    }
+
+    try:
+        desired_targets = _get_security_ids_from_watchlist()
+    except Exception:
+        desired_targets = {}
+
+    try:
+        desired_by_symbol: Dict[str, list] = {}
+        for sec_id, meta in desired_targets.items():
+            sym = str(meta.get("symbol") or "").upper().strip()
+            if not sym:
+                continue
+            desired_by_symbol.setdefault(sym, []).append(str(sec_id))
+    except Exception:
+        desired_by_symbol = {}
+
+    with _subscription_lock:
+        subscribed_map = dict(_subscribed_securities)
+        sec_to_symbol = dict(_security_id_symbol_map)
+        sec_to_option = dict(_security_id_subscription_map)
+        tick_map = dict(_LAST_TICK_CACHE)
+        depth_map = dict(_LAST_DEPTH_CACHE)
+
+    sub_mgr_items = []
+    try:
+        with SUBSCRIPTION_MGR.lock:
+            sub_mgr_items = list(SUBSCRIPTION_MGR.subscriptions.items())
+    except Exception:
+        sub_mgr_items = []
+
+    active_by_symbol: Dict[str, list] = {}
+    for sec_id, sym in sec_to_symbol.items():
+        symbol_upper = str(sym or "").upper().strip()
+        if not symbol_upper:
+            continue
+        payload = {
+            "security_id": str(sec_id),
+            "exchange": subscribed_map.get(str(sec_id), {}).get("exchange"),
+            "mode": subscribed_map.get(str(sec_id), {}).get("mode"),
+            "option_meta": sec_to_option.get(str(sec_id)),
+        }
+        active_by_symbol.setdefault(symbol_upper, []).append(payload)
+
+    tier_by_symbol: Dict[str, Dict[str, int]] = {}
+    for _token, sub_info in sub_mgr_items:
+        sym = str(sub_info.get("symbol_canonical") or sub_info.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        tier = str(sub_info.get("tier") or "UNKNOWN").upper()
+        if sym not in tier_by_symbol:
+            tier_by_symbol[sym] = {}
+        tier_by_symbol[sym][tier] = int(tier_by_symbol[sym].get(tier, 0)) + 1
+
+    all_symbols = set(desired_by_symbol.keys()) | set(active_by_symbol.keys()) | set(tick_map.keys()) | set(depth_map.keys())
+    if symbol_filter:
+        all_symbols = {s for s in all_symbols if s in symbol_filter}
+
+    rows = []
+    for sym in sorted(all_symbols)[:max(1, int(limit))]:
+        rows.append({
+            "symbol": sym,
+            "ltp_cache": get_price(sym),
+            "last_tick_at": tick_map.get(sym),
+            "last_depth_at": depth_map.get(sym),
+            "desired_security_ids": desired_by_symbol.get(sym, []),
+            "active_security_ids": [item.get("security_id") for item in active_by_symbol.get(sym, [])],
+            "active_details": active_by_symbol.get(sym, [])[:8],
+            "tier_breakdown": tier_by_symbol.get(sym, {}),
+        })
+
+    return {
+        "feed_status": get_live_feed_status(),
+        "desired_target_count": len(desired_targets),
+        "active_security_count": len(subscribed_map),
+        "symbol_map_count": len(sec_to_symbol),
+        "option_map_count": len(sec_to_option),
+        "rows": rows,
     }
 
 
@@ -888,6 +976,8 @@ def on_message_callback(feed, message):
             if ltp is None or ltp == 0:
                 return
 
+            _LAST_TICK_CACHE[symbol] = datetime.utcnow().isoformat()
+
             depth = _extract_depth(message)
             
             # ✨ CRITICAL: Update market state with depth data for square-off functionality
@@ -895,6 +985,7 @@ def on_message_callback(feed, message):
                 from app.market.market_state import state
                 if depth and (depth.get("bids") or depth.get("asks")):
                     state["depth"][symbol] = depth
+                    _LAST_DEPTH_CACHE[symbol] = datetime.utcnow().isoformat()
             except Exception as state_e:
                 print(f"[WARN] Failed to update market state depth: {state_e}")
             
@@ -958,6 +1049,7 @@ def on_message_callback(feed, message):
             return
 
         update_price(symbol, ltp)
+        _LAST_TICK_CACHE[symbol] = datetime.utcnow().isoformat()
         logger.debug("[PRICE] %s = %s", symbol, ltp)
 
         # ✨ CRITICAL: Update market state with depth data for non-option instruments
@@ -967,6 +1059,7 @@ def on_message_callback(feed, message):
             depth = _extract_depth(message)
             if depth and (depth.get("bids") or depth.get("asks")):
                 state["depth"][symbol] = depth
+                _LAST_DEPTH_CACHE[symbol] = datetime.utcnow().isoformat()
         except Exception as state_e:
             print(f"[WARN] Failed to update market state depth for {symbol}: {state_e}")
 

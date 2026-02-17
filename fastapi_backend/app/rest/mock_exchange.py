@@ -2220,3 +2220,21 @@ def admin_set_depth(payload: dict, caller=Depends(get_current_user), db: Session
     key = (sym or "").upper().strip()
     market_state.setdefault("depth", {})[key] = depth
     return {"status": "ok", "symbol": key, "depth": depth}
+
+
+@router.get("/admin/market/live-feed-diagnostics")
+def admin_live_feed_diagnostics(
+    symbols: Optional[str] = Query(None, description="Comma-separated symbols, e.g. RELIANCE,NIFTY"),
+    limit: int = Query(120, ge=1, le=500),
+    caller=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
+    symbol_list = []
+    if symbols:
+        symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+
+    from app.dhan.live_feed import get_live_feed_debug_snapshot
+
+    snapshot = get_live_feed_debug_snapshot(symbols=symbol_list, limit=limit)
+    return {"status": "success", "data": snapshot}
