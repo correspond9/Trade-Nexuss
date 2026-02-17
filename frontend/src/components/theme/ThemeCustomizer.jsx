@@ -172,9 +172,13 @@ export default function ThemeCustomizer() {
     showNotification(`Theme "${normalizedName}" deleted.`, 'success');
   };
 
-  const handleApplyThemeGlobally = () => {
-    applyThemeGlobally();
-    showNotification('Theme applied to the whole website.', 'success');
+  const handleApplyThemeGlobally = async () => {
+    try {
+      await applyThemeGlobally();
+      showNotification('Theme applied to the whole website.', 'success');
+    } catch (_error) {
+      showNotification('Failed to apply theme globally.', 'error');
+    }
   };
 
   const renderComponentSettings = () => {

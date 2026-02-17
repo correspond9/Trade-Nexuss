@@ -5,6 +5,7 @@ import { AppProvider } from './contexts/AppContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/core/ProtectedRoute';
 import Layout from './components/core/Layout';
+import { useThemeLogic } from './components/theme/ThemeLogic';
 
 // Lazy loaded pages for code splitting
 const Trade = React.lazy(() => import('./pages/Trade'));
@@ -63,6 +64,19 @@ const HomeRedirect = () => {
   return <Navigate to="/profile" replace />;
 };
 
+const GlobalThemeRuntimeInner = () => {
+  useThemeLogic();
+  return null;
+};
+
+const GlobalThemeRuntime = () => {
+  const { user } = useAuth();
+  if (!user) {
+    return null;
+  }
+  return <GlobalThemeRuntimeInner />;
+};
+
 const App = () => {
   React.useEffect(() => {
     try {
@@ -81,6 +95,7 @@ const App = () => {
     <ErrorBoundary>
       <AuthProvider>
         <AppProvider>
+          <GlobalThemeRuntime />
           <Router>
             <ScrollToTop />
             <Routes>

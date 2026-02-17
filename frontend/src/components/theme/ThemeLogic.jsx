@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { apiService } from '../../services/apiService';
 
 const cloneDeep = (value) => JSON.parse(JSON.stringify(value));
 
@@ -429,20 +430,55 @@ export const useThemeLogic = () => {
   };
 
   useEffect(() => {
-    const savedConfig =
-      localStorage.getItem('themeDraftConfig') ||
-      localStorage.getItem('appliedThemeConfig') ||
-      localStorage.getItem('customThemeConfig');
-    const savedComponentSettings =
-      localStorage.getItem('themeDraftComponentSettings') ||
-      localStorage.getItem('appliedComponentSettings') ||
-      localStorage.getItem('componentSettings');
-    if (savedConfig) {
-      setThemeConfig(JSON.parse(savedConfig));
-    }
-    if (savedComponentSettings) {
-      setComponentSettings(JSON.parse(savedComponentSettings));
-    }
+    const hydrateFromLocal = () => {
+      const savedConfig =
+        localStorage.getItem('themeDraftConfig') ||
+        localStorage.getItem('appliedThemeConfig') ||
+        localStorage.getItem('customThemeConfig');
+      const savedComponentSettings =
+        localStorage.getItem('themeDraftComponentSettings') ||
+        localStorage.getItem('appliedComponentSettings') ||
+        localStorage.getItem('componentSettings');
+      if (savedConfig) {
+        try {
+          setThemeConfig(JSON.parse(savedConfig));
+        } catch (_e) {
+          // ignore malformed local config
+        }
+      }
+      if (savedComponentSettings) {
+        try {
+          setComponentSettings(JSON.parse(savedComponentSettings));
+        } catch (_e) {
+          // ignore malformed local component settings
+        }
+      }
+    };
+
+    const hydrateFromServer = async () => {
+      try {
+        const response = await apiService.get('/theme-config');
+        const data = response?.data || response;
+        const themeConfigFromServer = data?.theme_config;
+        const componentSettingsFromServer = data?.component_settings;
+        if (themeConfigFromServer && componentSettingsFromServer) {
+          setThemeConfig(themeConfigFromServer);
+          setComponentSettings(componentSettingsFromServer);
+          localStorage.setItem('appliedThemeConfig', JSON.stringify(themeConfigFromServer));
+          localStorage.setItem('appliedComponentSettings', JSON.stringify(componentSettingsFromServer));
+          localStorage.setItem('customThemeConfig', JSON.stringify(themeConfigFromServer));
+          localStorage.setItem('componentSettings', JSON.stringify(componentSettingsFromServer));
+          localStorage.setItem('themeDraftConfig', JSON.stringify(themeConfigFromServer));
+          localStorage.setItem('themeDraftComponentSettings', JSON.stringify(componentSettingsFromServer));
+          return;
+        }
+      } catch (_e) {
+        // ignore and fallback to local state
+      }
+      hydrateFromLocal();
+    };
+
+    hydrateFromServer();
   }, []);
 
   useEffect(() => {
@@ -721,12 +757,32 @@ export const useThemeLogic = () => {
   }, []);
 
   const applyThemeGlobally = () => {
-    keepAppliedOnUnmountRef.current = true;
-    localStorage.setItem('appliedThemeConfig', JSON.stringify(themeConfig));
-    localStorage.setItem('appliedComponentSettings', JSON.stringify(componentSettings));
-    localStorage.setItem('customThemeConfig', JSON.stringify(themeConfig));
-    localStorage.setItem('componentSettings', JSON.stringify(componentSettings));
-    return true;
+    const persist = async () => {
+      keepAppliedOnUnmountRef.current = true;
+      localStorage.setItem('appliedThemeConfig', JSON.stringify(themeConfig));
+      localStorage.setItem('appliedComponentSettings', JSON.stringify(componentSettings));
+      localStorage.setItem('customThemeConfig', JSON.stringify(themeConfig));
+      localStorage.setItem('componentSettings', JSON.stringify(componentSettings));
+      localStorage.setItem('themeDraftConfig', JSON.stringify(themeConfig));
+      localStorage.setItem('themeDraftComponentSettings', JSON.stringify(componentSettings));
+
+      try {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('theme:applied'));
+        }
+      } catch (_e) {
+        // ignore event dispatch errors
+      }
+
+      await apiService.post('/admin/theme-config', {
+        theme_config: themeConfig,
+        component_settings: componentSettings,
+      });
+
+      return true;
+    };
+
+    return persist();
   };
 
   return {

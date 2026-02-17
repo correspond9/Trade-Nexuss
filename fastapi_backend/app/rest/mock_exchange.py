@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 import asyncio
 from typing import Optional, List
+import json
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Header, Query
 from pydantic import BaseModel, Field
@@ -35,6 +37,8 @@ from app.oms.order_ids import generate as generate_order_id
 
 # IST timezone offset (UTC+5:30)
 IST_OFFSET = timedelta(hours=5, minutes=30)
+THEME_SETTINGS_DIR = Path(__file__).parent.parent.parent / "config"
+THEME_SETTINGS_FILE = THEME_SETTINGS_DIR / "theme_settings.json"
 
 
 def ist_now():
@@ -67,6 +71,27 @@ def optional_current_user(x_user: str = Header(None), db: Session = Depends(get_
 
 def _serialize(model_obj):
     data = {k: v for k, v in model_obj.__dict__.items() if not k.startswith("_")}
+    return data
+
+
+def _load_theme_settings() -> dict:
+    try:
+        if not THEME_SETTINGS_FILE.exists():
+            return {}
+        with open(THEME_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            payload = json.load(f) or {}
+            if isinstance(payload, dict):
+                return payload
+            return {}
+    except Exception:
+        return {}
+
+
+def _save_theme_settings(payload: dict) -> dict:
+    data = payload if isinstance(payload, dict) else {}
+    THEME_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(THEME_SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
     return data
 
 
@@ -2222,6 +2247,44 @@ def admin_update_market_config(payload: dict, caller=Depends(get_current_user), 
         cfg = payload if isinstance(payload, dict) else {}
     market_config.update(cfg)
     return {"status": "ok", "data": market_config.get()}
+
+
+@router.get("/theme-config")
+def get_theme_config(caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return globally applied UI theme for all authenticated users."""
+    payload = _load_theme_settings()
+    theme_config = payload.get("theme_config") if isinstance(payload.get("theme_config"), dict) else None
+    component_settings = payload.get("component_settings") if isinstance(payload.get("component_settings"), dict) else None
+    return {
+        "status": "ok",
+        "data": {
+            "theme_config": theme_config,
+            "component_settings": component_settings,
+            "updated_at": payload.get("updated_at"),
+            "updated_by": payload.get("updated_by"),
+        },
+    }
+
+
+@router.post("/admin/theme-config")
+def admin_update_theme_config(payload: dict, caller=Depends(get_current_user), db: Session = Depends(get_db)):
+    """Persist globally applied UI theme. Only ADMIN/SUPER_ADMIN can update."""
+    require_role(caller, ["ADMIN", "SUPER_ADMIN"])
+
+    theme_config = payload.get("theme_config") if isinstance(payload, dict) else None
+    component_settings = payload.get("component_settings") if isinstance(payload, dict) else None
+
+    if not isinstance(theme_config, dict) or not isinstance(component_settings, dict):
+        raise HTTPException(status_code=400, detail="theme_config and component_settings are required")
+
+    next_payload = {
+        "theme_config": theme_config,
+        "component_settings": component_settings,
+        "updated_at": ist_now().isoformat(),
+        "updated_by": caller.username,
+    }
+    saved = _save_theme_settings(next_payload)
+    return {"status": "ok", "data": saved}
 
 
 @router.post("/admin/market-force")
