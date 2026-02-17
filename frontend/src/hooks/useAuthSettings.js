@@ -22,6 +22,15 @@ export const useAuthSettings = () => {
 
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const withTimeout = (promise, ms = 12000) => {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Request timeout')), ms);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+  };
 
   const extractCredentialData = (result) => {
     if (!result || typeof result !== 'object') return {};
@@ -57,7 +66,7 @@ export const useAuthSettings = () => {
   const loadSavedSettings = async () => {
     // Try primary backend endpoint
     try {
-      const result = await apiService.get('/credentials/active');
+      const result = await withTimeout(apiService.get('/credentials/active'));
       const data = extractCredentialData(result);
       const hasPersistedToken = Boolean(
         data?.has_token ||
@@ -120,7 +129,7 @@ export const useAuthSettings = () => {
 
       for (const url of fallbackBases) {
         try {
-          const result = await apiService.request(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } }).catch(() => null);
+          const result = await withTimeout(apiService.request(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } })).catch(() => null);
           if (!result) continue;
           const data = result?.data || {};
           if (data?.client_id || data?.access_token || data?.daily_token) {
@@ -171,25 +180,12 @@ export const useAuthSettings = () => {
       // ignore cache read errors
     }
 
-    return {
-      authMode: 'DAILY_TOKEN',
-      clientId: '',
-      accessToken: '',
-      apiKey: '',
-      clientSecret: '',
-      connected: false,
-      lastAuthTime: null,
-      authStatus: 'disconnected',
-      wsUrl: 'wss://api-feed.dhan.co?version=2&token=...&clientId=...&authType=2',
-      _cachedCredentials: {
-        DAILY_TOKEN: null,
-        STATIC_IP: null
-      }
-    };
+    return null;
   };
 
   // Save settings
   const saveSettings = async () => {
+    setIsSaving(true);
     try {
       console.log('🔐 Starting saveSettings...');
       console.log('🔐 Current settings:', localSettings);
@@ -215,7 +211,7 @@ export const useAuthSettings = () => {
         auth_mode: localSettings.authMode
       };
 
-      const response = await apiService.post('/credentials/save', payload);
+      const response = await withTimeout(apiService.post('/credentials/save', payload), 15000);
       if (!response || response.success !== true || response.error) {
         throw new Error((response && response.error) || 'Failed to save credentials');
       }
@@ -255,6 +251,8 @@ export const useAuthSettings = () => {
       console.error('🔐 SaveSettings error:', error);
       setSaved(false);
       throw error;
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -285,7 +283,7 @@ export const useAuthSettings = () => {
     const initializeSettings = async () => {
       try {
         const settings = await loadSavedSettings();
-        if (settings) {
+        if (settings && (settings.clientId || settings.accessToken || settings.connected)) {
           setLocalSettings(settings);
         }
       } catch (error) {
@@ -304,6 +302,7 @@ export const useAuthSettings = () => {
     saved,
     setSaved,
     loading,
+    isSaving,
     setLoading,
     saveSettings,
     switchMode,

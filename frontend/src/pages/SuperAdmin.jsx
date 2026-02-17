@@ -18,6 +18,7 @@ const SuperAdmin = () => {
     setLocalSettings,
     saved,
     loading,
+    isSaving,
     saveSettings,
     switchMode,
   } = useAuthSettings();
@@ -539,10 +540,10 @@ const SuperAdmin = () => {
                     </button>
                   <button
                     onClick={handleSave}
-                    disabled={loading}
+                    disabled={loading || isSaving}
                     className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
                   >
-                    {loading ? 'Saving...' : `Save ${localSettings.authMode === 'DAILY_TOKEN' ? 'Token' : 'Credentials'}`}
+                    {isSaving ? 'Saving...' : `Save ${localSettings.authMode === 'DAILY_TOKEN' ? 'Token' : 'Credentials'}`}
                   </button>
                   </div>
                 </div>
