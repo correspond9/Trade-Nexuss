@@ -27,6 +27,44 @@ export const GlobalColorControls = ({ themeConfig, onThemeConfigChange }) => {
             />
           </div>
         </div>
+
+        <div>
+          <label className="block text-xs font-medium mb-1">Light Shadow Color</label>
+          <div className="flex gap-1">
+            <input
+              type="color"
+              value={themeConfig.shadowLight}
+              onChange={(e) => onThemeConfigChange({...themeConfig, shadowLight: e.target.value})}
+              className="h-8 w-12 rounded cursor-pointer"
+            />
+            <input
+              type="text"
+              value={themeConfig.shadowLight}
+              onChange={(e) => onThemeConfigChange({...themeConfig, shadowLight: e.target.value})}
+              className="flex-1 px-2 py-1 rounded border border-gray-300 text-xs"
+              placeholder="#ffffff"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium mb-1">Dark Shadow Color</label>
+          <div className="flex gap-1">
+            <input
+              type="color"
+              value={themeConfig.shadowDark}
+              onChange={(e) => onThemeConfigChange({...themeConfig, shadowDark: e.target.value})}
+              className="h-8 w-12 rounded cursor-pointer"
+            />
+            <input
+              type="text"
+              value={themeConfig.shadowDark}
+              onChange={(e) => onThemeConfigChange({...themeConfig, shadowDark: e.target.value})}
+              className="flex-1 px-2 py-1 rounded border border-gray-300 text-xs"
+              placeholder="#5a5a5a"
+            />
+          </div>
+        </div>
         
         <div>
           <label className="block text-xs font-medium mb-1">Sidebar Background</label>
