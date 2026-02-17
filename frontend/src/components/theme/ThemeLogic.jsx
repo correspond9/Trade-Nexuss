@@ -434,14 +434,20 @@ export const useThemeLogic = () => {
       button {
         border-radius: var(--nui-buttons-border-radius, ${componentSettings.buttons.borderRadius}px) !important;
         box-shadow: var(--nui-buttons-outer-shadow) !important;
-        background-color: var(--nui-buttons-bg-color, ${componentSettings.buttons.backgroundColor}) !important;
-        color: var(--nui-buttons-text-color, ${componentSettings.buttons.textColor}) !important;
         border: var(--nui-buttons-border-width, ${componentSettings.buttons.borderWidth}px) var(--nui-buttons-border-style, ${componentSettings.buttons.borderStyle}) var(--nui-buttons-border-color, ${componentSettings.buttons.borderColor}) !important;
         font-family: var(--nui-buttons-font-family, ${componentSettings.buttons.fontFamily}) !important;
         font-weight: var(--nui-buttons-font-weight, ${componentSettings.buttons.fontWeight}) !important;
         font-style: var(--nui-buttons-font-style, ${componentSettings.buttons.fontStyle}) !important;
         font-size: var(--nui-buttons-font-size, ${componentSettings.buttons.fontSize}px) !important;
         transition: all 0.2s ease !important;
+      }
+
+      button:not([class*="bg-"]) {
+        background-color: var(--nui-buttons-bg-color, ${componentSettings.buttons.backgroundColor}) !important;
+      }
+
+      button:not([class*="text-"]) {
+        color: var(--nui-buttons-text-color, ${componentSettings.buttons.textColor}) !important;
       }
       
       button:hover {
