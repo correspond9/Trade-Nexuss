@@ -632,11 +632,15 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
         if (!data) return;
         const entries = data.watchlist || data.data || [];
         const mapped = await Promise.all(entries.map(async (e) => {
+          const normalizedInstrumentType = String(e.instrument_type || '').toUpperCase();
+          const displayInstrumentType = (normalizedInstrumentType === 'CE' || normalizedInstrumentType === 'PE' || normalizedInstrumentType === 'FUT')
+            ? normalizedInstrumentType
+            : (normalizedInstrumentType === 'EQUITY' ? 'EQUITY' : 'INDEX');
           const instrument = {
             id: `${e.symbol}_${e.expiry_date}`,
             symbol: e.symbol,
             exchange: isIndexSymbol(e.symbol) ? 'NSE_INDEX' : 'NSE',
-            instrumentType: e.instrument_type,
+            instrumentType: normalizedInstrumentType,
             expiry: e.expiry_date,
             strike: null,
             lotSize: 1,
@@ -645,7 +649,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
             changePercent: 0,
             ...formatInstrumentDisplay({
               symbol: e.symbol,
-              instrumentType: ['CE', 'PE'].includes(e.instrument_type) ? e.instrument_type : 'CE',
+              instrumentType: displayInstrumentType,
               expiry: e.expiry_date,
               strike: null
             })
@@ -659,13 +663,20 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
               instrument.lotSize = fut.lot_size || 1;
             }
           } else {
-            const ltp = Number(e?.ltp);
-            if (Number.isFinite(ltp) && ltp > 0) {
-              instrument.ltp = ltp;
-            } else {
-              const liveLtp = await getUnderlyingLtp(instrument.symbol);
+            if (instrument.instrumentType === 'EQUITY') {
+              const liveLtp = await getUnderlyingLtpWithRetry(instrument.symbol);
               if (liveLtp !== null && liveLtp !== undefined) {
                 instrument.ltp = Number(liveLtp) || 0;
+              }
+            } else {
+              const ltp = Number(e?.ltp);
+              if (Number.isFinite(ltp) && ltp > 0) {
+                instrument.ltp = ltp;
+              } else {
+                const liveLtp = await getUnderlyingLtp(instrument.symbol);
+                if (liveLtp !== null && liveLtp !== undefined) {
+                  instrument.ltp = Number(liveLtp) || 0;
+                }
               }
             }
           }
@@ -677,7 +688,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       }
     };
     load();
-  }, [user, fetchFutureQuote, getUnderlyingLtp]);
+  }, [user, fetchFutureQuote, getUnderlyingLtp, getUnderlyingLtpWithRetry]);
 
   // Handle search with debouncing
   useEffect(() => {

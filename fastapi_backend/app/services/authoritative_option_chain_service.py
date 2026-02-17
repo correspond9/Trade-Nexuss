@@ -2169,18 +2169,31 @@ class AuthoritativeOptionChainService:
         """Synchronous wrapper for populate_with_closing_prices (for startup initialization)"""
         try:
             logger.info("📊 Populating option chain with closing prices (markets closed)...")
-            
-            for underlying, data in market_data.items():
+
+            source_data = market_data or {}
+            configured_underlyings = list(self.index_options.keys())
+
+            for underlying in configured_underlyings:
+                data = source_data.get(underlying, {})
                 from app.market.live_prices import get_prices
                 live_prices = get_prices()
                 current_price = live_prices.get(underlying) or data.get("current_price", 0)
                 expiries = data.get("expiries", [])
+                if not expiries:
+                    try:
+                        expiries = self.get_available_expiries(underlying)
+                    except Exception:
+                        expiries = []
                 selected_expiries = self._select_current_next_expiries(underlying, expiries)
                 closing_prices = data.get("closing_prices", {})
                 
                 # Validate underlying is in permitted list
                 if underlying not in self.index_options:
                     logger.warning(f"⚠️ {underlying} not in permitted index options, skipping")
+                    continue
+
+                if not selected_expiries:
+                    logger.warning(f"⚠️ No expiries available for {underlying} in closing-price path, skipping")
                     continue
                 
                 logger.info(f"  Processing {underlying} at {current_price:.2f}")
