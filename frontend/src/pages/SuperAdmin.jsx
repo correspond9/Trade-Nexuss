@@ -39,7 +39,6 @@ const SuperAdmin = () => {
   const [backdateForm, setBackdateForm] = useState({
     userId: '',
     mobile: '',
-    username: '',
     symbol: '',
     quantity: '',
     avgPrice: '',
@@ -55,7 +54,6 @@ const SuperAdmin = () => {
   const [forceExitForm, setForceExitForm] = useState({
     userId: '',
     mobile: '',
-    username: '',
     positionId: '',
     symbol: '',
     productType: 'MIS',
@@ -66,6 +64,7 @@ const SuperAdmin = () => {
   const [forceExitError, setForceExitError] = useState('');
   const [forceExitMsg, setForceExitMsg] = useState('');
   const [forceExitResult, setForceExitResult] = useState(null);
+  const [instrumentSuggestions, setInstrumentSuggestions] = useState([]);
 
   // Handle save with error handling
   const handleSave = async () => {
@@ -138,9 +137,9 @@ const SuperAdmin = () => {
     setBackdateMsg('');
     setBackdateResult(null);
 
-    const hasTarget = backdateForm.userId || backdateForm.mobile.trim() || backdateForm.username.trim();
+    const hasTarget = backdateForm.userId || backdateForm.mobile.trim();
     if (!hasTarget) {
-      setBackdateError('Provide at least one target: User ID, Mobile, or Username');
+      setBackdateError('Provide at least one target: User ID or Mobile');
       return;
     }
     if (!backdateForm.symbol.trim()) {
@@ -169,7 +168,6 @@ const SuperAdmin = () => {
 
       if (backdateForm.userId) payload.user_id = Number(backdateForm.userId);
       if (backdateForm.mobile.trim()) payload.mobile = backdateForm.mobile.trim();
-      if (backdateForm.username.trim()) payload.username = backdateForm.username.trim();
       if (backdateForm.createdAt) payload.created_at = backdateForm.createdAt;
 
       const res = await apiService.post('/admin/positions/backdate', payload);
@@ -187,10 +185,10 @@ const SuperAdmin = () => {
     setForceExitMsg('');
     setForceExitResult(null);
 
-    const hasTarget = forceExitForm.userId || forceExitForm.mobile.trim() || forceExitForm.username.trim();
+    const hasTarget = forceExitForm.userId || forceExitForm.mobile.trim();
     const hasPositionId = !!forceExitForm.positionId;
     if (!hasPositionId && !hasTarget) {
-      setForceExitError('Provide Position ID or target user (User ID, Mobile, or Username)');
+      setForceExitError('Provide Position ID or target user (User ID or Mobile)');
       return;
     }
     if (!hasPositionId && !forceExitForm.symbol.trim()) {
@@ -215,7 +213,6 @@ const SuperAdmin = () => {
 
       if (forceExitForm.userId) payload.user_id = Number(forceExitForm.userId);
       if (forceExitForm.mobile.trim()) payload.mobile = forceExitForm.mobile.trim();
-      if (forceExitForm.username.trim()) payload.username = forceExitForm.username.trim();
       if (forceExitForm.positionId) payload.position_id = Number(forceExitForm.positionId);
       if (forceExitForm.symbol.trim()) payload.symbol = forceExitForm.symbol.trim();
       if (forceExitForm.quantity !== '') payload.quantity = Number(forceExitForm.quantity);
@@ -269,6 +266,21 @@ const SuperAdmin = () => {
   React.useEffect(() => {
     fetchMarketConfig();
   }, [fetchMarketConfig]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'backdate-position') return;
+
+    const loadSuggestions = async () => {
+      try {
+        const res = await apiService.get('/admin/instruments/suggestions');
+        setInstrumentSuggestions(Array.isArray(res?.data) ? res.data : []);
+      } catch (_error) {
+        setInstrumentSuggestions([]);
+      }
+    };
+
+    loadSuggestions();
+  }, [activeTab]);
 
   const timeInput = (value, onChange) => (
     <input
@@ -890,7 +902,7 @@ const SuperAdmin = () => {
                   Adds a backdated position into an existing user account using the existing admin API.
                 </p>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs text-gray-600 font-semibold mb-1">User ID (optional)</label>
                     <input
@@ -911,16 +923,6 @@ const SuperAdmin = () => {
                       placeholder="e.g. 9326890165"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs text-gray-600 font-semibold mb-1">Username (optional)</label>
-                    <input
-                      type="text"
-                      value={backdateForm.username}
-                      onChange={(e) => setBackdateForm((s) => ({ ...s, username: e.target.value }))}
-                      className="w-full border rounded px-3 py-2"
-                      placeholder="e.g. anums"
-                    />
-                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -928,11 +930,18 @@ const SuperAdmin = () => {
                     <label className="block text-xs text-gray-600 font-semibold mb-1">Symbol</label>
                     <input
                       type="text"
+                      list="historic-instrument-suggestions"
                       value={backdateForm.symbol}
                       onChange={(e) => setBackdateForm((s) => ({ ...s, symbol: e.target.value }))}
                       className="w-full border rounded px-3 py-2"
                       placeholder="e.g. NIFTY 25000 CE"
                     />
+                    <datalist id="historic-instrument-suggestions">
+                      {instrumentSuggestions.map((symbol) => (
+                        <option key={symbol} value={symbol} />
+                      ))}
+                    </datalist>
+                    <div className="mt-1 text-xs text-gray-500">Search Tier-A/Tier-B instruments, or type manually.</div>
                   </div>
                   <div>
                     <label className="block text-xs text-gray-600 font-semibold mb-1">Quantity</label>
@@ -957,7 +966,7 @@ const SuperAdmin = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs text-gray-600 font-semibold mb-1">Exchange Segment</label>
                     <select
@@ -1068,16 +1077,6 @@ const SuperAdmin = () => {
                       onChange={(e) => setForceExitForm((s) => ({ ...s, mobile: e.target.value }))}
                       className="w-full border rounded px-3 py-2"
                       placeholder="e.g. 9326890165"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-600 font-semibold mb-1">Username (optional)</label>
-                    <input
-                      type="text"
-                      value={forceExitForm.username}
-                      onChange={(e) => setForceExitForm((s) => ({ ...s, username: e.target.value }))}
-                      className="w-full border rounded px-3 py-2"
-                      placeholder="e.g. anums"
                     />
                   </div>
                 </div>

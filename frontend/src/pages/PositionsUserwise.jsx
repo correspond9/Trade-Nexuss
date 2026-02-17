@@ -10,6 +10,7 @@ const PositionsUserwise = () => {
   const [expandedUsers, setExpandedUsers] = useState(new Set());
   const [sortBy, setSortBy] = useState('UserId(asc)');
   const [selectedByUser, setSelectedByUser] = useState({});
+  const [selectedPosition, setSelectedPosition] = useState(null);
   const [exitingUsers, setExitingUsers] = useState(new Set());
   const [exitQtyByPosition, setExitQtyByPosition] = useState({});
 
@@ -58,7 +59,9 @@ const PositionsUserwise = () => {
             avgPrice,
             ltp: ltp,
             pnl: pnl,
-            type: pos.status
+            type: pos.status,
+            createdAt: pos.created_at,
+            updatedAt: pos.updated_at
           };
         });
 
@@ -217,6 +220,13 @@ const PositionsUserwise = () => {
 
   const formatPercentage = (value) => {
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+  };
+
+  const formatDateTime = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('en-IN', { hour12: false });
   };
 
   if (loading) {
@@ -401,6 +411,15 @@ const PositionsUserwise = () => {
                                 {exitingUsers.has(user.userId) ? 'Exiting...' : 'EXIT Selected'}
                               </button>
                             </div>
+                            {selectedPosition && selectedPosition.userId === user.userId && (
+                              <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
+                                <div className="font-semibold text-blue-900">Position Details</div>
+                                <div className="mt-1 text-blue-900">ID: {selectedPosition.id}</div>
+                                <div className="text-blue-900">Symbol: {selectedPosition.symbol}</div>
+                                <div className="text-blue-900">Execution Date & Time: {formatDateTime(selectedPosition.updatedAt || selectedPosition.createdAt)}</div>
+                                <div className="text-blue-900">Created At: {formatDateTime(selectedPosition.createdAt)}</div>
+                              </div>
+                            )}
                             <div className="overflow-x-auto">
                               <table className="min-w-full divide-y divide-gray-200 border border-gray-200">
                                 <thead className="bg-gray-100">
@@ -429,11 +448,16 @@ const PositionsUserwise = () => {
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-200">
                                   {user.positions.map((position) => (
-                                    <tr key={position.id} className="hover:bg-gray-50">
+                                    <tr
+                                      key={position.id}
+                                      className="hover:bg-gray-50 cursor-pointer"
+                                      onClick={() => setSelectedPosition({ ...position, userId: user.userId })}
+                                    >
                                       <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
                                         <input
                                           type="checkbox"
                                           checked={(selectedByUser[user.userId] || []).includes(position.id)}
+                                          onClick={(e) => e.stopPropagation()}
                                           onChange={() => togglePositionSelection(user.userId, position.id)}
                                           disabled={position.type !== 'OPEN'}
                                           className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
@@ -472,6 +496,7 @@ const PositionsUserwise = () => {
                                         <select
                                           value={exitQtyByPosition[position.id] ?? Math.max(1, Math.abs(Number(position.quantity || 0)))}
                                           onChange={(e) => handleQtyChange(position.id, e.target.value)}
+                                          onClick={(e) => e.stopPropagation()}
                                           disabled={position.type !== 'OPEN'}
                                           className="border border-gray-300 rounded px-2 py-1 text-xs disabled:opacity-50"
                                         >

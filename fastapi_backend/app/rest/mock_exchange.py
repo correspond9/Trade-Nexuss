@@ -1140,6 +1140,7 @@ def list_positions(user_id: Optional[int] = None, db: Session = Depends(get_db))
     for pos in positions:
         ltp = _get_ltp(pos.symbol, pos.avg_price)
         mtm = (ltp - pos.avg_price) * pos.quantity
+        normalized_status = "OPEN" if int(pos.quantity or 0) != 0 else "CLOSED"
         results.append({
             "id": pos.id,
             "user_id": pos.user_id,
@@ -1150,9 +1151,41 @@ def list_positions(user_id: Optional[int] = None, db: Session = Depends(get_db))
             "avgEntry": pos.avg_price,  # Frontend expects 'avgEntry'
             "mtm": mtm,
             "realizedPnl": pos.realized_pnl,  # Frontend expects 'realizedPnl'
-            "status": pos.status,
+            "status": normalized_status,
+            "created_at": pos.created_at.isoformat() if pos.created_at else None,
+            "updated_at": pos.updated_at.isoformat() if pos.updated_at else None,
         })
     return {"data": results}
+
+
+@router.get("/admin/instruments/suggestions")
+def admin_instrument_suggestions(user=Depends(get_current_user)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+
+    try:
+        if not REGISTRY.loaded:
+            REGISTRY.load()
+    except Exception:
+        pass
+
+    suggestions = set()
+    try:
+        suggestions.update(get_tier_a_equity_symbols() or set())
+    except Exception:
+        pass
+    try:
+        suggestions.update(get_tier_b_etf_symbols() or set())
+    except Exception:
+        pass
+    try:
+        suggestions.update(set(getattr(REGISTRY, "f_o_stocks", []) or []))
+    except Exception:
+        pass
+
+    suggestions.update({"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY", "BANKEX"})
+
+    cleaned = sorted({str(item).strip().upper() for item in suggestions if str(item or "").strip()})
+    return {"data": cleaned}
 
 
 @router.get("/positions")
@@ -1815,6 +1848,8 @@ def admin_backdate_position(req: BackdatePositionRequest, user=Depends(get_curre
             new_avg = ((existing.avg_price or 0.0) * (existing.quantity or 0) + req.avg_price * req.quantity) / total_qty
         existing.quantity = total_qty
         existing.avg_price = new_avg
+        existing.status = "OPEN" if int(total_qty or 0) != 0 else "CLOSED"
+        existing.exchange_segment = req.exchange_segment or existing.exchange_segment
         existing.updated_at = created_at
         # Optionally backdate created_at if requested
         existing.created_at = created_at
