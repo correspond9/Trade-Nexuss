@@ -5,7 +5,7 @@ Users add stocks/expiries, system subscribes to option chains on demand.
 
 import threading
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 from app.storage.db import SessionLocal
 from app.storage.models import Watchlist
 from app.market.subscription_manager import get_subscription_manager
@@ -24,7 +24,7 @@ class WatchlistManager:
     2. User adds to watchlist (symbol + expiry)
     3. System generates option chain (ATM-based strikes)
     4. System subscribes to all strikes (CE + PE)
-    5. At EOD 3:30 PM: unsubscribe all Tier A + clear watchlist
+    5. At EOD 4:00 PM: unsubscribe Tier A + clear watchlists (except protected open-position symbols)
     """
     
     def __init__(self):
@@ -381,6 +381,23 @@ class WatchlistManager:
     
     def clear_all_user_watchlist(self, user_id: int) -> Dict:
         """Clear entire user watchlist (used at EOD)"""
+        return self.clear_all_user_watchlist_with_protection(user_id=user_id, protected_keys=None)
+
+    @staticmethod
+    def _normalize_eod_key(symbol: Optional[str], expiry: Optional[str], instrument_type: Optional[str]) -> Tuple[str, Optional[str]]:
+        normalized_symbol = (symbol or "").strip().upper()
+        normalized_type = (instrument_type or "").upper()
+        if normalized_type == "EQUITY":
+            return normalized_symbol, None
+        normalized_expiry = (expiry or "").strip().upper() or None
+        return normalized_symbol, normalized_expiry
+
+    def clear_all_user_watchlist_with_protection(
+        self,
+        user_id: int,
+        protected_keys: Optional[Set[Tuple[str, Optional[str]]]]
+    ) -> Dict:
+        """Clear user watchlist while preserving globally protected symbol+expiry keys."""
         with self.lock:
             try:
                 entries = self.db.query(Watchlist).filter(
@@ -388,46 +405,17 @@ class WatchlistManager:
                 ).all()
                 
                 count = 0
+                skipped = 0
+                protected = protected_keys or set()
                 for entry in entries:
-                    # Skip clearing if there is an open position for this symbol+expiry
-                    try:
-                        from app.storage.models import MockPosition
-                        from app.rms.span_margin_calculator import _parse_symbol as parse_fno_symbol
-                        from app.rms.mcx_margin_calculator import _parse_symbol as parse_mcx_symbol
-                        pos_query = self.db.query(MockPosition).filter(
-                            MockPosition.user_id == user_id,
-                            MockPosition.quantity != 0,
-                            MockPosition.status == "OPEN"
-                        ).all()
-                        has_open = False
-                        for pos in pos_query:
-                            sym = (pos.symbol or "").strip()
-                            meta = parse_fno_symbol(sym)
-                            if not meta or not meta.get("underlying"):
-                                meta = parse_mcx_symbol(sym)
-                            underlying = (meta.get("underlying") or "").upper()
-                            expiry = meta.get("expiry")
-                            if underlying == (entry.symbol or "").upper() and (expiry == entry.expiry_date):
-                                has_open = True
-                                break
-                        if has_open:
-                            continue
-                    except Exception:
-                        pass
-                    
-                    # Unsubscribe related chains
-                    if entry.instrument_type in ("STOCK_OPTION", "INDEX_OPTION"):
-                        chain = self.atm_engine.get_cached_chain(
-                            entry.symbol,
-                            entry.expiry_date
-                        )
-                        if chain:
-                            strikes = chain["strikes"]
-                            for strike in strikes:
-                                token_ce = f"{entry.symbol}_{entry.expiry_date}_{strike:.0f}CE"
-                                token_pe = f"{entry.symbol}_{entry.expiry_date}_{strike:.0f}PE"
-                                self.sub_mgr.unsubscribe(token_ce, reason="EOD_CLEANUP")
-                                self.sub_mgr.unsubscribe(token_pe, reason="EOD_CLEANUP")
+                    entry_key = self._normalize_eod_key(
+                        entry.symbol,
+                        entry.expiry_date,
+                        entry.instrument_type
+                    )
+                    if entry_key in protected:
+                        skipped += 1
+                        continue
                     
                     self.db.delete(entry)
                     count += 1
@@ -436,7 +424,8 @@ class WatchlistManager:
                 
                 return {
                     "success": True,
-                    "cleared_count": count
+                    "cleared_count": count,
+                    "skipped_count": skipped
                 }
             
             except Exception as e:
@@ -447,6 +436,45 @@ class WatchlistManager:
                 return {
                     "success": False,
                     "message": f"Error clearing watchlist: {str(e)}"
+                }
+
+    def clear_all_watchlists(self, protected_keys: Optional[Set[Tuple[str, Optional[str]]]] = None) -> Dict:
+        """Clear all users' watchlists while preserving globally protected symbol+expiry keys."""
+        with self.lock:
+            try:
+                entries = self.db.query(Watchlist).all()
+
+                count = 0
+                skipped = 0
+                protected = protected_keys or set()
+
+                for entry in entries:
+                    entry_key = self._normalize_eod_key(
+                        entry.symbol,
+                        entry.expiry_date,
+                        entry.instrument_type
+                    )
+                    if entry_key in protected:
+                        skipped += 1
+                        continue
+
+                    self.db.delete(entry)
+                    count += 1
+
+                self.db.commit()
+                return {
+                    "success": True,
+                    "cleared_count": count,
+                    "skipped_count": skipped
+                }
+            except Exception as e:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+                return {
+                    "success": False,
+                    "message": f"Error clearing all watchlists: {str(e)}"
                 }
 
 

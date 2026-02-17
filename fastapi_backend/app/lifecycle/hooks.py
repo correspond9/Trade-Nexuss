@@ -30,12 +30,14 @@ def get_scheduler():
 def eod_cleanup():
     """
     End-of-Day (4:00 PM IST) cleanup task
-    - Unsubscribe all Tier A (user watchlist) subscriptions
+    - Unsubscribe Tier A (user watchlist) subscriptions except globally protected open-position symbols
+    - Clear watchlist entries except globally protected open-position symbols
     - Preserve Tier B (always-on) subscriptions
     - Reset system for next trading session
     """
     try:
         from app.market.subscription_manager import SUBSCRIPTION_MGR
+        from app.market.watchlist_manager import WATCHLIST_MGR
         from app.storage.db import SessionLocal
         
         print("\n" + "="*70)
@@ -48,10 +50,21 @@ def eod_cleanup():
         print(f"  • Total subscriptions: {stats_before['total_subscriptions']}")
         print(f"  • Tier A (user watchlists): {stats_before['tier_a_count']}")
         print(f"  • Tier B (always-on): {stats_before['tier_b_count']}")
+
+        protected_keys = SUBSCRIPTION_MGR.get_global_open_position_protected_keys()
+        print(f"\n[EOD] Protected symbol-expiry keys (open positions): {len(protected_keys)}")
         
-        # Unsubscribe all Tier A subscriptions
-        tier_a_unsubscribed = SUBSCRIPTION_MGR.unsubscribe_all_tier_a()
-        print(f"\n[EOD] Unsubscribed {tier_a_unsubscribed} Tier A instruments")
+        # Phase 1: Unsubscribe Tier A subscriptions (except protected)
+        tier_a_unsubscribed = SUBSCRIPTION_MGR.unsubscribe_all_tier_a(protected_keys=protected_keys)
+        print(f"\n[EOD] Phase 1 - Unsubscribed {tier_a_unsubscribed} Tier A instruments")
+
+        # Phase 2: Clear watchlists (except protected)
+        watchlist_result = WATCHLIST_MGR.clear_all_watchlists(protected_keys=protected_keys)
+        watchlist_cleared = int(watchlist_result.get("cleared_count") or 0)
+        watchlist_skipped = int(watchlist_result.get("skipped_count") or 0)
+        if not watchlist_result.get("success"):
+            print(f"[EOD-WARN] Watchlist clear failed: {watchlist_result.get('message')}")
+        print(f"[EOD] Phase 2 - Cleared watchlist entries: {watchlist_cleared}, Skipped (protected): {watchlist_skipped}")
         
         # Get stats after cleanup
         stats_after = SUBSCRIPTION_MGR.get_ws_stats()
@@ -67,7 +80,12 @@ def eod_cleanup():
             log_entry = SubscriptionLog(
                 action="EOD_CLEANUP",
                 instrument_token="ALL_TIER_A",
-                reason=f"End-of-day cleanup: unsubscribed {tier_a_unsubscribed} instruments"
+                reason=(
+                    f"End-of-day cleanup: unsubscribed={tier_a_unsubscribed}, "
+                    f"watchlist_cleared={watchlist_cleared}, "
+                    f"watchlist_skipped={watchlist_skipped}, "
+                    f"protected_keys={len(protected_keys)}"
+                )
             )
             db.add(log_entry)
             db.commit()

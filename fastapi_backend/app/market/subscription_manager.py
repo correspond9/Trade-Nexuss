@@ -437,17 +437,22 @@ class SubscriptionManager:
                 "tier_a_count": len([s for s in self.subscriptions.values() if s["tier"] == "TIER_A"]),
                 "tier_b_count": len([s for s in self.subscriptions.values() if s["tier"] == "TIER_B"])
             }
-    
-    def unsubscribe_all_tier_a(self) -> int:
-        """Unsubscribe all Tier A subscriptions (e.g., at EOD)"""
-        # Build protection set from open mock positions
-        protected_tokens = set()
-        protected_normalized = set()
+
+    @staticmethod
+    def _normalize_eod_key(symbol: Optional[str], expiry: Optional[str]) -> Tuple[str, Optional[str]]:
+        normalized_symbol = (symbol or "").strip().upper()
+        normalized_expiry = (expiry or "").strip().upper() or None
+        return normalized_symbol, normalized_expiry
+
+    def get_global_open_position_protected_keys(self) -> Set[Tuple[str, Optional[str]]]:
+        """Build global protection keys from all open positions across all users."""
+        protected_keys: Set[Tuple[str, Optional[str]]] = set()
+        db = None
         try:
-            from app.storage.db import SessionLocal
             from app.storage.models import MockPosition
             from app.rms.span_margin_calculator import _parse_symbol as parse_fno_symbol
             from app.rms.mcx_margin_calculator import _parse_symbol as parse_mcx_symbol
+
             db = SessionLocal()
             positions = (
                 db.query(MockPosition)
@@ -456,19 +461,30 @@ class SubscriptionManager:
                 .all()
             )
             for pos in positions:
-                sym = (pos.symbol or "").strip()
-                if sym:
-                    protected_tokens.add(sym)
-                meta = parse_fno_symbol(sym)
+                symbol_text = pos.symbol or ""
+                meta = parse_fno_symbol(symbol_text)
                 if not meta or not meta.get("underlying"):
-                    meta = parse_mcx_symbol(sym)
-                underlying = (meta.get("underlying") or "").upper()
-                expiry = meta.get("expiry")
-                strike = meta.get("strike")
-                opt = (meta.get("option_type") or "").upper() or None
-                protected_normalized.add((underlying, expiry, strike, opt))
+                    meta = parse_mcx_symbol(symbol_text)
+                key = self._normalize_eod_key(
+                    meta.get("underlying") or symbol_text,
+                    meta.get("expiry")
+                )
+                if key[0]:
+                    protected_keys.add(key)
         except Exception:
-            pass
+            return protected_keys
+        finally:
+            try:
+                if db:
+                    db.close()
+            except Exception:
+                pass
+
+        return protected_keys
+    
+    def unsubscribe_all_tier_a(self, protected_keys: Optional[Set[Tuple[str, Optional[str]]]] = None) -> int:
+        """Unsubscribe all Tier A subscriptions (e.g., at EOD)"""
+        protected = protected_keys or self.get_global_open_position_protected_keys()
         
         # Unsubscribe Tier A except protected
         unsubscribed = 0
@@ -478,17 +494,11 @@ class SubscriptionManager:
                 if data.get("tier") == "TIER_A"
             ]
             for token, data in tier_a_items:
-                if token in protected_tokens:
-                    continue
-                underlying = (data.get("symbol_canonical") or data.get("symbol") or "").upper()
-                expiry = data.get("expiry")
-                strike = data.get("strike")
-                try:
-                    strike = float(strike) if strike is not None else None
-                except Exception:
-                    strike = None
-                opt = (data.get("option_type") or "").upper() or None
-                if (underlying, expiry, strike, opt) in protected_normalized:
+                sub_key = self._normalize_eod_key(
+                    data.get("symbol_canonical") or data.get("symbol") or "",
+                    data.get("expiry")
+                )
+                if sub_key in protected:
                     continue
                 ok, _msg = self.unsubscribe(token, reason="EOD_CLEANUP")
                 if ok:
