@@ -439,6 +439,8 @@ def _apply_position(db: Session, user_id: int, symbol: str, exchange_segment: st
             position.status = "CLOSED"
         else:
             position.avg_price = price
+
+    position.status = "OPEN" if int(position.quantity or 0) != 0 else "CLOSED"
     position.updated_at = ist_now()
 
 

@@ -416,6 +416,7 @@ class ExecutionEngine:
             if total_qty != 0:
                 position.avg_price = ((position.avg_price * position.quantity) + (fill_price * qty)) / total_qty
             position.quantity = total_qty
+        position.status = "OPEN" if int(position.quantity or 0) != 0 else "CLOSED"
         position.updated_at = ist_now()
         db.commit()  # Commit position update immediately
 
