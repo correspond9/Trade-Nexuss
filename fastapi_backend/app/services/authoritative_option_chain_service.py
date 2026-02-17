@@ -1066,7 +1066,12 @@ class AuthoritativeOptionChainService:
         return next_week.month != date_value.month
 
     def _select_current_next_expiries(self, underlying: str, expiries: List[str]) -> List[str]:
-        """Select correct current and next expiries based on underlying rules."""
+        """Select current and next expiries from source data.
+
+        Notes:
+        - Avoid hard-coded weekday assumptions (exchange schedules can change).
+        - Trust upstream expiry ordering and return first 2 upcoming expiries.
+        """
         today = datetime.utcnow().date()
 
         parsed = []
@@ -1081,40 +1086,7 @@ class AuthoritativeOptionChainService:
         if not parsed:
             return []
 
-        upper = underlying.upper()
-
-        # Weekly selection for NIFTY and SENSEX (as per current exchange schedule)
-        weekly_day_map = {
-            "NIFTY": 1,
-            "NIFTY50": 1,
-            "SENSEX": 3
-        }
-
-        if upper in weekly_day_map:
-            target_weekday = weekly_day_map[upper]
-            weekly = [item for item in parsed if item[0].weekday() == target_weekday]
-            if len(weekly) >= 2:
-                return [weekly[0][1], weekly[1][1]]
-            if weekly:
-                remaining = [item for item in parsed if item not in weekly]
-                return [weekly[0][1]] + ([remaining[0][1]] if remaining else [])
-
-        # Monthly-only selection for BANKNIFTY
-        if upper in {"BANKNIFTY"}:
-            monthly_by_month: Dict[tuple, tuple] = {}
-            for exp_date, exp_raw in parsed:
-                key = (exp_date.year, exp_date.month)
-                if key not in monthly_by_month or exp_date > monthly_by_month[key][0]:
-                    monthly_by_month[key] = (exp_date, exp_raw)
-
-            monthly = sorted(monthly_by_month.values(), key=lambda x: x[0])
-            if len(monthly) >= 2:
-                return [monthly[0][1], monthly[1][1]]
-            if monthly:
-                remaining = [item for item in parsed if item not in monthly]
-                return [monthly[0][1]] + ([remaining[0][1]] if remaining else [])
-
-        # Default: first 2 upcoming expiries
+        # Universal selection: first 2 upcoming expiries
         return [parsed[0][1]] + ([parsed[1][1]] if len(parsed) > 1 else [])
 
     def get_cache_statistics(self) -> Dict[str, Any]:
