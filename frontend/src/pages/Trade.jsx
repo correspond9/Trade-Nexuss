@@ -10,6 +10,9 @@ import PositionsTab from './POSITIONS';
 import OrderModal from '../components/OrderModal';
 // import marketDataCache from '../services/marketDataCache'; // Temporarily disabled
 
+const expiryCache = new Map();
+const EXPIRY_CACHE_TTL_MS = 2 * 60 * 1000;
+
 // Convert ISO dates to display format (DD MMM) for UI
 const formatExpiry = (dateStr) => {
   const date = new Date(dateStr);
@@ -24,10 +27,9 @@ const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
     // Convert display name to symbol
     const symbol = normalizeUnderlying(selectedIndex);
 
-    const underlyingsData = await apiService.get('/options/available/underlyings');
-    const availableUnderlyings = Array.isArray(underlyingsData?.data) ? underlyingsData.data : [];
-    if (!availableUnderlyings.includes(symbol)) {
-      console.warn('[TRADE] Underlying not listed in available/underlyings, trying direct expiry fetch:', symbol);
+    const cached = expiryCache.get(symbol);
+    if (cached && (Date.now() - cached.ts) < EXPIRY_CACHE_TTL_MS) {
+      return cached.value;
     }
     
     console.log('[TRADE] Fetching expiries from authoritative API for', symbol);
@@ -56,36 +58,17 @@ const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
       currentIndex = 0;
     }
     
-    const probeStart = Math.max(0, currentIndex - 1);
-    const probeEnd = Math.min(sorted.length, currentIndex + 6);
-    const probeCandidates = sorted.slice(probeStart, probeEnd);
-
-    const probeResults = await Promise.all(
-      probeCandidates.map(async (expIso) => {
-        try {
-          const response = await apiService.get('/options/live', { underlying: symbol, expiry: expIso });
-          if (response?.status === 'success') {
-            return expIso;
-          }
-        } catch {
-          // Ignore miss for this expiry candidate
-        }
-        return null;
-      })
-    );
-
-    const validExpiries = probeResults.filter(Boolean);
-    const selected = (validExpiries.length > 0
-      ? validExpiries
-      : sorted.slice(currentIndex, currentIndex + 2)).slice(0, 2);
+    const selected = sorted.slice(currentIndex, currentIndex + 2);
     
     console.log('[TRADE] Selected indices:', currentIndex, 'to', currentIndex + 2);
     console.log('[TRADE] Selected expiries (ISO):', selected);
     console.log('[TRADE] Selected expiries (Display):', selected.map(formatExpiry));
-    return {
+    const value = {
       displayExpiries: selected.map(formatExpiry),
       isoExpiries: selected
     };
+    expiryCache.set(symbol, { ts: Date.now(), value });
+    return value;
     
   } catch (error) {
     console.error('[TRADE] Error fetching from authoritative API:', error);

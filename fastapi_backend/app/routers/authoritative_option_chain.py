@@ -69,7 +69,7 @@ async def get_option_chain_live(
                             logger.info(f"♻️ Cache miss for {underlying} {expiry}; running on-demand market-aware warm-up")
                             await asyncio.wait_for(
                                 authoritative_option_chain_service.populate_cache_with_market_aware_data(),
-                                timeout=3.0,
+                                timeout=8.0,
                             )
                         except asyncio.TimeoutError:
                             logger.warning(f"⚠️ Warm-up timed out for {underlying}; serving cache miss response")
@@ -77,6 +77,19 @@ async def get_option_chain_live(
                             logger.warning(f"⚠️ Warm-up attempt failed for {underlying}: {warmup_error}")
 
                 option_chain = authoritative_option_chain_service.get_option_chain_from_cache(underlying, expiry)
+
+            if option_chain is None:
+                try:
+                    logger.info(f"♻️ Cache still missing for {underlying} {expiry}; running live-data bootstrap fallback")
+                    await asyncio.wait_for(
+                        authoritative_option_chain_service.populate_with_live_data(),
+                        timeout=8.0,
+                    )
+                    option_chain = authoritative_option_chain_service.get_option_chain_from_cache(underlying, expiry)
+                except asyncio.TimeoutError:
+                    logger.warning(f"⚠️ Live-data bootstrap timed out for {underlying} {expiry}")
+                except Exception as bootstrap_error:
+                    logger.warning(f"⚠️ Live-data bootstrap failed for {underlying} {expiry}: {bootstrap_error}")
 
             if option_chain is None:
                 try:
