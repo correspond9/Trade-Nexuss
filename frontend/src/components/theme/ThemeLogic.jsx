@@ -148,6 +148,15 @@ export const useThemeLogic = () => {
   const originalThemeVarsRef = useRef(null);
   const keepAppliedOnUnmountRef = useRef(false);
 
+  const syncThemeToLocalStorage = (config, settings) => {
+    localStorage.setItem('appliedThemeConfig', JSON.stringify(config));
+    localStorage.setItem('appliedComponentSettings', JSON.stringify(settings));
+    localStorage.setItem('customThemeConfig', JSON.stringify(config));
+    localStorage.setItem('componentSettings', JSON.stringify(settings));
+    localStorage.setItem('themeDraftConfig', JSON.stringify(config));
+    localStorage.setItem('themeDraftComponentSettings', JSON.stringify(settings));
+  };
+
   const themes = {
     'Default': {
       borderRadius: 10,
@@ -464,12 +473,7 @@ export const useThemeLogic = () => {
         if (themeConfigFromServer && componentSettingsFromServer) {
           setThemeConfig(themeConfigFromServer);
           setComponentSettings(componentSettingsFromServer);
-          localStorage.setItem('appliedThemeConfig', JSON.stringify(themeConfigFromServer));
-          localStorage.setItem('appliedComponentSettings', JSON.stringify(componentSettingsFromServer));
-          localStorage.setItem('customThemeConfig', JSON.stringify(themeConfigFromServer));
-          localStorage.setItem('componentSettings', JSON.stringify(componentSettingsFromServer));
-          localStorage.setItem('themeDraftConfig', JSON.stringify(themeConfigFromServer));
-          localStorage.setItem('themeDraftComponentSettings', JSON.stringify(componentSettingsFromServer));
+          syncThemeToLocalStorage(themeConfigFromServer, componentSettingsFromServer);
           return;
         }
       } catch (_e) {
@@ -479,6 +483,23 @@ export const useThemeLogic = () => {
     };
 
     hydrateFromServer();
+  }, []);
+
+  useEffect(() => {
+    const handleThemeApplied = (event) => {
+      const detail = event?.detail || {};
+      const nextConfig = detail?.themeConfig;
+      const nextSettings = detail?.componentSettings;
+      if (!nextConfig || !nextSettings) {
+        return;
+      }
+      setThemeConfig(nextConfig);
+      setComponentSettings(nextSettings);
+      syncThemeToLocalStorage(nextConfig, nextSettings);
+    };
+
+    window.addEventListener('theme:applied', handleThemeApplied);
+    return () => window.removeEventListener('theme:applied', handleThemeApplied);
   }, []);
 
   useEffect(() => {
@@ -540,8 +561,8 @@ export const useThemeLogic = () => {
       document.documentElement.style.setProperty(`--nui-${component}-font-style`, settings.fontStyle);
       
       // Generate component-specific shadows
-      const componentLightColor = settings.shadowLight;
-      const componentDarkColor = settings.shadowDark;
+      const componentLightColor = themeConfig.shadowLight;
+      const componentDarkColor = themeConfig.shadowDark;
       const componentLightIntensity = settings.shadowLightIntensity / 100;
       const componentDarkIntensity = settings.shadowDarkIntensity / 100;
       
@@ -759,25 +780,25 @@ export const useThemeLogic = () => {
   const applyThemeGlobally = () => {
     const persist = async () => {
       keepAppliedOnUnmountRef.current = true;
-      localStorage.setItem('appliedThemeConfig', JSON.stringify(themeConfig));
-      localStorage.setItem('appliedComponentSettings', JSON.stringify(componentSettings));
-      localStorage.setItem('customThemeConfig', JSON.stringify(themeConfig));
-      localStorage.setItem('componentSettings', JSON.stringify(componentSettings));
-      localStorage.setItem('themeDraftConfig', JSON.stringify(themeConfig));
-      localStorage.setItem('themeDraftComponentSettings', JSON.stringify(componentSettings));
-
-      try {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('theme:applied'));
-        }
-      } catch (_e) {
-        // ignore event dispatch errors
-      }
+      syncThemeToLocalStorage(themeConfig, componentSettings);
 
       await apiService.post('/admin/theme-config', {
         theme_config: themeConfig,
         component_settings: componentSettings,
       });
+
+      try {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('theme:applied', {
+            detail: {
+              themeConfig,
+              componentSettings,
+            },
+          }));
+        }
+      } catch (_e) {
+        // ignore event dispatch errors
+      }
 
       return true;
     };
