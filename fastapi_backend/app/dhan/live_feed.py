@@ -526,7 +526,7 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
         except Exception:
             pass
     
-    # ✨ NEW: Include ALL Tier B subscriptions from subscription manager
+    # Include active Tier A + Tier B subscriptions from subscription manager
     try:
         # ✨ CRITICAL: Load subscriptions from database first (with caching)
         global _last_db_load_time
@@ -540,13 +540,11 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
         from app.services.dhan_security_id_mapper import dhan_security_mapper
         _ensure_mapper_loaded()
         
-        tier_b_count = 0
+        synced_count = 0
         for token, sub_info in SUBSCRIPTION_MGR.subscriptions.items():
             symbol = (sub_info.get("symbol_canonical") or sub_info.get("symbol") or "").upper()
             tier = sub_info.get("tier", "").upper()
-            
-            # Only include Tier B (always-on) subscriptions
-            if tier != "TIER_B":
+            if tier not in {"TIER_A", "TIER_B"}:
                 continue
                 
             # Resolve missing security metadata (DB-loaded subscriptions do not persist exchange/security_id)
@@ -630,9 +628,9 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
                     "option_type": option_type,
                 }
             
-            tier_b_count += 1
+            synced_count += 1
         
-        print(f"[SYNC] Found {tier_b_count} Tier B subscriptions to sync")
+        print(f"[SYNC] Found {synced_count} active subscriptions to sync (Tier A + Tier B)")
         
     except Exception as e:
         print(f"[ERROR] Failed to load Tier B subscriptions: {e}")
@@ -943,6 +941,15 @@ def on_message_callback(feed, message):
             existing_price = get_price(symbol)
             if existing_price and existing_price > 0:
                 return
+            try:
+                from app.ems.exchange_clock import is_market_open
+                exchange_code = _subscribed_securities.get(sec_id_str, {}).get("exchange")
+                exchange_name = _exchange_name_from_code(exchange_code)
+                if exchange_name and is_market_open(exchange_name):
+                    # During market hours, don't overwrite with stale previous close.
+                    return
+            except Exception:
+                pass
             exchange_code = _subscribed_securities.get(sec_id_str, {}).get("exchange")
             last_close = _get_last_close_price(sec_id_str, exchange_code)
             if last_close is not None:
