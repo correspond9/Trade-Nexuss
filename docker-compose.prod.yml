@@ -26,7 +26,7 @@ services:
       - DEBUG=false
       - STARTUP_LOAD_MASTER=false
       - STARTUP_LOAD_TIER_B=false
-      - STARTUP_START_STREAMS=false
+      - STARTUP_START_STREAMS=true
       - DISABLE_DHAN_WS=false
       - DISABLE_MARKET_STREAMS=false
     env_file:
