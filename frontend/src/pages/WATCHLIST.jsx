@@ -1047,7 +1047,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
                 key={num}
                 onClick={() => setSelectedWatchlist(parseInt(num))}
                 className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${selectedWatchlist === parseInt(num)
-                  ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-500 ring-offset-2'
+                  ? 'bg-blue-600 !text-white shadow-sm ring-2 ring-blue-500 ring-offset-2'
                   : 'bg-gray-100 text-gray-700 ring-1 ring-gray-300 hover:bg-gray-50 hover:ring-gray-400'
                   }`}
               >

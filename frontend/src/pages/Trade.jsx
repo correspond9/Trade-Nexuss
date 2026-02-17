@@ -199,7 +199,7 @@ const Trade = () => {
                   onClick={() => setLeftTab(tab.id)}
                   className={`flex-1 px-[1em] py-[0.6em] min-h-[2.4em] leading-tight font-semibold rounded-md transition-colors ${
                     leftTab === tab.id
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-blue-600 !text-white'
                       : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
                   }`}
                 >
@@ -222,7 +222,7 @@ const Trade = () => {
                           onClick={() => handleExpiryChange(exp)}
                           className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
                             expiry === exp
-                              ? 'bg-blue-600 text-white'
+                              ? 'bg-blue-600 !text-white'
                               : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                           }`}
                         >
@@ -245,7 +245,7 @@ const Trade = () => {
                         onClick={() => setSortBy(option)}
                         className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
                           sortBy === option
-                            ? 'bg-blue-600 text-white'
+                            ? 'bg-blue-600 !text-white'
                             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                         }`}
                       >
@@ -265,7 +265,7 @@ const Trade = () => {
                       onClick={() => setSelectedIndex(index)}
                       className={`flex-1 px-2 py-1 text-xs font-medium rounded transition-colors ${
                         selectedIndex === index
-                          ? 'bg-blue-600 text-white'
+                          ? 'bg-blue-600 !text-white'
                           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       }`}
                     >
@@ -294,7 +294,7 @@ const Trade = () => {
                     onClick={() => setRightTab(tab.id)}
                     className={`flex-1 px-[1em] py-[0.6em] min-h-[2.4em] leading-tight font-semibold rounded-md transition-colors ${
                       rightTab === tab.id
-                        ? 'bg-blue-600 text-white'
+                        ? 'bg-blue-600 !text-white'
                         : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
                     }`}
                   >
