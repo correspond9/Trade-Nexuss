@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.execution_simulator.execution_config import ExecutionConfig
 from app.execution_simulator.latency_model import LatencyModel
 from app.execution_simulator.slippage_model import SlippageModel
-from app.execution_simulator.fill_engine import FillEngine
+from app.execution_simulator.fill_engine import FillEngine, FillResult
 from app.execution_simulator.order_queue_manager import OrderQueueManager
 from app.execution_simulator.rejection_engine import RejectionEngine
 from app.market_cache.equities import get_equity
@@ -54,7 +54,7 @@ class ExecutionEngine:
                         "best_ask": best_ask,
                         "bid_qty": bid_qty,
                         "ask_qty": ask_qty,
-                        "last_update_time": ist_now().isoformat(),
+                        "last_update_time": depth.get("timestamp"),
                     }
         except Exception:
             pass
@@ -165,6 +165,70 @@ class ExecutionEngine:
             "ask_qty": None,
             "last_update_time": None,
         }
+
+    def _parse_snapshot_time(self, value: Optional[object]) -> Optional[datetime]:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(str(value))
+        except Exception:
+            return None
+
+    def _is_snapshot_stale(self, snapshot: Dict[str, object], max_age_ms: int = 1500) -> bool:
+        ts = self._parse_snapshot_time(snapshot.get("last_update_time"))
+        if ts is None:
+            return True
+        age_ms = (ist_now() - ts).total_seconds() * 1000.0
+        return age_ms > max_age_ms
+
+    def _compute_market_sweep_fills(
+        self,
+        exchange: str,
+        side: str,
+        order_qty: int,
+        top_price: Optional[float],
+        top_qty: Optional[int],
+        spread: float,
+        lot_step: int = 1,
+    ) -> List[FillResult]:
+        if order_qty <= 0 or top_price is None:
+            return []
+
+        remaining = int(order_qty)
+        step = max(1, int(lot_step or 1))
+        visible_qty = int(top_qty or 0)
+        if visible_qty <= 0:
+            visible_qty = remaining
+
+        fills: List[FillResult] = []
+        while remaining > 0:
+            chunk = min(remaining, visible_qty)
+            if step > 1:
+                chunk = (chunk // step) * step
+                if chunk <= 0:
+                    if remaining >= step:
+                        chunk = step
+                    else:
+                        chunk = remaining
+
+            chunk = min(chunk, remaining)
+            if chunk <= 0:
+                break
+
+            slippage = self.slippage_model.compute_slippage(
+                exchange,
+                remaining,
+                max(visible_qty, 1),
+                spread,
+                float(top_price),
+            )
+            fill_price = float(top_price) + slippage if side == "BUY" else float(top_price) - slippage
+            fills.append(FillResult(fill_price=fill_price, fill_quantity=int(chunk), slippage=slippage))
+            remaining -= int(chunk)
+
+        return fills
 
     def _exchange_from_segment(self, exchange_segment: str) -> str:
         prefix = (exchange_segment or "").split("_")[0].upper()
@@ -397,11 +461,29 @@ class ExecutionEngine:
         latency_ms = self.latency_model.sample_latency_ms(exchange, order.user_id)
         time.sleep(latency_ms / 1000.0)
 
-        decision_price = snapshot.get("best_ask") if order.transaction_type == "BUY" else snapshot.get("best_bid")
+        # Refresh after latency so execution uses latest bid/ask instead of pre-latency snapshot.
+        fresh_snapshot = self._snapshot_for_order(order.symbol, order.exchange_segment)
+        if self._is_snapshot_stale(fresh_snapshot):
+            retry_snapshot = self._snapshot_for_order(order.symbol, order.exchange_segment)
+            if retry_snapshot.get("best_bid") is not None or retry_snapshot.get("best_ask") is not None:
+                fresh_snapshot = retry_snapshot
+
+        snapshot = fresh_snapshot
+        bid = snapshot.get("best_bid")
+        ask = snapshot.get("best_ask")
+
+        decision_price = ask if order.transaction_type == "BUY" else bid
         self._log_event(db, order, "ORDER_ACCEPTED", decision_price, None, None, None, latency_ms, None)
 
         remaining = order.quantity - order.filled_qty
         if remaining <= 0:
+            return
+
+        if effective_type == "MARKET" and (bid is None or ask is None):
+            order.status = "REJECTED"
+            order.remarks = "NO_LIQUIDITY"
+            order.updated_at = ist_now()
+            self._log_event(db, order, "ORDER_REJECTED", decision_price, None, None, "NO_LIQUIDITY", latency_ms, None)
             return
 
         bid_qty = snapshot.get("bid_qty") or self.config.default_bid_qty
@@ -412,13 +494,22 @@ class ExecutionEngine:
         if effective_type == "MARKET":
             top_price = ask if order.transaction_type == "BUY" else bid
             top_qty = ask_qty if order.transaction_type == "BUY" else bid_qty
-            fills = self.fill_engine.compute_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread, lot_step=lot_step)
+            fills = self._compute_market_sweep_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread, lot_step=lot_step)
             if not fills:
+                order.status = "REJECTED"
+                order.remarks = "NO_LIQUIDITY"
+                order.updated_at = ist_now()
+                self._log_event(db, order, "ORDER_REJECTED", top_price, None, None, "NO_LIQUIDITY", latency_ms, None)
                 return
             for fill in fills:
                 self._apply_fill(db, order, fill.fill_price, fill.fill_quantity)
                 event_type = "FULL_FILL" if order.filled_qty >= order.quantity else "PARTIAL_FILL"
                 self._log_event(db, order, event_type, top_price, fill.fill_price, fill.fill_quantity, None, latency_ms, fill.slippage)
+            if order.filled_qty < order.quantity:
+                order.status = "REJECTED"
+                order.remarks = "NO_LIQUIDITY"
+                order.updated_at = ist_now()
+                self._log_event(db, order, "ORDER_REJECTED", top_price, None, None, "NO_LIQUIDITY", latency_ms, None)
             return
 
         if effective_type == "LIMIT":
@@ -471,6 +562,14 @@ class ExecutionEngine:
             bid_qty = snapshot.get("bid_qty") or self.config.default_bid_qty
             ask_qty = snapshot.get("ask_qty") or self.config.default_ask_qty
             if bid is None or ask is None:
+                effective_type = order.order_type
+                if order.order_type in {"SL-M", "TRIGGER"}:
+                    effective_type = "MARKET"
+                if effective_type == "MARKET":
+                    order.status = "REJECTED"
+                    order.remarks = "NO_LIQUIDITY"
+                    order.updated_at = ist_now()
+                    self._log_event(db, order, "ORDER_REJECTED", None, None, None, "NO_LIQUIDITY", None, None)
                 continue
 
             spread = ask - bid
@@ -498,14 +597,28 @@ class ExecutionEngine:
                 else:
                     continue
 
-            fills = self.fill_engine.compute_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread, lot_step=lot_step)
+            if effective_type == "MARKET":
+                fills = self._compute_market_sweep_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread, lot_step=lot_step)
+            else:
+                fills = self.fill_engine.compute_fills(exchange, order.transaction_type, remaining, top_price, top_qty, spread, lot_step=lot_step)
             if not fills:
+                if effective_type == "MARKET":
+                    order.status = "REJECTED"
+                    order.remarks = "NO_LIQUIDITY"
+                    order.updated_at = ist_now()
+                    self._log_event(db, order, "ORDER_REJECTED", top_price, None, None, "NO_LIQUIDITY", None, None)
                 continue
             latency_ms = self.latency_model.sample_latency_ms(exchange, order.user_id)
             for fill in fills:
                 self._apply_fill(db, order, fill.fill_price, fill.fill_quantity)
                 event_type = "FULL_FILL" if order.filled_qty >= order.quantity else "PARTIAL_FILL"
                 self._log_event(db, order, event_type, top_price, fill.fill_price, fill.fill_quantity, None, latency_ms, fill.slippage)
+
+            if effective_type == "MARKET" and order.filled_qty < order.quantity:
+                order.status = "REJECTED"
+                order.remarks = "NO_LIQUIDITY"
+                order.updated_at = ist_now()
+                self._log_event(db, order, "ORDER_REJECTED", top_price, None, None, "NO_LIQUIDITY", None, None)
 
 _ENGINE = ExecutionEngine()
 
