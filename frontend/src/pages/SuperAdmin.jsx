@@ -5,6 +5,7 @@ import { apiService } from '../services/apiService';
 import { Settings, Eye } from 'lucide-react';
 import { useAuthSettings } from '../hooks/useAuthSettings';
 import SystemMonitoring from '../components/SystemMonitoring';
+import ThemeCustomizer from '../components/theme/ThemeCustomizer';
 
 const SuperAdmin = () => {
   const { user } = useAuth();
@@ -360,6 +361,16 @@ const SuperAdmin = () => {
             }`}
           >
             Historic Position
+          </button>
+          <button
+            onClick={() => setActiveTab('theme-management')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'theme-management'
+                ? 'bg-blue-600 text-white'
+                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            Theme Management
           </button>
         </div>
 
@@ -1154,6 +1165,14 @@ const SuperAdmin = () => {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'theme-management' && (
+          <div className="max-w-7xl">
+            <div className="bg-white rounded-lg shadow p-4">
+              <ThemeCustomizer />
             </div>
           </div>
         )}
