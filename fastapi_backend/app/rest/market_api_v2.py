@@ -8,10 +8,72 @@ from datetime import datetime, date
 from typing import Optional
 import logging
 import requests
+import os
+import threading
+import time
 from app.market_orchestrator import get_orchestrator
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_stream_recovery_lock = threading.Lock()
+_last_stream_recovery_attempt = 0.0
+
+
+def _maybe_recover_streams() -> None:
+    """Best-effort auto-recovery when market feed is unexpectedly not started."""
+    global _last_stream_recovery_attempt
+
+    try:
+        flag = (os.getenv("DISABLE_DHAN_WS") or os.getenv("BACKEND_OFFLINE") or os.getenv("DISABLE_MARKET_STREAMS") or "").strip().lower()
+        if flag in ("1", "true", "yes", "on"):
+            return
+
+        ws_connected = False
+        try:
+            from app.market.ws_manager import get_ws_manager
+            ws_connected = (get_ws_manager().get_status().get("connected_connections") or 0) > 0
+        except Exception:
+            ws_connected = False
+
+        feed_started = False
+        cooldown_active = False
+        try:
+            from app.dhan.live_feed import get_live_feed_status
+            feed = get_live_feed_status() or {}
+            feed_started = bool(feed.get("started"))
+            cooldown_active = bool(feed.get("cooldown_active"))
+        except Exception:
+            feed_started = False
+            cooldown_active = False
+
+        if ws_connected or cooldown_active:
+            return
+
+        now = time.time()
+        if (now - _last_stream_recovery_attempt) < 30:
+            return
+
+        with _stream_recovery_lock:
+            now_locked = time.time()
+            if (now_locked - _last_stream_recovery_attempt) < 30:
+                return
+            _last_stream_recovery_attempt = now_locked
+
+            def _runner():
+                try:
+                    logger.info("[MARKET] Auto-recovering market streams (feed_started=%s)", feed_started)
+                    get_orchestrator().start_streams_sync()
+                    try:
+                        from app.dhan.live_feed import sync_subscriptions_with_watchlist
+                        sync_subscriptions_with_watchlist()
+                    except Exception:
+                        pass
+                except Exception as stream_err:
+                    logger.warning("[MARKET] Auto stream recovery failed: %s", stream_err)
+
+            threading.Thread(target=_runner, name="market-auto-recover", daemon=True).start()
+    except Exception:
+        return
 
 # =====================================
 # SECTION 1 — SAFE DATE NORMALIZER
@@ -53,6 +115,7 @@ def test():
 def underlying_ltp(underlying: str):
     """Return LTP for an underlying symbol from live prices cache."""
     try:
+        _maybe_recover_streams()
         from app.market.live_prices import get_price, update_price
         sym = (underlying or "").upper()
         price = get_price(sym)
