@@ -75,6 +75,10 @@ const PositionsMIS = () => {
     }
   };
 
+  const handleRefresh = () => {
+    loadPositions({ background: false });
+  };
+
   const handleSort = (sortOption) => {
     setSortBy(sortOption);
     // Apply sorting logic here
@@ -125,7 +129,7 @@ const PositionsMIS = () => {
                   {lastUpdate.toLocaleTimeString()}
                 </span>
                 <button
-                  onClick={loadPositions}
+                  onClick={handleRefresh}
                   className="p-1 text-blue-600 hover:text-blue-800"
                   title="Refresh"
                 >
