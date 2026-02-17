@@ -6,10 +6,10 @@ import ThemeSelector from './ThemeSelector';
 const Header = () => {
   const { user, logout, hasRole } = useAuth();
   const location = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
   const navigationItems = [
     { name: 'Trade', path: '/trade', icon: '💹' },
-    { name: 'Commodities', path: '/commodities', icon: '🛢️' },
     { name: 'P. MIS', path: '/trade/all-positions', icon: '📊', adminOnly: true },
     { name: 'P. Normal', path: '/trade/all-positions-normal', icon: '📈', adminOnly: true },
     { name: 'P.Userwise', path: '/trade/all-positions-userwise', icon: '👥', adminOnly: true },
@@ -37,6 +37,10 @@ const Header = () => {
     console.log('✅ Allowed:', item.name);
     return true;
   });
+
+  React.useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
   
   console.log('🔍 Final filtered items:', filteredItems.map(item => item.name));
 
@@ -73,7 +77,24 @@ const Header = () => {
           </nav>
 
           {/* User Menu */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-4">
+            <button
+              onClick={() => setMobileMenuOpen((prev) => !prev)}
+              className="md:hidden inline-flex items-center justify-center p-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+              aria-label="Toggle navigation"
+              aria-expanded={mobileMenuOpen}
+            >
+              {mobileMenuOpen ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
+
             <div className="text-right hidden sm:block">
               <div className="text-sm text-gray-900 font-medium">
                 {user?.firstName} {user?.lastName}
@@ -103,6 +124,43 @@ const Header = () => {
             </div>
           </div>
         </div>
+
+        {/* Mobile Navigation */}
+        {mobileMenuOpen && (
+          <nav className="md:hidden border-t border-gray-200 py-2">
+            <div className="flex flex-col gap-1">
+              {filteredItems.map((item) => (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    location.pathname === item.path
+                      ? 'bg-blue-50 text-blue-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {item.name}
+                </Link>
+              ))}
+              <Link
+                to="/profile"
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  location.pathname === '/profile'
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                Profile
+              </Link>
+              <button
+                onClick={logout}
+                className="text-left px-3 py-2 rounded-md text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          </nav>
+        )}
       </div>
     </header>
   );

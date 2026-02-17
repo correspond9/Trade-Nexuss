@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiService } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { useMarketPulse } from '../hooks/useMarketPulse';
 
 const PositionsTab = () => {
   const { user } = useAuth();
+  const { pulse, marketActive } = useMarketPulse();
   const [positions, setPositions] = useState([]);
   const [selectedOpenIds, setSelectedOpenIds] = useState(new Set());
 
@@ -48,9 +50,11 @@ const PositionsTab = () => {
   }, [fetchPositions]);
 
   useEffect(() => {
-    const id = setInterval(fetchPositions, 5000);
-    return () => clearInterval(id);
-  }, [fetchPositions]);
+    if (!marketActive || !pulse?.timestamp) {
+      return;
+    }
+    fetchPositions();
+  }, [pulse?.timestamp, marketActive, fetchPositions]);
 
   // Manual refresh function
   const handleRefresh = () => {

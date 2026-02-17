@@ -128,8 +128,11 @@ class MarketDataOrchestrator:
         if flag in ("1", "true", "yes", "on"):
             return
 
+        commodities_enabled = (os.getenv("ENABLE_COMMODITIES") or "").strip().lower() in ("1", "true", "yes", "on")
+
         self.start_equity_stream()
-        await self.start_mcx_stream()
+        if commodities_enabled:
+            await self.start_mcx_stream()
 
     def start_streams_sync(self) -> None:
         try:

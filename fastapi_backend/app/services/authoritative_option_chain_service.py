@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 from app.market.atm_engine import ATM_ENGINE
 from app.ems.exchange_clock import is_market_open
 from app.services.dhan_rate_limiter import DhanRateLimiter
+from app.services.dhan_sdk_bridge import sdk_expiry_list_async, sdk_option_chain_async, sdk_quote_data_async
 
 class ExchangeSegment(Enum):
     NSE = "NSE"
@@ -801,81 +802,75 @@ class AuthoritativeOptionChainService:
             
             instrument_meta = self.instrument_master_cache[underlying]
             security_id = instrument_meta["security_id"]
-            
-            # Fetch LTP from DhanHQ marketfeed/quote API
-            headers = {
-                "access-token": creds["access_token"],
-                "client-id": creds["client_id"],
-                "Content-Type": "application/json"
-            }
-
-            quote_url = f"{self.dhan_base_url}/v2/marketfeed/quote"
             quote_payload = {instrument_meta["segment"]: [int(security_id)]}
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(quote_url, json=quote_payload, headers=headers, timeout=10) as response:
-                    if response.status == 200:
-                        quote_data = await response.json()
-                        segment_data = quote_data.get("data", {}).get(instrument_meta["segment"], {})
-                        sec_payload = segment_data.get(str(security_id)) or segment_data.get(int(security_id))
-                        if isinstance(sec_payload, list) and sec_payload:
-                            sec_payload = sec_payload[0]
+            quote_result = await sdk_quote_data_async(creds=creds, securities=quote_payload)
+            if not quote_result.get("ok"):
+                error_kind = quote_result.get("error_kind")
+                if error_kind == "auth":
+                    await self._block_rest_calls("quote", 900, "AUTH_FAILURE")
+                if error_kind == "rate":
+                    await self._block_rest_calls("quote", 120, "RATE_LIMIT")
+                logger.error(
+                    "❌ DhanHQ quote SDK error for %s: %s",
+                    underlying,
+                    quote_result.get("error") or "unknown",
+                )
+                return None
 
-                        ltp = None
-                        if isinstance(sec_payload, dict):
-                            ltp = sec_payload.get("ltp") or sec_payload.get("LTP")
-                            if ltp is None:
-                                ohlc = sec_payload.get("ohlc") or sec_payload.get("OHLC")
-                                if isinstance(ohlc, dict):
-                                    ltp = ohlc.get("close") or ohlc.get("prev_close")
+            quote_data = quote_result.get("data") or {}
+            segment_data = quote_data.get("data", {}).get(instrument_meta["segment"], {})
+            sec_payload = segment_data.get(str(security_id)) or segment_data.get(int(security_id))
+            if isinstance(sec_payload, list) and sec_payload:
+                sec_payload = sec_payload[0]
 
-                        if not ltp:
-                            logger.error(f"❌ No LTP data found for {underlying}")
-                            return None
+            ltp = None
+            if isinstance(sec_payload, dict):
+                ltp = sec_payload.get("ltp") or sec_payload.get("LTP")
+                if ltp is None:
+                    ohlc = sec_payload.get("ohlc") or sec_payload.get("OHLC")
+                    if isinstance(ohlc, dict):
+                        ltp = ohlc.get("close") or ohlc.get("prev_close")
 
-                        try:
-                            from app.market.live_prices import update_price
-                            update_price(underlying, float(ltp))
-                        except Exception:
-                            pass
+            if not ltp:
+                logger.error(f"❌ No LTP data found for {underlying}")
+                return None
 
-                        # Fetch expiries from DhanHQ API
-                        expiry_url = f"{self.dhan_base_url}/v2/optionchain/expirylist"
-                        payload = {
-                            "UnderlyingScrip": security_id,
-                            "UnderlyingSeg": instrument_meta["segment"]
-                        }
+            try:
+                from app.market.live_prices import update_price
+                update_price(underlying, float(ltp))
+            except Exception:
+                pass
 
-                        if await self.rate_limiter.is_blocked_async("data"):
-                            return None
-                        await self._enforce_rest_rate_limit("data")
-                        async with session.post(expiry_url, json=payload, headers=headers, timeout=10) as expiry_response:
-                            if expiry_response.status == 200:
-                                expiry_data = await expiry_response.json()
-                                expiries = expiry_data.get("data", [])
+            if await self.rate_limiter.is_blocked_async("data"):
+                return None
+            await self._enforce_rest_rate_limit("data")
 
-                                return {
-                                    "underlying": underlying,
-                                    "current_price": float(ltp),
-                                    "expiries": expiries,
-                                    "source": "dhanhq_api"
-                                }
-                            else:
-                                error_text = await expiry_response.text()
-                                logger.error(f"❌ DhanHQ expiry API error for {underlying}: {expiry_response.status} - {error_text}")
-                                if expiry_response.status in (401, 403):
-                                    await self._block_rest_calls("data", 900, "AUTH_FAILURE")
-                                if expiry_response.status == 429:
-                                    await self._block_rest_calls("data", 120, "RATE_LIMIT")
-                                return None
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ DhanHQ quote API error for {underlying}: {response.status} - {error_text}")
-                        if response.status in (401, 403):
-                            await self._block_rest_calls("quote", 900, "AUTH_FAILURE")
-                        if response.status == 429:
-                            await self._block_rest_calls("quote", 120, "RATE_LIMIT")
-                        return None
+            expiry_result = await sdk_expiry_list_async(
+                creds=creds,
+                under_security_id=int(security_id),
+                under_exchange_segment=instrument_meta["segment"],
+            )
+            if not expiry_result.get("ok"):
+                error_kind = expiry_result.get("error_kind")
+                if error_kind == "auth":
+                    await self._block_rest_calls("data", 900, "AUTH_FAILURE")
+                if error_kind == "rate":
+                    await self._block_rest_calls("data", 120, "RATE_LIMIT")
+                logger.error(
+                    "❌ DhanHQ expiry SDK error for %s: %s",
+                    underlying,
+                    expiry_result.get("error") or "unknown",
+                )
+                return None
+
+            expiries = expiry_result.get("data") or []
+            return {
+                "underlying": underlying,
+                "current_price": float(ltp),
+                "expiries": expiries if isinstance(expiries, list) else [],
+                "source": "dhanhq_api"
+            }
                         
         except asyncio.TimeoutError:
             logger.error(f"⏱️ Timeout fetching market data for {underlying}")
@@ -911,121 +906,113 @@ class AuthoritativeOptionChainService:
             
             security_id = instrument_meta["security_id"]
             
-            headers = {
-                "access-token": creds["access_token"],
-                "client-id": creds["client_id"],
-                "Content-Type": "application/json"
-            }
-            
-            # Fetch option chain
-            url = f"{self.dhan_base_url}/v2/optionchain"
-            payload = {
-                "UnderlyingScrip": security_id,
-                "UnderlyingSeg": instrument_meta["segment"],
-                "ExpiryDate": expiry
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers, timeout=15) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        raw = data.get("data", data)
+            sdk_result = await sdk_option_chain_async(
+                creds=creds,
+                under_security_id=int(security_id),
+                under_exchange_segment=instrument_meta["segment"],
+                expiry=expiry,
+            )
+            if sdk_result.get("ok"):
+                data = sdk_result.get("data") or {}
+                raw = data.get("data", data)
 
-                        def _extract_strikes(payload_obj: Any) -> List[Dict[str, Any]]:
-                            if isinstance(payload_obj, list):
-                                return payload_obj
-                            if not isinstance(payload_obj, dict):
-                                return []
+                def _extract_strikes(payload_obj: Any) -> List[Dict[str, Any]]:
+                    if isinstance(payload_obj, list):
+                        return payload_obj
+                    if not isinstance(payload_obj, dict):
+                        return []
 
-                            for key in (
-                                "strikes",
-                                "option_chain",
-                                "optionChain",
-                                "oc",
-                                "data",
-                            ):
-                                value = payload_obj.get(key)
-                                if isinstance(value, list):
-                                    return value
-                            return []
+                    for key in (
+                        "strikes",
+                        "option_chain",
+                        "optionChain",
+                        "oc",
+                        "data",
+                    ):
+                        value = payload_obj.get(key)
+                        if isinstance(value, list):
+                            return value
+                    return []
 
-                        def _normalize_side(strike_row: Dict[str, Any], side: str) -> Dict[str, Any]:
-                            side_upper = side.upper()
-                            side_lower = side.lower()
-                            aliases = (
-                                side_lower,
-                                side_upper,
-                                f"{side_lower}_option",
-                                f"{side_lower}_options",
-                                "call" if side_upper == "CE" else "put",
-                                "call_option" if side_upper == "CE" else "put_option",
-                                "call_options" if side_upper == "CE" else "put_options",
-                            )
-                            for alias in aliases:
-                                value = strike_row.get(alias)
-                                if isinstance(value, dict):
-                                    return value
-                            return {}
+                def _normalize_side(strike_row: Dict[str, Any], side: str) -> Dict[str, Any]:
+                    side_upper = side.upper()
+                    side_lower = side.lower()
+                    aliases = (
+                        side_lower,
+                        side_upper,
+                        f"{side_lower}_option",
+                        f"{side_lower}_options",
+                        "call" if side_upper == "CE" else "put",
+                        "call_option" if side_upper == "CE" else "put_option",
+                        "call_options" if side_upper == "CE" else "put_options",
+                    )
+                    for alias in aliases:
+                        value = strike_row.get(alias)
+                        if isinstance(value, dict):
+                            return value
+                    return {}
 
-                        raw_strikes = _extract_strikes(raw)
-                        normalized_strikes: List[Dict[str, Any]] = []
+                raw_strikes = _extract_strikes(raw)
+                normalized_strikes: List[Dict[str, Any]] = []
 
-                        for item in raw_strikes:
-                            if not isinstance(item, dict):
-                                continue
-                            strike_price = (
-                                item.get("strike_price")
-                                or item.get("strikePrice")
-                                or item.get("strike")
-                                or 0
-                            )
-                            normalized_strikes.append(
-                                {
-                                    **item,
-                                    "strike_price": strike_price,
-                                    "ce": _normalize_side(item, "CE"),
-                                    "pe": _normalize_side(item, "PE"),
-                                }
-                            )
-
-                        underlying_ltp = None
-                        if isinstance(raw, dict):
-                            underlying_ltp = (
-                                raw.get("underlying_ltp")
-                                or raw.get("underlyingLtp")
-                                or raw.get("underlying_value")
-                                or raw.get("underlyingValue")
-                                or raw.get("last_price")
-                                or raw.get("ltp")
-                            )
-
-                        result = {
-                            "strikes": normalized_strikes,
-                            "underlying_ltp": float(underlying_ltp) if underlying_ltp is not None else None,
+                for item in raw_strikes:
+                    if not isinstance(item, dict):
+                        continue
+                    strike_price = (
+                        item.get("strike_price")
+                        or item.get("strikePrice")
+                        or item.get("strike")
+                        or 0
+                    )
+                    normalized_strikes.append(
+                        {
+                            **item,
+                            "strike_price": strike_price,
+                            "ce": _normalize_side(item, "CE"),
+                            "pe": _normalize_side(item, "PE"),
                         }
-                        
-                        # Cache the successful result
-                        self._set_rest_cache(cache_key, result, "option_chain")
-                        
-                        # ✨ Update central live_prices cache so /market/underlying-ltp endpoint works
-                        try:
-                            from app.market.live_prices import update_price
-                            ltp_val = result.get("underlying_ltp")
-                            if ltp_val is not None and float(ltp_val) > 0:
-                                update_price(underlying, float(ltp_val))
-                            
-                        except Exception as e:
-                            logger.warning(f"Failed to update live_prices from option chain: {e}")
+                    )
 
-                        return result
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ DhanHQ option chain API error for {underlying} {expiry}: {response.status} - {error_text}")
-                        if response.status in (401, 403):
-                            await self._block_rest_calls("data", 900, "AUTH_FAILURE")
-                        if response.status == 429:
-                            await self._block_rest_calls("data", 120, "RATE_LIMIT")
-                        return None
+                underlying_ltp = None
+                if isinstance(raw, dict):
+                    underlying_ltp = (
+                        raw.get("underlying_ltp")
+                        or raw.get("underlyingLtp")
+                        or raw.get("underlying_value")
+                        or raw.get("underlyingValue")
+                        or raw.get("last_price")
+                        or raw.get("ltp")
+                    )
+
+                result = {
+                    "strikes": normalized_strikes,
+                    "underlying_ltp": float(underlying_ltp) if underlying_ltp is not None else None,
+                }
+                
+                self._set_rest_cache(cache_key, result, "option_chain")
+                
+                try:
+                    from app.market.live_prices import update_price
+                    ltp_val = result.get("underlying_ltp")
+                    if ltp_val is not None and float(ltp_val) > 0:
+                        update_price(underlying, float(ltp_val))
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to update live_prices from option chain: {e}")
+
+                return result
+
+            logger.error(
+                "❌ DhanHQ option chain SDK error for %s %s: %s",
+                underlying,
+                expiry,
+                sdk_result.get("error") or "unknown",
+            )
+            if sdk_result.get("error_kind") == "auth":
+                await self._block_rest_calls("data", 900, "AUTH_FAILURE")
+            if sdk_result.get("error_kind") == "rate":
+                await self._block_rest_calls("data", 120, "RATE_LIMIT")
+            return None
                         
         except asyncio.TimeoutError:
             logger.error(f"⏱️ Timeout fetching option chain for {underlying} {expiry}")

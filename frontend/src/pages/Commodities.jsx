@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import OrderModal from '../components/OrderModal';
 import { apiService } from '../services/apiService';
+import { useMarketPulse } from '../hooks/useMarketPulse';
 
 const MCX_OPTIONS = [
   { key: 'CRUDEOIL', label: 'CRUDEOIL' },
@@ -240,6 +241,7 @@ const FuturesList = ({
 );
 
 const Commodities = () => {
+  const { pulse, marketActive } = useMarketPulse();
   const [chains, setChains] = useState({});
   const [expiries, setExpiries] = useState({});
   const [activeTabs, setActiveTabs] = useState({});
@@ -328,13 +330,11 @@ const Commodities = () => {
     };
 
     refreshChains();
-    const intervalId = setInterval(refreshChains, 1000);
 
     return () => {
       mounted = false;
-      clearInterval(intervalId);
     };
-  }, [activeTabs]);
+  }, [activeTabs, pulse?.timestamp, marketActive]);
 
   useEffect(() => {
     let mounted = true;
@@ -345,13 +345,11 @@ const Commodities = () => {
     };
 
     refreshFutures();
-    const intervalId = setInterval(refreshFutures, 1000);
 
     return () => {
       mounted = false;
-      clearInterval(intervalId);
     };
-  }, [futuresTabs]);
+  }, [futuresTabs, pulse?.timestamp, marketActive]);
 
   const handleOpenOrderModal = (leg) => {
     setModalOrderData({

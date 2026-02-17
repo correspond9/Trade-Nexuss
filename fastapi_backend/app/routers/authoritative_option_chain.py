@@ -6,7 +6,7 @@ Serves frontend from central cache only - no direct Dhan API calls
 import logging
 import asyncio
 import time
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -18,6 +18,20 @@ router = APIRouter()
 _warmup_lock = asyncio.Lock()
 _last_warmup_by_underlying: Dict[str, float] = {}
 _warmup_cooldown_seconds = 20.0
+
+
+def _is_underlying_market_open(underlying: str) -> bool:
+    try:
+        from app.ems.exchange_clock import is_market_open
+
+        symbol = str(underlying or "").strip().upper()
+        if symbol in {"SENSEX", "BANKEX"}:
+            return bool(is_market_open("BSE"))
+        if symbol in {"CRUDEOIL", "GOLD", "SILVER", "NATURALGAS", "MCX"}:
+            return bool(is_market_open("MCX"))
+        return bool(is_market_open("NSE"))
+    except Exception:
+        return False
 
 
 def _parse_iso_date(value: str):
@@ -166,6 +180,43 @@ async def get_option_chain_live(
             status_code=500,
             detail="Internal server error"
         )
+
+
+@router.websocket("/ws/live")
+async def option_chain_live_ws(
+    ws: WebSocket,
+    underlying: str,
+    expiry: str,
+):
+    await ws.accept()
+    symbol = str(underlying or "").strip().upper()
+    exp = str(expiry or "").strip()
+    try:
+        while True:
+            try:
+                payload = await get_option_chain_live(underlying=symbol, expiry=exp)
+                await ws.send_json(payload)
+            except HTTPException as http_error:
+                await ws.send_json({
+                    "status": "error",
+                    "detail": http_error.detail,
+                    "underlying": symbol,
+                    "expiry": exp,
+                    "timestamp": datetime.now().isoformat(),
+                })
+            except Exception as stream_error:
+                await ws.send_json({
+                    "status": "error",
+                    "detail": str(stream_error),
+                    "underlying": symbol,
+                    "expiry": exp,
+                    "timestamp": datetime.now().isoformat(),
+                })
+
+            sleep_seconds = 1 if _is_underlying_market_open(symbol) else 60
+            await asyncio.sleep(sleep_seconds)
+    except WebSocketDisconnect:
+        logger.info(f"🔌 Option chain WS client disconnected: {symbol} {exp}")
 
 @router.get("/available/underlyings")
 async def get_available_underlyings() -> Dict[str, Any]:

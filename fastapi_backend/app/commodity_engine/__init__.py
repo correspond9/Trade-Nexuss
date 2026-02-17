@@ -6,14 +6,13 @@ import logging
 from datetime import datetime
 from typing import Dict, Optional
 
-import aiohttp
-
 from app.commodity_engine.commodity_expiry_service import commodity_expiry_service
 from app.commodity_engine.commodity_futures_service import commodity_futures_service, MCX_FUTURES_SYMBOLS
 from app.commodity_engine.commodity_option_chain_service import commodity_option_chain_service, MCX_UNDERLYINGS
 from app.commodity_engine.commodity_utils import fetch_dhan_credentials
 from app.commodity_engine.commodity_market_session_manager import commodity_market_session_manager
 from app.commodity_engine.commodity_ws_manager import commodity_ws_manager
+from app.services.dhan_sdk_bridge import sdk_quote_data_async
 
 logger = logging.getLogger(__name__)
 
@@ -54,38 +53,29 @@ class CommodityEngine:
         creds = await fetch_dhan_credentials()
         if not creds:
             return None
-        headers = {
-            "access-token": creds["access_token"],
-            "client-id": creds["client_id"],
-            "Content-Type": "application/json",
-        }
-        url = "https://api.dhan.co/v2/marketfeed/quote"
         payload = {meta["segment"]: [int(meta["security_id"])]}
         for attempt in range(3):
             await self._rate_limit_rest()
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, headers=headers, timeout=10) as response:
-                        if response.status != 200:
-                            error_text = await response.text()
-                            logger.warning(f"⚠️ MCX quote API error for {symbol}: {response.status} - {error_text}")
-                            if response.status in (429, 502):
-                                if response.status == 429:
-                                    self._rest_block_until = asyncio.get_event_loop().time() + self._rest_cooldown_seconds
-                                await asyncio.sleep(2 + attempt * 2)
-                                continue
-                            return None
-                        data = await response.json()
-                        segment_data = data.get("data", {}).get(meta["segment"], {})
-                        sec_payload = segment_data.get(str(meta["security_id"])) or segment_data.get(int(meta["security_id"]))
-                        if isinstance(sec_payload, list) and sec_payload:
-                            sec_payload = sec_payload[0]
-                        if isinstance(sec_payload, dict):
-                            ltp = sec_payload.get("ltp") or sec_payload.get("LTP")
-                            if ltp is not None:
-                                value = float(ltp)
-                                self._ltp_cache[symbol] = {"ltp": value, "ts": asyncio.get_event_loop().time()}
-                                return value
+                sdk_result = await sdk_quote_data_async(creds=creds, securities=payload)
+                if not sdk_result.get("ok"):
+                    if sdk_result.get("error_kind") == "rate":
+                        self._rest_block_until = asyncio.get_event_loop().time() + self._rest_cooldown_seconds
+                        await asyncio.sleep(2 + attempt * 2)
+                        continue
+                    return None
+
+                data = sdk_result.get("data") or {}
+                segment_data = data.get("data", {}).get(meta["segment"], {})
+                sec_payload = segment_data.get(str(meta["security_id"])) or segment_data.get(int(meta["security_id"]))
+                if isinstance(sec_payload, list) and sec_payload:
+                    sec_payload = sec_payload[0]
+                if isinstance(sec_payload, dict):
+                    ltp = sec_payload.get("ltp") or sec_payload.get("LTP")
+                    if ltp is not None:
+                        value = float(ltp)
+                        self._ltp_cache[symbol] = {"ltp": value, "ts": asyncio.get_event_loop().time()}
+                        return value
             except Exception as exc:
                 logger.error(f"❌ MCX REST LTP fetch failed for {symbol}: {exc}")
                 await asyncio.sleep(1 + attempt)
@@ -152,13 +142,6 @@ class CommodityEngine:
             creds = await fetch_dhan_credentials()
             if not creds:
                 return False
-            headers = {
-                "access-token": creds["access_token"],
-                "client-id": creds["client_id"],
-                "Content-Type": "application/json",
-            }
-            url = "https://api.dhan.co/v2/marketfeed/quote"
-
             # Group tokens by segment from instrument registry
             from app.market.instrument_master.registry import REGISTRY
             if not REGISTRY.loaded:
@@ -190,47 +173,44 @@ class CommodityEngine:
                 segment_groups.setdefault(seg, []).append(token_id)
                 token_meta[token_id] = meta
 
-            # Fetch quotes per segment and update legs
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                for seg, ids in segment_groups.items():
-                    # Chunk to avoid large payloads
-                    chunk_size = 50
-                    for i in range(0, len(ids), chunk_size):
-                        chunk = ids[i : i + chunk_size]
-                        payload = {seg: chunk}
-                        try:
-                            await self._rate_limit_rest()
-                            async with session.post(url, json=payload, headers=headers, timeout=10) as response:
-                                if response.status != 200:
-                                    if response.status == 429:
-                                        self._rest_block_until = asyncio.get_event_loop().time() + self._rest_cooldown_seconds
-                                    continue
-                                data = await response.json()
-                                segment_data = data.get("data", {}).get(seg, {})
-                                for key, val in segment_data.items():
-                                    try:
-                                        token_id = int(key)
-                                    except Exception:
-                                        continue
-                                    rec = val
-                                    if isinstance(rec, list) and rec:
-                                        rec = rec[0]
-                                    ltp = rec.get("ltp") or rec.get("LTP")
-                                    if ltp is None:
-                                        continue
-                                    meta = token_meta.get(token_id)
-                                    if not meta:
-                                        continue
-                                    commodity_option_chain_service.update_option_tick(
-                                        symbol=str(meta.get("symbol")),
-                                        expiry=str(meta.get("expiry")),
-                                        strike=float(meta.get("strike")),
-                                        option_type=str(meta.get("option_type")),
-                                        ltp=float(ltp),
-                                    )
-                        except Exception:
+            for seg, ids in segment_groups.items():
+                chunk_size = 50
+                for i in range(0, len(ids), chunk_size):
+                    chunk = ids[i : i + chunk_size]
+                    payload = {seg: chunk}
+                    try:
+                        await self._rate_limit_rest()
+                        sdk_result = await sdk_quote_data_async(creds=creds, securities=payload)
+                        if not sdk_result.get("ok"):
+                            if sdk_result.get("error_kind") == "rate":
+                                self._rest_block_until = asyncio.get_event_loop().time() + self._rest_cooldown_seconds
                             continue
+
+                        data = sdk_result.get("data") or {}
+                        segment_data = data.get("data", {}).get(seg, {})
+                        for key, val in segment_data.items():
+                            try:
+                                token_id = int(key)
+                            except Exception:
+                                continue
+                            rec = val
+                            if isinstance(rec, list) and rec:
+                                rec = rec[0]
+                            ltp = rec.get("ltp") or rec.get("LTP")
+                            if ltp is None:
+                                continue
+                            meta = token_meta.get(token_id)
+                            if not meta:
+                                continue
+                            commodity_option_chain_service.update_option_tick(
+                                symbol=str(meta.get("symbol")),
+                                expiry=str(meta.get("expiry")),
+                                strike=float(meta.get("strike")),
+                                option_type=str(meta.get("option_type")),
+                                ltp=float(ltp),
+                            )
+                    except Exception:
+                        continue
 
             # Update nearest futures LTPs
             for symbol in MCX_FUTURES_SYMBOLS:
@@ -240,26 +220,25 @@ class CommodityEngine:
                 seg = "MCX_COMM"
                 sec_id = int(meta["security_id"])
                 payload = {seg: [sec_id]}
-                async with aiohttp.ClientSession() as session:
-                    try:
-                        await self._rate_limit_rest()
-                        async with session.post(url, json=payload, headers=headers, timeout=10) as response:
-                            if response.status != 200:
-                                continue
-                            data = await response.json()
-                            segment_data = data.get("data", {}).get(seg, {})
-                            rec = segment_data.get(str(sec_id)) or segment_data.get(sec_id)
-                            if isinstance(rec, list) and rec:
-                                rec = rec[0]
-                            ltp = rec.get("ltp") or rec.get("LTP")
-                            if ltp is not None:
-                                commodity_futures_service.update_future_tick(
-                                    symbol=symbol,
-                                    expiry=str(meta.get("expiry")),
-                                    ltp=float(ltp),
-                                )
-                    except Exception:
+                try:
+                    await self._rate_limit_rest()
+                    sdk_result = await sdk_quote_data_async(creds=creds, securities=payload)
+                    if not sdk_result.get("ok"):
                         continue
+                    data = sdk_result.get("data") or {}
+                    segment_data = data.get("data", {}).get(seg, {})
+                    rec = segment_data.get(str(sec_id)) or segment_data.get(sec_id)
+                    if isinstance(rec, list) and rec:
+                        rec = rec[0]
+                    ltp = rec.get("ltp") or rec.get("LTP")
+                    if ltp is not None:
+                        commodity_futures_service.update_future_tick(
+                            symbol=symbol,
+                            expiry=str(meta.get("expiry")),
+                            ltp=float(ltp),
+                        )
+                except Exception:
+                    continue
 
             return True
         except Exception:

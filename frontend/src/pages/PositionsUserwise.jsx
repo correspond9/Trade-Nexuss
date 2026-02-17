@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../services/apiService';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useMarketPulse } from '../hooks/useMarketPulse';
 
 const PositionsUserwise = () => {
+  const { pulse, marketActive } = useMarketPulse();
   const [loading, setLoading] = useState(false);
   const [userPositions, setUserPositions] = useState([]);
   const [expandedUsers, setExpandedUsers] = useState(new Set());
@@ -12,11 +14,13 @@ const PositionsUserwise = () => {
   const [exitQtyByPosition, setExitQtyByPosition] = useState({});
 
   useEffect(() => {
-    loadUserPositions();
+    loadUserPositions({ background: false });
   }, []);
 
-  const loadUserPositions = async () => {
-    setLoading(true);
+  const loadUserPositions = async ({ background = false } = {}) => {
+    if (!background) {
+      setLoading(true);
+    }
     try {
       const [positionsResponse, usersResponse] = await Promise.all([
         apiService.get('/portfolio/positions'),
@@ -91,7 +95,9 @@ const PositionsUserwise = () => {
     } catch (error) {
       console.error('Error loading user positions:', error);
     } finally {
-      setLoading(false);
+      if (!background) {
+        setLoading(false);
+      }
     }
   };
 
@@ -191,11 +197,11 @@ const PositionsUserwise = () => {
 
 
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      loadUserPositions();
-    }, 5000);
-    return () => clearInterval(intervalId);
-  }, []);
+    if (!marketActive || !pulse?.timestamp) {
+      return;
+    }
+    loadUserPositions({ background: true });
+  }, [pulse?.timestamp, marketActive]);
   const handleSort = (sortOption) => {
     setSortBy(sortOption);
     // Apply sorting logic here

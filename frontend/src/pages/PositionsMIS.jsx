@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { apiService } from '../services/apiService';
 import { TrendingUp, TrendingDown, RefreshCw, Filter } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useMarketPulse } from '../hooks/useMarketPulse';
 
 const PositionsMIS = () => {
   const { user } = useAuth();
+  const { pulse, marketActive } = useMarketPulse();
   const [loading, setLoading] = useState(false);
   const [positions, setPositions] = useState([]);
   const [sortBy, setSortBy] = useState('UserId(asc)');
@@ -12,17 +14,20 @@ const PositionsMIS = () => {
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
   useEffect(() => {
-    loadPositions();
-    // Set up auto-refresh for live data
-    const interval = setInterval(() => {
-      loadPositions();
-    }, 5000); // Refresh every 5 seconds for live data
-
-    return () => clearInterval(interval);
+    loadPositions({ background: false });
   }, []);
 
-  const loadPositions = async () => {
-    setLoading(true);
+  useEffect(() => {
+    if (!marketActive || !pulse?.timestamp) {
+      return;
+    }
+    loadPositions({ background: true });
+  }, [pulse?.timestamp, marketActive]);
+
+  const loadPositions = async ({ background = false } = {}) => {
+    if (!background) {
+      setLoading(true);
+    }
     try {
       const [positionsResponse, usersResponse] = await Promise.all([
         apiService.get('/portfolio/positions', user?.id ? { user_id: user.id } : {}),
@@ -64,7 +69,9 @@ const PositionsMIS = () => {
     } catch (error) {
       console.error('Error loading MIS positions:', error);
     } finally {
-      setLoading(false);
+      if (!background) {
+        setLoading(false);
+      }
     }
   };
 

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import aiohttp
 
 from app.services.dhan_rate_limiter import DhanRateLimiter
+from app.services.dhan_sdk_bridge import sdk_margin_calculator_async
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,18 @@ class DhanMarginService:
             return "MTF"
         return "INTRADAY"
 
+    def _segment_code_for_sdk(self, segment: Optional[Union[str, int]]) -> Optional[str]:
+        normalized = self._normalize_segment(segment)
+        segment_map = {
+            0: "IDX_I",
+            1: "NSE_EQ",
+            2: "NSE_FNO",
+            4: "BSE_EQ",
+            5: "MCX_COMM",
+            8: "BSE_FNO",
+        }
+        return segment_map.get(normalized) if normalized is not None else None
+
     async def _post(self, endpoint: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if await self.rate_limiter.is_blocked_async("data"):
             return None
@@ -150,27 +163,55 @@ class DhanMarginService:
         price: float,
         trigger_price: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
-        segment = self._normalize_segment(exchange_segment)
-        if not segment:
+        segment_code = self._segment_code_for_sdk(exchange_segment)
+        if not segment_code:
             return None
 
         creds = await self._fetch_credentials()
         if not creds:
             return None
 
-        payload = {
-            "dhanClientId": creds["client_id"],
-            "exchangeSegment": segment,
+        if await self.rate_limiter.is_blocked_async("data"):
+            return None
+        await self.rate_limiter.wait("data")
+
+        key_payload = {
+            "exchangeSegment": segment_code,
             "transactionType": transaction_type.upper(),
             "quantity": int(quantity),
             "productType": self._normalize_product_type(product_type),
             "securityId": str(security_id),
             "price": float(price),
+            "triggerPrice": float(trigger_price) if trigger_price is not None else 0.0,
         }
-        if trigger_price is not None:
-            payload["triggerPrice"] = float(trigger_price)
+        cache_key = self._cache_key(key_payload, "sdk:/v2/margincalculator")
+        cached = self._cache_get(cache_key)
+        if cached:
+            return cached
 
-        return await self._post("/v2/margincalculator", payload)
+        sdk_result = await sdk_margin_calculator_async(
+            creds=creds,
+            security_id=str(security_id),
+            exchange_segment=segment_code,
+            transaction_type=transaction_type.upper(),
+            quantity=int(quantity),
+            product_type=self._normalize_product_type(product_type),
+            price=float(price),
+            trigger_price=float(trigger_price) if trigger_price is not None else 0.0,
+        )
+        if not sdk_result.get("ok"):
+            if sdk_result.get("error_kind") == "auth":
+                await self.rate_limiter.block_async("data", 900)
+            if sdk_result.get("error_kind") == "rate":
+                await self.rate_limiter.block_async("data", 120)
+            logger.warning("Dhan margin SDK error: %s", sdk_result.get("error"))
+            return None
+
+        data = sdk_result.get("data")
+        if isinstance(data, dict):
+            self._cache_set(cache_key, data)
+            return data
+        return None
 
     async def calculate_margin_multi(
         self,

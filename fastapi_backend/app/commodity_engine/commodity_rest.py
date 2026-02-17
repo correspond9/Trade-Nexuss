@@ -6,7 +6,6 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
-import aiohttp
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.commodity_engine import commodity_engine
@@ -18,6 +17,7 @@ from app.ems.exchange_clock import is_market_open
 from app.market.market_state import state as market_state
 from app.market_cache.options import get_option_chain
 from app.market_cache.futures import list_futures
+from app.services.dhan_sdk_bridge import sdk_quote_data_async
 
 router = APIRouter(prefix="/commodities")
 
@@ -147,31 +147,25 @@ async def _fetch_mcx_quotes(tokens: List[str]) -> Dict[str, Dict[str, object]]:
     if not creds:
         return response_map
 
-    headers = {
-        "access-token": creds["access_token"],
-        "client-id": creds["client_id"],
-        "Content-Type": "application/json",
-    }
-
     await _rate_limit_quote_api()
     try:
-        async with aiohttp.ClientSession() as session:
-            payload = {"MCX_COMM": [int(token) for token in missing]}
-            async with session.post("https://api.dhan.co/v2/marketfeed/quote", json=payload, headers=headers, timeout=8) as response:
-                if response.status != 200:
-                    return response_map
-                body = await response.json()
-                segment = (body.get("data") or {}).get("MCX_COMM") or {}
-                ts = time.monotonic()
-                for token_key, quote_payload in segment.items():
-                    token = _as_token(token_key)
-                    if not token:
-                        continue
-                    if isinstance(quote_payload, list) and quote_payload:
-                        quote_payload = quote_payload[0]
-                    if isinstance(quote_payload, dict):
-                        response_map[token] = quote_payload
-                        _QUOTE_CACHE[token] = {"payload": quote_payload, "ts": ts}
+        payload = {"MCX_COMM": [int(token) for token in missing]}
+        sdk_result = await sdk_quote_data_async(creds=creds, securities=payload)
+        if not sdk_result.get("ok"):
+            return response_map
+
+        body = sdk_result.get("data") or {}
+        segment = (body.get("data") or {}).get("MCX_COMM") or {}
+        ts = time.monotonic()
+        for token_key, quote_payload in segment.items():
+            token = _as_token(token_key)
+            if not token:
+                continue
+            if isinstance(quote_payload, list) and quote_payload:
+                quote_payload = quote_payload[0]
+            if isinstance(quote_payload, dict):
+                response_map[token] = quote_payload
+                _QUOTE_CACHE[token] = {"payload": quote_payload, "ts": ts}
     except Exception:
         return response_map
 

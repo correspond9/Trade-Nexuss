@@ -11,6 +11,10 @@ export const useWebSocket = (url) => {
 
   const connect = useCallback(() => {
     try {
+      if (!url) {
+        setReadyState(WebSocket.CLOSED);
+        return;
+      }
       const lowerUrl = String(url || '').toLowerCase();
       if (lowerUrl.includes('dhan.co')) {
         throw new Error('Frontend direct Dhan WebSocket connections are disabled. Use backend websocket endpoints only.');
@@ -65,6 +69,9 @@ export const useWebSocket = (url) => {
   }, [url]);
 
   useEffect(() => {
+    if (!url) {
+      return undefined;
+    }
     connect();
     
     return () => {
@@ -75,7 +82,7 @@ export const useWebSocket = (url) => {
         ws.current.close(1000, 'Component unmounted');
       }
     };
-  }, [connect]);
+  }, [connect, url]);
 
   return {
     lastMessage,

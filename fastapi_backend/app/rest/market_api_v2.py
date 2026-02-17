@@ -12,11 +12,16 @@ import os
 import threading
 import time
 from app.market_orchestrator import get_orchestrator
+from app.services.dhan_sdk_bridge import sdk_quote_data
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 _stream_recovery_lock = threading.Lock()
 _last_stream_recovery_attempt = 0.0
+
+
+def _commodities_enabled() -> bool:
+    return (os.getenv("ENABLE_COMMODITIES") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _maybe_recover_streams() -> None:
@@ -158,16 +163,14 @@ def underlying_ltp(underlying: str):
                     db.close()
 
                 if access_token and client_id:
-                    headers = {
-                        "access-token": access_token,
-                        "client-id": client_id,
-                        "Content-Type": "application/json",
-                    }
                     payload = {exchange_segment: [int(str(security_id))]}
                     try:
-                        response = requests.post("https://api.dhan.co/v2/marketfeed/quote", json=payload, headers=headers, timeout=8)
-                        if response.status_code == 200:
-                            body = response.json() or {}
+                        sdk_result = sdk_quote_data(
+                            creds={"client_id": client_id, "access_token": access_token},
+                            securities=payload,
+                        )
+                        if sdk_result.get("ok"):
+                            body = sdk_result.get("data") or {}
                             seg_data = (body.get("data") or {}).get(exchange_segment) or {}
                             sec_key = str(security_id)
                             sec_payload = seg_data.get(sec_key) or seg_data.get(int(security_id))
@@ -203,15 +206,13 @@ def underlying_ltp(underlying: str):
                             db.close()
 
                         if access_token and client_id:
-                            headers = {
-                                "access-token": access_token,
-                                "client-id": client_id,
-                                "Content-Type": "application/json",
-                            }
                             payload = {"IDX_I": [int(str(index_sec))]}
-                            response = requests.post("https://api.dhan.co/v2/marketfeed/quote", json=payload, headers=headers, timeout=8)
-                            if response.status_code == 200:
-                                body = response.json() or {}
+                            sdk_result = sdk_quote_data(
+                                creds={"client_id": client_id, "access_token": access_token},
+                                securities=payload,
+                            )
+                            if sdk_result.get("ok"):
+                                body = sdk_result.get("data") or {}
                                 sec_payload = ((body.get("data") or {}).get("IDX_I") or {}).get(str(index_sec))
                                 if isinstance(sec_payload, list) and sec_payload:
                                     sec_payload = sec_payload[0]
@@ -259,11 +260,14 @@ def market_stream_status():
         except Exception:
             equity_ws = {"connected_connections": 0, "total_subscriptions": 0}
 
-        try:
-            from app.commodity_engine.commodity_ws_manager import commodity_ws_manager
-            mcx_ws = commodity_ws_manager.get_status()
-        except Exception:
-            mcx_ws = {"connected_connections": 0, "total_subscriptions": 0}
+        if _commodities_enabled():
+            try:
+                from app.commodity_engine.commodity_ws_manager import commodity_ws_manager
+                mcx_ws = commodity_ws_manager.get_status()
+            except Exception:
+                mcx_ws = {"connected_connections": 0, "total_subscriptions": 0}
+        else:
+            mcx_ws = {"connected_connections": 0, "total_subscriptions": 0, "status": "disabled"}
 
         try:
             from app.dhan.live_feed import get_live_feed_status
@@ -514,17 +518,15 @@ def market_depth(symbol: str):
         if not access_token or not client_id:
             return {"status": "success", "data": {"bids": [], "asks": []}}
 
-        headers = {
-            "access-token": access_token,
-            "client-id": client_id,
-            "Content-Type": "application/json",
-        }
         payload = {exchange_segment: [int(str(security_id))]}
-        response = requests.post("https://api.dhan.co/v2/marketfeed/quote", json=payload, headers=headers, timeout=8)
-        if response.status_code != 200:
+        sdk_result = sdk_quote_data(
+            creds={"client_id": client_id, "access_token": access_token},
+            securities=payload,
+        )
+        if not sdk_result.get("ok"):
             return {"status": "success", "data": {"bids": [], "asks": []}}
 
-        body = response.json() or {}
+        body = sdk_result.get("data") or {}
         seg_data = (body.get("data") or {}).get(exchange_segment) or {}
         sec_key = str(security_id)
         sec_payload = seg_data.get(sec_key) or seg_data.get(int(security_id))

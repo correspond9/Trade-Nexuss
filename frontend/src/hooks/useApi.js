@@ -165,7 +165,7 @@ export const useRealTimeData = (endpoint, options = {}) => {
   const [error, setError] = useState(null);
   
   const {
-    interval = 5000, // 5 seconds default
+    interval = 0,
     immediate = true,
     enabled = true,
   } = options;
@@ -191,7 +191,9 @@ export const useRealTimeData = (endpoint, options = {}) => {
       fetchData();
     }
 
-    intervalId = setInterval(fetchData, interval);
+    if (interval > 0) {
+      intervalId = setInterval(fetchData, interval);
+    }
 
     return () => {
       if (intervalId) {

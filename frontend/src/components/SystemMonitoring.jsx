@@ -3,50 +3,51 @@ import React, { useState, useEffect } from 'react';
 import { Eye, TrendingUp, AlertCircle } from 'lucide-react';
 import LiveQuotes from './LiveQuotes';
 import { apiService } from '../services/apiService';
+import { useMarketPulse } from '../hooks/useMarketPulse';
 
 const API_BASE = apiService.baseURL;
 const ROOT_BASE = API_BASE.replace(/\/api\/v\d+\/?$/, '');
 
 const SystemMonitoring = () => {
+  const { pulse } = useMarketPulse();
   const [systemData, setSystemData] = useState({});
   const [lastUpdate, setLastUpdate] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [actionMessage, setActionMessage] = useState(null);
   const [actionError, setActionError] = useState(null);
 
-  useEffect(() => {
-    const fetchSystemStatus = async () => {
-      try {
-        const [healthData, streamData, etfData] = await Promise.all([
-          apiService.get('/health').catch(() => ({})),
-          apiService.get('/market/stream-status').catch(() => ({})),
-          apiService.get('/market/etf-tierb-status').catch(() => ({}))
-        ]);
-        const data = healthData;
-        const streamPayload = streamData?.data || streamData || {};
-        const etfPayload = etfData?.data || {};
+  const fetchSystemStatus = async () => {
+    try {
+      const [healthData, streamData, etfData] = await Promise.all([
+        apiService.get('/health').catch(() => ({})),
+        apiService.get('/market/stream-status').catch(() => ({})),
+        apiService.get('/market/etf-tierb-status').catch(() => ({}))
+      ]);
+      const data = healthData;
+      const streamPayload = streamData?.data || streamData || {};
+      const etfPayload = etfData?.data || {};
 
-        const wsStatus = streamPayload?.equity_ws || data?.websocket_status || {};
-        const mcxWsStatus = streamPayload?.mcx_ws || data?.mcx_websocket_status || {};
-        const wsConnected = (wsStatus.connected_connections ?? 0) > 0;
-        const mcxWsConnected = (mcxWsStatus.connected_connections ?? 0) > 0;
-        const liveFeed = streamPayload?.live_feed || {};
-        const marketOpen = streamPayload?.market_open || {};
-        const marketTime = streamPayload?.market_time || new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
-        const database = streamPayload?.database || {};
-        const dhanApi = streamPayload?.dhan_api || {};
-        const apiHealthy = String(data?.status || '').toLowerCase() === 'ok';
+      const wsStatus = streamPayload?.equity_ws || data?.websocket_status || {};
+      const mcxWsStatus = streamPayload?.mcx_ws || data?.mcx_websocket_status || {};
+      const wsConnected = (wsStatus.connected_connections ?? 0) > 0;
+      const mcxWsConnected = (mcxWsStatus.connected_connections ?? 0) > 0;
+      const liveFeed = streamPayload?.live_feed || {};
+      const marketOpen = streamPayload?.market_open || {};
+      const marketTime = streamPayload?.market_time || new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+      const database = streamPayload?.database || {};
+      const dhanApi = streamPayload?.dhan_api || {};
+      const apiHealthy = String(data?.status || '').toLowerCase() === 'ok';
 
-        const wsMessage = wsConnected
-          ? `${wsStatus.connected_connections || 0} connection(s), ${wsStatus.total_subscriptions || 0} subscriptions`
-          : (liveFeed.cooldown_active ? 'Cooldown active' : 'No active connections');
+      const wsMessage = wsConnected
+        ? `${wsStatus.connected_connections || 0} connection(s), ${wsStatus.total_subscriptions || 0} subscriptions`
+        : (liveFeed.cooldown_active ? 'Cooldown active' : 'No active connections');
 
-        const mcxMessage = mcxWsConnected
-          ? `${mcxWsStatus.connected_connections || 0} connection(s), ${mcxWsStatus.total_subscriptions || 0} subscriptions`
-          : (mcxWsStatus.cooldown_active ? 'Cooldown active' : 'No active connections');
+      const mcxMessage = mcxWsConnected
+        ? `${mcxWsStatus.connected_connections || 0} connection(s), ${mcxWsStatus.total_subscriptions || 0} subscriptions`
+        : (mcxWsStatus.cooldown_active ? 'Cooldown active' : 'No active connections');
 
-        const normalized = {
-          services: {
+      const normalized = {
+        services: {
             database: {
               status: database?.status || 'unknown',
               response_time: database?.message || 'Not checked'
@@ -84,18 +85,23 @@ const SystemMonitoring = () => {
           },
         };
 
-        setSystemData(normalized);
-        setLastUpdate(new Date());
-      } catch (error) {
-        console.error('❌ Error fetching system status:', error);
-      }
-    };
+      setSystemData(normalized);
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error('❌ Error fetching system status:', error);
+    }
+  };
 
+  useEffect(() => {
     fetchSystemStatus();
-    const interval = setInterval(fetchSystemStatus, 5000); // production-safe polling cadence
-    
-    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!pulse?.timestamp) {
+      return;
+    }
+    fetchSystemStatus();
+  }, [pulse?.timestamp]);
 
   useEffect(() => {
     let interval = null;

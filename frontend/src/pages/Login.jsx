@@ -30,13 +30,7 @@ const Login = () => {
     const result = await login(mobileTrimmed, formData.password);
     
     if (result.success) {
-      const role = result.user?.role;
-      const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
-      if (result.user?.require_password_reset) {
-        navigate('/profile');
-      } else {
-        navigate(isAdmin ? '/dashboard' : '/options');
-      }
+      navigate('/profile');
     } else {
       setError(result.error || 'Login failed');
     }

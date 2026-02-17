@@ -22,7 +22,6 @@ const SuperAdmin = React.lazy(() => import('./pages/SuperAdmin'));
 const Options = React.lazy(() => import('./pages/OPTIONS'));
 const Watchlist = React.lazy(() => import('./pages/WATCHLIST'));
 const StraddlyEmbed = React.lazy(() => import('./pages/StraddlyEmbed'));
-const Commodities = React.lazy(() => import('./pages/Commodities'));
 const ThemeAdmin = React.lazy(() => import('./pages/ThemeAdmin'));
 
 // Wrapper component for Watchlist to provide required props
@@ -61,10 +60,7 @@ const ScrollToTop = () => {
 };
 
 const HomeRedirect = () => {
-  const { user } = useAuth();
-  const role = user?.role;
-  const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
-  return <Navigate to={isAdmin ? '/dashboard' : '/options'} replace />;
+  return <Navigate to="/profile" replace />;
 };
 
 const App = () => {
@@ -155,12 +151,10 @@ const App = () => {
                     <Trade />
                   </React.Suspense>
                 } />
-                <Route path="commodities" element={
-                  <React.Suspense fallback={<LoadingSpinner />}>
-                    <Commodities />
-                  </React.Suspense>
-                } />
               </Route>
+
+              {/* Commodities temporarily disabled */}
+              <Route path="/commodities" element={<Navigate to="/trade" replace />} />
               
               {/* Trade pages with proper nested routing */}
               <Route path="/trade/all-positions" element={<Layout />}>

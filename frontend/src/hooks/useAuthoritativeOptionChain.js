@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 /**
  * useAuthoritativeOptionChain Hook
@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback } from 'react';
  * - Loading states and metadata
  */
 import { apiService } from '../services/apiService';
+import { useWebSocket } from './useWebSocket';
 
 export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) => {
   // State management
@@ -27,8 +28,27 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
   // Options with defaults
   const {
     autoRefresh = true,
-    refreshInterval = 1000, // 1 second default for realtime
+    refreshInterval = 1000,
   } = options;
+
+  const streamUrl = useMemo(() => {
+    if (!underlying || !expiry) {
+      return null;
+    }
+    const fallbackOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8000';
+    const endpoint = `/api/v2/options/ws/live?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}`;
+    try {
+      const base = new URL(apiService.baseURL, fallbackOrigin);
+      const wsProtocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${wsProtocol}//${base.host}${endpoint}`;
+    } catch (_error) {
+      const wsProtocol = fallbackOrigin.startsWith('https') ? 'wss:' : 'ws:';
+      const host = fallbackOrigin.replace(/^https?:\/\//, '');
+      return `${wsProtocol}//${host}${endpoint}`;
+    }
+  }, [underlying, expiry]);
+
+  const { lastMessage, readyState } = useWebSocket(streamUrl);
 
   // Construct API URL
   const apiUrl = useCallback(() => {
@@ -101,23 +121,53 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
     }
   }, [underlying, expiry, apiUrl]);
 
-  // Auto-refresh effect
+  // WebSocket push stream effect
+  useEffect(() => {
+    if (!autoRefresh || !underlying || !expiry || !lastMessage?.data) {
+      return;
+    }
+
+    try {
+      const result = JSON.parse(lastMessage.data);
+      if (!result || result.status !== 'success') {
+        if (result?.detail) {
+          setError(result.detail);
+        }
+        return;
+      }
+
+      const chainData = {
+        ...(result.data || {}),
+        underlying_ltp: result.underlying_ltp ?? result.data?.underlying_ltp ?? null,
+      };
+      setData(chainData);
+      setTimestamp(new Date(result.timestamp));
+      setCacheStats(result.cache_stats || {});
+      setRetryCount(0);
+      setError(null);
+      setLoading(false);
+    } catch (_error) {
+      setError('Invalid stream payload');
+    }
+  }, [autoRefresh, underlying, expiry, lastMessage]);
+
+  // Initial fetch for first paint + websocket fallback
+  useEffect(() => {
+    if (!underlying || !expiry) {
+      return;
+    }
+
+    fetchChain();
+  }, [underlying, expiry, fetchChain]);
+
   useEffect(() => {
     if (!autoRefresh || !underlying || !expiry) {
       return;
     }
-
-    // Initial fetch
-    fetchChain();
-
-    // Set up polling interval
-    const interval = setInterval(() => {
+    if (readyState === WebSocket.CLOSED) {
       fetchChain();
-    }, refreshInterval);
-
-    return () => clearInterval(interval);
-
-  }, [underlying, expiry, autoRefresh, refreshInterval, fetchChain]);
+    }
+  }, [readyState, autoRefresh, underlying, expiry, fetchChain, refreshInterval]);
 
   // Manual refresh function
   const refresh = useCallback(() => {

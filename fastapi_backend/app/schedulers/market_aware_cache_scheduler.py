@@ -35,6 +35,7 @@ MCX_MARKET_HOURS = {
 }
 
 ENABLE_DHAN_REST_CLOSING_SNAPSHOT = (os.getenv("ENABLE_DHAN_REST_CLOSING_SNAPSHOT") or "").strip().lower() in {"1", "true", "yes", "on"}
+ENABLE_COMMODITIES = (os.getenv("ENABLE_COMMODITIES") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class MarketAwareCacheScheduler:
@@ -169,21 +170,22 @@ class MarketAwareCacheScheduler:
                             else:
                                 logger.warning("⚠️ Closing snapshot job failed")
                         
-                        # MCX one-time closing snapshot after 23:30
-                        mcx_close_time = MCX_MARKET_HOURS["close_time"]
-                        if (
-                            now.weekday() < 5
-                            and now.time() >= mcx_close_time
-                            and self.last_closing_run_date != (today_key + "_MCX")
-                        ):
-                            logger.info("🕚 Running MCX closing snapshot job (23:30)...")
-                            from app.commodity_engine import commodity_engine
-                            ok2 = await commodity_engine.populate_closing_snapshot_from_rest()
-                            if ok2:
-                                self.last_closing_run_date = today_key + "_MCX"
-                                logger.info("✅ MCX closing snapshot job completed")
-                            else:
-                                logger.warning("⚠️ MCX closing snapshot job failed")
+                        # MCX one-time closing snapshot after 23:30 (optional)
+                        if ENABLE_COMMODITIES:
+                            mcx_close_time = MCX_MARKET_HOURS["close_time"]
+                            if (
+                                now.weekday() < 5
+                                and now.time() >= mcx_close_time
+                                and self.last_closing_run_date != (today_key + "_MCX")
+                            ):
+                                logger.info("🕚 Running MCX closing snapshot job (23:30)...")
+                                from app.commodity_engine import commodity_engine
+                                ok2 = await commodity_engine.populate_closing_snapshot_from_rest()
+                                if ok2:
+                                    self.last_closing_run_date = today_key + "_MCX"
+                                    logger.info("✅ MCX closing snapshot job completed")
+                                else:
+                                    logger.warning("⚠️ MCX closing snapshot job failed")
                     except Exception as e:
                         logger.error(f"❌ Error running closing snapshot job: {e}")
                 

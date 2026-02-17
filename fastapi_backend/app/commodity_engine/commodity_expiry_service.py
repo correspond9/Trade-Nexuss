@@ -7,11 +7,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, date
 from typing import Dict, List, Optional
 
-import aiohttp
-
 from app.commodity_engine.commodity_utils import fetch_dhan_credentials
 from app.market.instrument_master.registry import REGISTRY
 from app.services.dhan_rate_limiter import DhanRateLimiter
+from app.services.dhan_sdk_bridge import sdk_expiry_list_async
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,6 @@ class CommodityExpiryRegistry:
 class CommodityExpiryService:
     def __init__(self) -> None:
         self.registry = CommodityExpiryRegistry()
-        self.dhan_base_url = "https://api.dhan.co"
         self._rate_lock = asyncio.Lock()
         self._last_call = None
         self._min_interval = 1.0
@@ -140,47 +138,39 @@ class CommodityExpiryService:
                 self.registry.set_expiries(symbol, fallback)
             return fallback
 
-        headers = {
-            "access-token": creds["access_token"],
-            "client-id": creds["client_id"],
-            "Content-Type": "application/json",
-        }
-        url = f"{self.dhan_base_url}/v2/optionchain/expirylist"
-        payload = {
-            "UnderlyingScrip": int(meta["security_id"]),
-            "UnderlyingSeg": meta["segment"],
-        }
-
         for attempt in range(3):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, headers=headers, timeout=10) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            expiries = data.get("data", [])
-                            if isinstance(expiries, list):
-                                self.registry.set_expiries(symbol, expiries)
-                                return expiries
-                            return []
+                sdk_result = await sdk_expiry_list_async(
+                    creds=creds,
+                    under_security_id=int(meta["security_id"]),
+                    under_exchange_segment=meta["segment"],
+                )
+                if sdk_result.get("ok"):
+                    expiries = sdk_result.get("data") or []
+                    if isinstance(expiries, list):
+                        self.registry.set_expiries(symbol, expiries)
+                        return expiries
+                    return []
 
-                        error_text = await response.text()
-                        if response.status == 502:
-                            break
-                        logger.warning(
-                            f"⚠️ MCX expiry API error for {symbol}: {response.status} - {error_text}"
-                        )
-                        if response.status in (401, 403):
-                            await self.rate_limiter.block_async("expiry", 900)
-                        if response.status == 429:
-                            await self.rate_limiter.block_async("expiry", 120)
-                        if response.status == 429:
-                            await asyncio.sleep(3 + attempt * 2)
-                            continue
-                        fallback = self._fallback_expiries_from_registry(symbol)
-                        if fallback:
-                            self.registry.set_expiries(symbol, fallback)
-                            return fallback
-                        return []
+                if sdk_result.get("error_kind") == "auth":
+                    await self.rate_limiter.block_async("expiry", 900)
+                if sdk_result.get("error_kind") == "rate":
+                    await self.rate_limiter.block_async("expiry", 120)
+
+                logger.warning(
+                    "⚠️ MCX expiry SDK error for %s: %s",
+                    symbol,
+                    sdk_result.get("error") or "unknown",
+                )
+                if sdk_result.get("error_kind") == "rate":
+                    await asyncio.sleep(3 + attempt * 2)
+                    continue
+
+                fallback = self._fallback_expiries_from_registry(symbol)
+                if fallback:
+                    self.registry.set_expiries(symbol, fallback)
+                    return fallback
+                return []
             except Exception as exc:
                 logger.warning(f"⚠️ MCX expiry fetch failed for {symbol}: {exc}")
                 await asyncio.sleep(1 + attempt)

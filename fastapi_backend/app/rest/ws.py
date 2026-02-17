@@ -32,7 +32,8 @@ async def prices_ws(ws: WebSocket):
             if msg_count % 10 == 0:  # Log every 10th message to avoid spam
                 print(f"[WS] Sending prices to client: {msg_count} messages, payload: {payload}")
             await ws.send_json(payload)
-            await asyncio.sleep(1)
+            sleep_seconds = 1 if payload.get("status") == "active" else 30
+            await asyncio.sleep(sleep_seconds)
     except Exception as e:
         print(f"[WS] Error: {e}")
     finally:

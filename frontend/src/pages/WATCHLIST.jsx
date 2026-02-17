@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
 import { RefreshCw } from 'lucide-react';
+import { useMarketPulse } from '../hooks/useMarketPulse';
 
 // HUMAN-READABLE INSTRUMENT DISPLAY FORMATTING
 // PRESENTATION LAYER ONLY - Canonical data remains unchanged
@@ -51,6 +52,7 @@ const formatInstrumentDisplay = (instrument) => {
 
 const WatchlistComponent = ({ handleOpenOrderModal }) => {
   const { user } = useAuth();
+  const { pulse, marketActive } = useMarketPulse();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWatchlist, setSelectedWatchlist] = useState(1);
   const [watchlists, setWatchlists] = useState({ 1: [], 2: [], 3: [] });
@@ -728,16 +730,11 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
   useEffect(() => {
     const currentList = watchlists[selectedWatchlist] || [];
-    if (!currentList.length) {
-      return undefined;
+    if (!marketActive || !pulse?.timestamp || !currentList.length) {
+      return;
     }
-
-    const intervalId = setInterval(() => {
-      handleRefresh();
-    }, 1500);
-
-    return () => clearInterval(intervalId);
-  }, [watchlists, selectedWatchlist, handleRefresh]);
+    handleRefresh();
+  }, [pulse?.timestamp, marketActive, watchlists, selectedWatchlist, handleRefresh]);
 
   useEffect(() => {
     const handler = (e) => {

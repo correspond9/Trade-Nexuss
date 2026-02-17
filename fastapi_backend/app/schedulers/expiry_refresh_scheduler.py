@@ -7,7 +7,8 @@ import logging
 from datetime import datetime, time
 from typing import Dict, List
 import asyncio
-import aiohttp
+
+from app.services.dhan_sdk_bridge import sdk_expiry_list_async
 
 logger = logging.getLogger(__name__)
 
@@ -73,29 +74,28 @@ class ExpiryRefreshScheduler:
             if not creds_record:
                 logger.warning(f"No active credentials found for {underlying} expiry fetch")
                 return []
-            
-            url = "https://api.dhan.co/v2/optionchain/expirylist"
-            headers = {
-                "access-token": creds_record.daily_token or creds_record.auth_token,
-                "client-id": creds_record.client_id,
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "UnderlyingScrip": security_id,
-                "UnderlyingSeg": segment
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        expiries = data.get("data", [])
-                        logger.info(f"✅ Fetched {len(expiries)} expiries for {underlying} from DhanHQ API")
-                        return expiries
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ DhanHQ expiry API error for {underlying}: {response.status} - {error_text}")
-                        return []
+
+            sdk_result = await sdk_expiry_list_async(
+                creds={
+                    "client_id": creds_record.client_id,
+                    "access_token": creds_record.daily_token or creds_record.auth_token,
+                },
+                under_security_id=security_id,
+                under_exchange_segment=segment,
+            )
+            if sdk_result.get("ok"):
+                expiries = sdk_result.get("data") or []
+                if isinstance(expiries, list):
+                    logger.info(f"✅ Fetched {len(expiries)} expiries for {underlying} from DhanHQ API")
+                    return expiries
+                return []
+
+            logger.error(
+                "❌ DhanHQ expiry SDK error for %s: %s",
+                underlying,
+                sdk_result.get("error") or "unknown",
+            )
+            return []
         
         except asyncio.TimeoutError:
             logger.error(f"⏱️ Timeout fetching expiries for {underlying}")

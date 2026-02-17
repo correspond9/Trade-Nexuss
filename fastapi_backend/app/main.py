@@ -14,7 +14,6 @@ from app.rest.auth import router as auth_router
 from app.rest.settings import router as settings_router
 from app.rest.ws import router as ws_router
 from app.rest.mock_exchange import router as mock_exchange_router
-from app.commodity_engine.commodity_rest import router as commodity_router
 from app.trading.positions import router as positions_router
 from app.trading.orders import router as orders_router
 from app.routers.authoritative_option_chain import router as option_chain_router
@@ -138,7 +137,6 @@ app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(credentials_router, prefix=API_PREFIX)
 app.include_router(settings_router, prefix=API_PREFIX)
 app.include_router(ws_router, prefix=API_PREFIX)
-app.include_router(commodity_router, prefix=API_PREFIX)
 app.include_router(positions_router, prefix=API_PREFIX)
 app.include_router(orders_router, prefix=API_PREFIX)
 app.include_router(mock_exchange_router, prefix=API_PREFIX)
@@ -147,16 +145,24 @@ app.include_router(admin_router, prefix=API_PREFIX)
 from app.rest.option_chain_compat import router as option_chain_compat_router
 app.include_router(option_chain_compat_router, prefix=API_PREFIX)
 
+_commodities_enabled = (os.getenv("ENABLE_COMMODITIES") or "").strip().lower() in ("1", "true", "yes", "on")
+if _commodities_enabled:
+    from app.commodity_engine.commodity_rest import router as commodity_router
+    app.include_router(commodity_router, prefix=API_PREFIX)
+else:
+    log.info("[STARTUP] Commodity routes disabled (ENABLE_COMMODITIES is off)")
+
 # Compatibility for stale clients accidentally calling /api/v2/api/v2/*
 DOUBLE_API_PREFIX = API_PREFIX + API_PREFIX
 app.include_router(market_router, prefix=DOUBLE_API_PREFIX)
 app.include_router(credentials_router, prefix=DOUBLE_API_PREFIX)
 app.include_router(settings_router, prefix=DOUBLE_API_PREFIX)
 app.include_router(ws_router, prefix=DOUBLE_API_PREFIX)
-app.include_router(commodity_router, prefix=DOUBLE_API_PREFIX)
 app.include_router(option_chain_compat_router, prefix=DOUBLE_API_PREFIX)
 app.include_router(option_chain_router, prefix=DOUBLE_API_PREFIX + "/options")
 app.include_router(admin_router, prefix=DOUBLE_API_PREFIX)
+if _commodities_enabled:
+    app.include_router(commodity_router, prefix=DOUBLE_API_PREFIX)
 # Backward compatibility for older frontend calls (v1)
 import os as _os
 _disable_v1 = (_os.getenv("DISABLE_V1_COMPAT") or "").strip().lower() in ("1","true","yes","on")
