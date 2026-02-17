@@ -63,6 +63,9 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   const [depthOpen, setDepthOpen] = useState({});
   const [depthCache, setDepthCache] = useState({});
   const [depthLoading, setDepthLoading] = useState({});
+  const [pendingLtpByKey, setPendingLtpByKey] = useState({});
+
+  const getItemKey = useCallback((item) => `${item?.exchange || 'NSE'}:${item?.id}`, []);
 
   const getUnderlyingLtp = useCallback(async (symbol) => {
     try {
@@ -144,114 +147,114 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       return;
     }
 
+    const optimisticKey = getItemKey(instrument);
+    const optimisticItem = {
+      ...instrument,
+      _pendingSubscription: true,
+    };
+
+    setWatchlists(prev => ({
+      ...prev,
+      [selectedWatchlist]: [...(prev[selectedWatchlist] || []), optimisticItem]
+    }));
+    setPendingLtpByKey(prev => ({ ...prev, [optimisticKey]: true }));
+    setSearchTerm('');
+    setSearchResults([]);
+    setShowSuggestions(false);
+
     try {
-      if (instrument.instrumentType === 'FUT') {
-        let enriched = instrument;
-        if (instrument.expiry) {
-          const fut = await fetchFutureQuote(instrument.symbol, instrument.expiry, instrument.exchange || 'NSE');
-          if (fut) {
-            enriched = {
-              ...instrument,
-              ltp: fut.ltp || 0,
-              change: fut.change || 0,
-              changePercent: fut.changePercent || 0,
-              lotSize: fut.lot_size || instrument.lotSize || 1
-            };
-          }
-        }
-        setWatchlists(prev => ({
-          ...prev,
-          [selectedWatchlist]: [...currentList, enriched]
-        }));
-        setSearchTerm('');
-        setSearchResults([]);
-        setShowSuggestions(false);
-        setError('Instrument added to watchlist successfully!');
-        setTimeout(() => setError(''), 2000);
-        return;
-      }
+      let result = null;
       const normalizedType = (instrument.instrumentType || '').toUpperCase();
-      let payload;
-      if (normalizedType === 'EQUITY') {
-        payload = {
-          user_id: userId,
-          symbol: instrument.symbol,
-          expiry: instrument.expiry || null,
-          instrument_type: 'EQUITY',
-          underlying_ltp: null
-        };
-      } else {
-        if (!instrument.expiry) {
-          throw new Error('No expiry available for this instrument');
+
+      if (normalizedType !== 'FUT') {
+        let payload;
+        if (normalizedType === 'EQUITY') {
+          payload = {
+            user_id: userId,
+            symbol: instrument.symbol,
+            expiry: instrument.expiry || null,
+            instrument_type: 'EQUITY',
+            underlying_ltp: null
+          };
+        } else {
+          if (!instrument.expiry) {
+            throw new Error('No expiry available for this instrument');
+          }
+          const instrumentType = isIndexSymbol(instrument.symbol) ? 'INDEX_OPTION' : 'STOCK_OPTION';
+          const underlyingLtp = await getUnderlyingLtp(instrument.symbol);
+          payload = {
+            user_id: userId,
+            symbol: instrument.symbol,
+            expiry: instrument.expiry,
+            instrument_type: instrumentType,
+            underlying_ltp: underlyingLtp
+          };
         }
-        const instrumentType = isIndexSymbol(instrument.symbol) ? 'INDEX_OPTION' : 'STOCK_OPTION';
-        const underlyingLtp = await getUnderlyingLtp(instrument.symbol);
-        payload = {
-          user_id: userId,
-          symbol: instrument.symbol,
-          expiry: instrument.expiry,
-          instrument_type: instrumentType,
-          underlying_ltp: underlyingLtp
-        };
+
+        result = await apiService.post('/watchlist/add', payload);
+        if (!result || (!result.success && result.error !== 'DUPLICATE')) {
+          throw new Error((result && (result.detail || result.message)) || 'Failed to add to watchlist');
+        }
       }
 
-      const result = await apiService.post('/watchlist/add', payload);
-      if (!result || (!result.success && result.error !== 'DUPLICATE')) {
-        throw new Error((result && (result.detail || result.message)) || 'Failed to add to watchlist');
-      }
+      let ltpUpdate = null;
+      let changeUpdate = null;
+      let changePercentUpdate = null;
+      let lotSizeUpdate = null;
 
-      let enriched = instrument;
-      if (instrument.instrumentType === 'FUT' && instrument.expiry) {
+      if (normalizedType === 'FUT' && instrument.expiry) {
         const fut = await fetchFutureQuote(instrument.symbol, instrument.expiry, instrument.exchange || 'NSE');
         if (fut) {
-          enriched = {
-            ...instrument,
-            ltp: fut.ltp || 0,
-            change: fut.change || 0,
-            changePercent: fut.changePercent || 0,
-            lotSize: fut.lot_size || instrument.lotSize || 1
-          };
+          ltpUpdate = fut.ltp || 0;
+          changeUpdate = fut.change || 0;
+          changePercentUpdate = fut.changePercent || 0;
+          lotSizeUpdate = fut.lot_size || instrument.lotSize || 1;
         }
-      } else if (instrument.instrumentType === 'CE' || instrument.instrumentType === 'PE') {
-        const optLtp = await fetchOptionLegLtp(instrument.symbol, instrument.expiry, instrument.strike, instrument.instrumentType);
+      } else if (normalizedType === 'CE' || normalizedType === 'PE') {
+        const optLtp = await fetchOptionLegLtp(instrument.symbol, instrument.expiry, instrument.strike, normalizedType);
         if (optLtp !== null) {
-          enriched = {
-            ...instrument,
-            ltp: optLtp,
-          };
+          ltpUpdate = optLtp;
         }
       } else {
         let liveLtp = Number(result?.ltp);
         if (!Number.isFinite(liveLtp) || liveLtp <= 0) {
-          const fallback = await getUnderlyingLtpWithRetry(instrument.symbol);
+          const fallback = await getUnderlyingLtp(instrument.symbol);
           liveLtp = Number(fallback);
         }
         if (Number.isFinite(liveLtp) && liveLtp > 0) {
-          enriched = {
-            ...instrument,
-            ltp: liveLtp,
-          };
+          ltpUpdate = liveLtp;
         }
       }
+
       setWatchlists(prev => ({
         ...prev,
-        [selectedWatchlist]: [...currentList, enriched]
+        [selectedWatchlist]: (prev[selectedWatchlist] || []).map((item) => {
+          if (getItemKey(item) !== optimisticKey) return item;
+          return {
+            ...item,
+            ltp: ltpUpdate !== null ? ltpUpdate : item.ltp,
+            change: changeUpdate !== null ? changeUpdate : item.change,
+            changePercent: changePercentUpdate !== null ? changePercentUpdate : item.changePercent,
+            lotSize: lotSizeUpdate !== null ? lotSizeUpdate : item.lotSize,
+            _pendingSubscription: false,
+          };
+        })
       }));
-      setShowSuggestions(false);
 
-      // Clear search after adding
-      setSearchTerm('');
-      setSearchResults([]);
-
-      // Show success message
       setError('Instrument added to watchlist successfully!');
       setTimeout(() => setError(''), 2000);
     } catch (err) {
       console.error('Error adding to watchlist:', err);
+      setWatchlists(prev => ({
+        ...prev,
+        [selectedWatchlist]: (prev[selectedWatchlist] || []).filter((item) => getItemKey(item) !== optimisticKey)
+      }));
       setError(err.message || 'Failed to add instrument to watchlist');
       setTimeout(() => setError(''), 2000);
+    } finally {
+      setPendingLtpByKey(prev => ({ ...prev, [optimisticKey]: false }));
     }
-  }, [watchlists, selectedWatchlist, user, fetchFutureQuote, fetchOptionLegLtp, getUnderlyingLtp, getUnderlyingLtpWithRetry]);
+  }, [watchlists, selectedWatchlist, user, fetchFutureQuote, fetchOptionLegLtp, getUnderlyingLtp, getItemKey]);
 
   // Remove instrument from watchlist
   const removeFromWatchlist = useCallback(async (instrumentId, exchange) => {
@@ -349,22 +352,32 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     }
   }, []);
 
+  const fetchMarketDepth = useCallback(async (symbol) => {
+    try {
+      const data = await apiService.get(`/market/depth/${encodeURIComponent(symbol)}`).catch(() => null);
+      return data?.data || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const toggleDepth = useCallback(async (item) => {
     const isOption = item.instrumentType === 'CE' || item.instrumentType === 'PE';
-    if (!isOption || !item.expiry || !item.strike) return;
     const opened = !!depthOpen[item.id];
     if (opened) {
       setDepthOpen(prev => ({ ...prev, [item.id]: false }));
       return;
     }
     setDepthLoading(prev => ({ ...prev, [item.id]: true }));
-    const data = await fetchOptionDepth(item.symbol, item.expiry, item.strike, item.instrumentType);
+    const data = isOption
+      ? await fetchOptionDepth(item.symbol, item.expiry, item.strike, item.instrumentType)
+      : await fetchMarketDepth(item.symbol);
     if (data) {
       setDepthCache(prev => ({ ...prev, [item.id]: data }));
     }
     setDepthLoading(prev => ({ ...prev, [item.id]: false }));
     setDepthOpen(prev => ({ ...prev, [item.id]: true }));
-  }, [depthOpen, fetchOptionDepth]);
+  }, [depthOpen, fetchOptionDepth, fetchMarketDepth]);
 
   const fetchTierBSuggestions = useCallback(async (searchText) => {
     try {
@@ -866,6 +879,12 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
               <div className="bg-white">
                 {sortedDisplayData.map((item, index) => (
                   <React.Fragment key={`${item.exchange}-${item.id}-${index}`}>
+                  {(() => {
+                    const isOption = item.instrumentType === 'CE' || item.instrumentType === 'PE';
+                    const canDepth = isOption || item.instrumentType === 'EQUITY' || item.instrumentType === 'FUT' || item.instrumentType === 'INDEX';
+                    const itemKey = getItemKey(item);
+                    const isPendingQuote = !!item._pendingSubscription || !!pendingLtpByKey[itemKey];
+                    return (
                   <div
                     className="grid grid-cols-12 px-6 py-2 border-b border-gray-100 hover:bg-gray-50 transition-colors"
                   >
@@ -887,9 +906,9 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
                     <div className="col-span-2 flex items-center justify-center">
                       <button
                         onClick={() => toggleDepth(item)}
-                        disabled={!(item.instrumentType === 'CE' || item.instrumentType === 'PE')}
+                        disabled={!canDepth}
                         className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium shadow-sm transition-colors ${
-                          (item.instrumentType === 'CE' || item.instrumentType === 'PE')
+                          canDepth
                             ? 'bg-gray-700 text-white hover:bg-gray-800'
                             : 'bg-gray-200 text-gray-500 cursor-not-allowed'
                         }`}
@@ -901,14 +920,18 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
                     {/* LTP Column */}
                     <div className="col-span-2 flex items-center justify-end">
-                      <div className="text-sm font-semibold text-gray-900">
-                        {item.ltp > 0 ? `₹${item.ltp.toFixed(2)}` : '--'}
-                      </div>
+                      {isPendingQuote ? (
+                        <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" title="Subscribing" />
+                      ) : (
+                        <div className="text-sm font-semibold text-gray-900">
+                          {item.ltp > 0 ? `₹${item.ltp.toFixed(2)}` : '--'}
+                        </div>
+                      )}
                     </div>
 
                     {/* Change Column */}
                     <div className="col-span-2 flex items-center justify-end">
-                      {item.change !== 0 && (
+                      {!isPendingQuote && item.change !== 0 && (
                         <div className="text-right">
                           <div className={`text-sm font-medium ${item.change >= 0 ? 'text-green-600' : 'text-red-600'
                             }`}>
@@ -969,6 +992,8 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
                       </button>
                     </div>
                   </div>
+                  );
+                  })()}
                   {depthOpen[item.id] && (
                     <div className="px-6 py-2 border-b border-gray-100 bg-gray-50">
                       {depthLoading[item.id] ? (

@@ -433,3 +433,143 @@ def option_depth(underlying: str, expiry: str, strike: float, option_type: str):
     except Exception as e:
         logger.exception("Failed to fetch option depth: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/market/depth/{symbol}")
+def market_depth(symbol: str):
+    """Return best-known top-5 depth for non-option instruments (equity/index/futures)."""
+    try:
+        _maybe_recover_streams()
+        sym = (symbol or "").strip().upper()
+        if not sym:
+            raise HTTPException(status_code=400, detail="symbol is required")
+
+        try:
+            from app.market.market_state import state
+            cached = (state.get("depth") or {}).get(sym)
+            if isinstance(cached, dict):
+                bids = cached.get("bids") if isinstance(cached.get("bids"), list) else []
+                asks = cached.get("asks") if isinstance(cached.get("asks"), list) else []
+                if bids or asks:
+                    return {
+                        "status": "success",
+                        "data": {
+                            "bids": bids[:5],
+                            "asks": asks[:5],
+                        },
+                    }
+        except Exception:
+            pass
+
+        from app.market.instrument_master.registry import REGISTRY
+        from app.storage.db import SessionLocal
+        from app.storage.models import DhanCredential
+        from app.market.security_ids import get_default_index_security
+
+        if not REGISTRY.loaded:
+            REGISTRY.load()
+
+        exchange_segment = None
+        security_id = None
+
+        try:
+            for row in REGISTRY.get_equity_stocks_nse(limit=12000):
+                row_symbol = (row.get("UNDERLYING_SYMBOL") or row.get("SYMBOL") or row.get("SYMBOL_NAME") or "").strip().upper()
+                if row_symbol != sym:
+                    continue
+                inst_type = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
+                if inst_type not in {"ES", "ETF"}:
+                    continue
+                security_id = row.get("SECURITY_ID") or row.get("SecurityId")
+                exch = (row.get("EXCH_ID") or "NSE").strip().upper()
+                exchange_segment = "BSE_EQ" if exch == "BSE" else "NSE_EQ"
+                if security_id:
+                    break
+        except Exception:
+            security_id = None
+            exchange_segment = None
+
+        if not security_id:
+            try:
+                index_meta = get_default_index_security(sym) or {}
+                index_sec = index_meta.get("security_id")
+                if index_sec:
+                    security_id = index_sec
+                    exchange_segment = "IDX_I"
+            except Exception:
+                security_id = None
+                exchange_segment = None
+
+        if not security_id or not exchange_segment:
+            return {"status": "success", "data": {"bids": [], "asks": []}}
+
+        db = SessionLocal()
+        try:
+            creds = db.query(DhanCredential).first()
+            access_token = (getattr(creds, "daily_token", None) or getattr(creds, "auth_token", None)) if creds else None
+            client_id = getattr(creds, "client_id", None) if creds else None
+        finally:
+            db.close()
+
+        if not access_token or not client_id:
+            return {"status": "success", "data": {"bids": [], "asks": []}}
+
+        headers = {
+            "access-token": access_token,
+            "client-id": client_id,
+            "Content-Type": "application/json",
+        }
+        payload = {exchange_segment: [int(str(security_id))]}
+        response = requests.post("https://api.dhan.co/v2/marketfeed/quote", json=payload, headers=headers, timeout=8)
+        if response.status_code != 200:
+            return {"status": "success", "data": {"bids": [], "asks": []}}
+
+        body = response.json() or {}
+        seg_data = (body.get("data") or {}).get(exchange_segment) or {}
+        sec_key = str(security_id)
+        sec_payload = seg_data.get(sec_key) or seg_data.get(int(security_id))
+        if isinstance(sec_payload, list) and sec_payload:
+            sec_payload = sec_payload[0]
+
+        if not isinstance(sec_payload, dict):
+            return {"status": "success", "data": {"bids": [], "asks": []}}
+
+        raw_depth = sec_payload.get("depth") or sec_payload.get("market_depth") or {}
+        bids = raw_depth.get("buy") or raw_depth.get("bids") or []
+        asks = raw_depth.get("sell") or raw_depth.get("asks") or []
+
+        def _norm(levels):
+            out = []
+            if not isinstance(levels, list):
+                return out
+            for level in levels[:5]:
+                if isinstance(level, dict):
+                    price = level.get("price") or level.get("rate") or level.get("p")
+                    qty = level.get("quantity") or level.get("qty") or level.get("q")
+                elif isinstance(level, (list, tuple)) and len(level) >= 2:
+                    price, qty = level[0], level[1]
+                else:
+                    continue
+                try:
+                    price_val = float(price)
+                except Exception:
+                    continue
+                try:
+                    qty_val = float(qty) if qty is not None else 0.0
+                except Exception:
+                    qty_val = 0.0
+                out.append({"price": price_val, "qty": qty_val})
+            return out
+
+        return {
+            "status": "success",
+            "data": {
+                "bids": _norm(bids),
+                "asks": _norm(asks),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to fetch market depth: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
