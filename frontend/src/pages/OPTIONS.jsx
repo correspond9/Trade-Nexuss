@@ -3,9 +3,14 @@ import { useAuthoritativeOptionChain } from '../hooks/useAuthoritativeOptionChai
 import normalizeUnderlying from '../utils/underlying';
 import { apiService } from '../services/apiService';
 import { getLotSize as getConfiguredLotSize } from '../config/tradingConfig';
+import { useAuth } from '../contexts/AuthContext';
 
 const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) => {
+  const { user } = useAuth();
   const [underlyingPrice, setUnderlyingPrice] = useState(null);
+  const [openActionMenuKey, setOpenActionMenuKey] = useState(null);
+  const [message, setMessage] = useState(null);
+  const [bidAskModal, setBidAskModal] = useState(null);
   const listRef = useRef(null);
   const didInitialScroll = useRef(false);
 
@@ -136,6 +141,110 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
     didInitialScroll.current = true;
   }, [displayedStrikes]);
 
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (!event.target.closest('.leg-action-root')) {
+        setOpenActionMenuKey(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(null), 2200);
+    return () => clearTimeout(timer);
+  }, [message]);
+
+  const isIndexSymbol = (value) => {
+    const indexSet = new Set(['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'MIDCPNIFTY', 'BANKEX']);
+    return indexSet.has(String(value || '').toUpperCase());
+  };
+
+  const addLegToWatchlist = async ({ optionType, strikeData }) => {
+    try {
+      if (!user?.id) {
+        setMessage({ type: 'error', text: 'User not available for watchlist action' });
+        return;
+      }
+      if (!expiry) {
+        setMessage({ type: 'error', text: 'Expiry is required to add options to watchlist' });
+        return;
+      }
+
+      const instrumentType = isIndexSymbol(symbol) ? 'INDEX_OPTION' : 'STOCK_OPTION';
+      const payload = {
+        user_id: user.id,
+        symbol,
+        expiry,
+        instrument_type: instrumentType,
+        underlying_ltp: underlyingPrice,
+      };
+
+      await apiService.post('/watchlist/add', payload);
+      setMessage({ type: 'success', text: `${symbol} ${strikeData.strike} ${optionType} added to watchlist` });
+    } catch (error) {
+      setMessage({ type: 'error', text: error?.message || 'Failed to add to watchlist' });
+    }
+  };
+
+  const openBidAsk = ({ optionType, strikeData }) => {
+    const bid = optionType === 'CE' ? Number(strikeData.bidCE || 0) : Number(strikeData.bidPE || 0);
+    const ask = optionType === 'CE' ? Number(strikeData.askCE || 0) : Number(strikeData.askPE || 0);
+    setBidAskModal({
+      symbol,
+      strike: strikeData.strike,
+      optionType,
+      bid,
+      ask,
+    });
+  };
+
+  const legMenuKey = (strike, optionType) => `${strike}-${optionType}`;
+
+  const LegActionMenu = ({ strikeData, optionType }) => {
+    const key = legMenuKey(strikeData.strike, optionType);
+    const isOpen = openActionMenuKey === key;
+
+    return (
+      <div className="relative leg-action-root">
+        <button
+          type="button"
+          onClick={() => setOpenActionMenuKey(isOpen ? null : key)}
+          className="w-6 h-6 rounded hover:bg-gray-200 text-gray-600 text-sm font-bold"
+          title="More actions"
+        >
+          ⋮
+        </button>
+        {isOpen && (
+          <div className="absolute z-30 mt-1 right-0 bg-white border border-gray-200 rounded-md shadow-lg w-36">
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+              onClick={async () => {
+                setOpenActionMenuKey(null);
+                await addLegToWatchlist({ optionType, strikeData });
+              }}
+            >
+              Add to watchlist
+            </button>
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+              onClick={() => {
+                setOpenActionMenuKey(null);
+                openBidAsk({ optionType, strikeData });
+              }}
+            >
+              Show bid-ask
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Manual refresh
   const handleRefresh = () => {
     refreshChain();
@@ -182,6 +291,11 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
 
       {/* Options Matrix */}
       <div className="overflow-y-auto flex-grow" ref={listRef} style={{ maxHeight: '640px' }}>
+        {message && (
+          <div className={`m-2 p-2 rounded text-xs border ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+            {message.text}
+          </div>
+        )}
         {/* Loading State */}
         {chainLoading && !strikes.length && (
           <div className="m-2 p-3 bg-blue-50 border border-blue-200 rounded text-blue-700 text-sm text-center">
@@ -230,10 +344,13 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
           >
             {/* CE Premium Column - Left */}
             <div className="flex items-center justify-between pr-2">
-              <span className="text-sm font-semibold text-gray-900">
-                {strikeData.ltpCE > 0 ? strikeData.ltpCE.toFixed(2) : '0.00'}
-              </span>
-            <div className="flex space-x-1 ml-2">
+              <div className="flex items-center gap-1">
+                <span className="text-sm font-semibold text-gray-900">
+                  {strikeData.ltpCE > 0 ? strikeData.ltpCE.toFixed(2) : '0.00'}
+                </span>
+                <LegActionMenu strikeData={strikeData} optionType="CE" />
+              </div>
+              <div className="flex space-x-1 ml-2">
                 <button
                   onClick={() => {
                     if (strikeData.ltpCE <= 0) return;
@@ -348,13 +465,43 @@ const Options = ({ handleOpenOrderModal, selectedIndex = 'NIFTY 50', expiry }) =
                   S
                 </button>
               </div>
-              <span className="text-sm font-semibold text-gray-900">
-                {strikeData.ltpPE > 0 ? strikeData.ltpPE.toFixed(2) : '0.00'}
-              </span>
+              <div className="flex items-center gap-1">
+                <LegActionMenu strikeData={strikeData} optionType="PE" />
+                <span className="text-sm font-semibold text-gray-900">
+                  {strikeData.ltpPE > 0 ? strikeData.ltpPE.toFixed(2) : '0.00'}
+                </span>
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {bidAskModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-40">
+          <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-4 w-72">
+            <div className="text-sm font-semibold text-gray-900 mb-3">
+              {bidAskModal.symbol} {bidAskModal.strike} {bidAskModal.optionType}
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Bid</span>
+                <span className="font-semibold text-green-700">{bidAskModal.bid.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Ask</span>
+                <span className="font-semibold text-red-700">{bidAskModal.ask.toFixed(2)}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBidAskModal(null)}
+              className="mt-4 w-full px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
