@@ -66,6 +66,14 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   const [pendingLtpByKey, setPendingLtpByKey] = useState({});
 
   const getItemKey = useCallback((item) => `${item?.exchange || 'NSE'}:${item?.id}`, []);
+  const getDepthKey = useCallback((item) => {
+    const exchange = item?.exchange || 'NSE';
+    const symbol = item?.symbol || '';
+    const expiry = item?.expiry || '';
+    const strike = item?.strike ?? '';
+    const instrumentType = item?.instrumentType || '';
+    return `${exchange}:${symbol}:${expiry}:${strike}:${instrumentType}`;
+  }, []);
 
   const getUnderlyingLtp = useCallback(async (symbol) => {
     try {
@@ -363,21 +371,22 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
   const toggleDepth = useCallback(async (item) => {
     const isOption = item.instrumentType === 'CE' || item.instrumentType === 'PE';
-    const opened = !!depthOpen[item.id];
+    const depthKey = getDepthKey(item);
+    const opened = !!depthOpen[depthKey];
     if (opened) {
-      setDepthOpen(prev => ({ ...prev, [item.id]: false }));
+      setDepthOpen(prev => ({ ...prev, [depthKey]: false }));
       return;
     }
-    setDepthLoading(prev => ({ ...prev, [item.id]: true }));
+    setDepthLoading(prev => ({ ...prev, [depthKey]: true }));
     const data = isOption
       ? await fetchOptionDepth(item.symbol, item.expiry, item.strike, item.instrumentType)
       : await fetchMarketDepth(item.symbol);
     if (data) {
-      setDepthCache(prev => ({ ...prev, [item.id]: data }));
+      setDepthCache(prev => ({ ...prev, [depthKey]: data }));
     }
-    setDepthLoading(prev => ({ ...prev, [item.id]: false }));
-    setDepthOpen(prev => ({ ...prev, [item.id]: true }));
-  }, [depthOpen, fetchOptionDepth, fetchMarketDepth]);
+    setDepthLoading(prev => ({ ...prev, [depthKey]: false }));
+    setDepthOpen(prev => ({ ...prev, [depthKey]: true }));
+  }, [depthOpen, fetchOptionDepth, fetchMarketDepth, getDepthKey]);
 
   const fetchTierBSuggestions = useCallback(async (searchText) => {
     try {
@@ -877,14 +886,14 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
               {/* Table Body */}
               <div className="bg-white">
-                {sortedDisplayData.map((item, index) => (
+                {sortedDisplayData.map((item, index) => {
+                  const isOption = item.instrumentType === 'CE' || item.instrumentType === 'PE';
+                  const canDepth = isOption || item.instrumentType === 'EQUITY' || item.instrumentType === 'FUT' || item.instrumentType === 'INDEX';
+                  const itemKey = getItemKey(item);
+                  const depthKey = getDepthKey(item);
+                  const isPendingQuote = !!item._pendingSubscription || !!pendingLtpByKey[itemKey];
+                  return (
                   <React.Fragment key={`${item.exchange}-${item.id}-${index}`}>
-                  {(() => {
-                    const isOption = item.instrumentType === 'CE' || item.instrumentType === 'PE';
-                    const canDepth = isOption || item.instrumentType === 'EQUITY' || item.instrumentType === 'FUT' || item.instrumentType === 'INDEX';
-                    const itemKey = getItemKey(item);
-                    const isPendingQuote = !!item._pendingSubscription || !!pendingLtpByKey[itemKey];
-                    return (
                   <div
                     className="grid grid-cols-12 px-6 py-2 border-b border-gray-100 hover:bg-gray-50 transition-colors"
                   >
@@ -992,18 +1001,16 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
                       </button>
                     </div>
                   </div>
-                  );
-                  })()}
-                  {depthOpen[item.id] && (
+                  {depthOpen[depthKey] && (
                     <div className="px-6 py-2 border-b border-gray-100 bg-gray-50">
-                      {depthLoading[item.id] ? (
+                      {depthLoading[depthKey] ? (
                         <div className="text-xs text-gray-600">Loading depth...</div>
                       ) : (
                         <div className="grid grid-cols-12 gap-4">
                           <div className="col-span-6">
                             <div className="text-xs font-semibold text-gray-700 mb-1">Bids</div>
                             <ul className="text-xs">
-                              {(depthCache[item.id]?.bids || []).slice(0,5).map((b, i) => (
+                              {(depthCache[depthKey]?.bids || []).slice(0,5).map((b, i) => (
                                 <li key={`bid-${i}`} className="flex justify-between py-0.5">
                                   <span>{(b.price ?? b[0] ?? '--')}</span>
                                   <span className="text-gray-500">{(b.qty ?? b[1] ?? '')}</span>
@@ -1014,7 +1021,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
                           <div className="col-span-6">
                             <div className="text-xs font-semibold text-gray-700 mb-1">Asks</div>
                             <ul className="text-xs">
-                              {(depthCache[item.id]?.asks || []).slice(0,5).map((a, i) => (
+                              {(depthCache[depthKey]?.asks || []).slice(0,5).map((a, i) => (
                                 <li key={`ask-${i}`} className="flex justify-between py-0.5">
                                   <span>{(a.price ?? a[0] ?? '--')}</span>
                                   <span className="text-gray-500">{(a.qty ?? a[1] ?? '')}</span>
@@ -1027,7 +1034,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
                     </div>
                   )}
                   </React.Fragment>
-                ))}
+                );})}
               </div>
             </div>
           </div>

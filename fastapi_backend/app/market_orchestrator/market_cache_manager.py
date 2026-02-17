@@ -107,9 +107,8 @@ class MarketCacheManager:
             self.set_equity(exchange, symbol, fields)
             try:
                 if ltp is not None:
-                    from app.market.live_prices import update_price, get_dashboard_symbols
-                    if symbol in get_dashboard_symbols():
-                        update_price(symbol, float(ltp))
+                    from app.market.live_prices import update_price
+                    update_price(symbol, float(ltp))
             except Exception:
                 pass
 
