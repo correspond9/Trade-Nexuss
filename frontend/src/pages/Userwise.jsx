@@ -14,6 +14,52 @@ const Userwise = () => {
   const [userPositions, setUserPositions] = useState([]);
   const [selectedPositionIds, setSelectedPositionIds] = useState(new Set());
 
+  const fetchUserPositions = useCallback(async () => {
+    if (!selectedUser?.id) return;
+    try {
+      const positionsResponse = await apiService.get('/portfolio/positions', { user_id: selectedUser.id });
+      setUserPositions(positionsResponse?.data || []);
+    } catch (error) {
+      console.error('Failed to fetch user positions:', error);
+    }
+  }, [selectedUser]);
+
+  const exitPositions = useCallback(async (idsSet) => {
+    if (!idsSet?.size) return;
+    try {
+      for (const id of idsSet) {
+        const response = await apiService.post(`/positions/${id}/close`, {
+          quantity: undefined,
+        });
+        console.log(`Exit position ${id} for user ${selectedUser?.id}:`, response?.data || response);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await fetchUserPositions();
+      setSelectedPositionIds(new Set());
+    } catch (err) {
+      console.error('Error exiting positions:', err);
+    }
+  }, [fetchUserPositions, selectedUser]);
+
+  const handleExitSelected = useCallback(() => {
+    if (!selectedPositionIds.size) return;
+    exitPositions(selectedPositionIds);
+  }, [exitPositions, selectedPositionIds]);
+
+  const handleExitSingle = useCallback((id) => {
+    if (!id) return;
+    exitPositions(new Set([id]));
+  }, [exitPositions]);
+
+  const togglePositionSelection = useCallback((id) => {
+    setSelectedPositionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const fetchUserStats = useCallback(async () => {
     if (!selectedUser) {
       return;
@@ -39,44 +85,6 @@ const Userwise = () => {
       const totalPnL = pnlByPosition.reduce((sum, p) => sum + p, 0);
       const totalVolume = orders.reduce((sum, o) => sum + (Number(o.quantity || 0) * Number(o.price || 0)), 0);
       const averageTradeSize = totalTrades ? totalVolume / totalTrades : 0;
-
-      const exitPositions = async (idsSet) => {
-        try {
-          // Call backend API to close positions
-          for (const id of idsSet) {
-            const response = await apiService.post(`/positions/${id}/close`, {
-              quantity: undefined  // Let backend determine quantity
-            });
-            console.log(`Exit position ${id} for user ${selectedUser.id}:`, response?.data || response);
-          }
-          
-          // Wait a moment for backend processing
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Refresh positions
-          await fetchUserPositions();
-          setSelectedPositionIds(new Set());
-        } catch (err) {
-          console.error('Error exiting positions:', err);
-        }
-      };
-
-      const handleExitSelected = () => {
-        if (!selectedPositionIds.size) return;
-        exitPositions(selectedPositionIds);
-      };
-
-      const togglePositionSelection = (id) => {
-        setSelectedPositionIds(prev => {
-          const newSet = new Set(prev);
-          if (newSet.has(id)) {
-            newSet.delete(id);
-          } else {
-            newSet.add(id);
-          }
-          return newSet;
-        });
-      };
 
       const instrumentsMap = new Map();
       orders.forEach((o) => {
@@ -517,12 +525,13 @@ const Userwise = () => {
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">MTM</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">P&L</th>
                               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
                             </tr>
                           </thead>
                           <tbody className="bg-white divide-y divide-gray-200">
                             {userPositions.length === 0 ? (
                               <tr>
-                                <td colSpan="8" className="px-6 py-8 text-center text-gray-500">
+                                <td colSpan="10" className="px-6 py-8 text-center text-gray-500">
                                   No open positions found for this user.
                                 </td>
                               </tr>
@@ -573,6 +582,16 @@ const Userwise = () => {
                                     }`}>
                                       {position.status || 'UNKNOWN'}
                                     </span>
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap">
+                                    <button
+                                      onClick={() => handleExitSingle(position.id)}
+                                      disabled={position.status !== 'OPEN'}
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                      Exit
+                                    </button>
                                   </td>
                                 </tr>
                               ))

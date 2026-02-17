@@ -52,6 +52,20 @@ const SuperAdmin = () => {
   const [backdateError, setBackdateError] = useState('');
   const [backdateMsg, setBackdateMsg] = useState('');
   const [backdateResult, setBackdateResult] = useState(null);
+  const [forceExitForm, setForceExitForm] = useState({
+    userId: '',
+    mobile: '',
+    username: '',
+    positionId: '',
+    symbol: '',
+    productType: 'MIS',
+    quantity: '',
+    exitPrice: '',
+  });
+  const [forceExitLoading, setForceExitLoading] = useState(false);
+  const [forceExitError, setForceExitError] = useState('');
+  const [forceExitMsg, setForceExitMsg] = useState('');
+  const [forceExitResult, setForceExitResult] = useState(null);
 
   // Handle save with error handling
   const handleSave = async () => {
@@ -165,6 +179,54 @@ const SuperAdmin = () => {
       setBackdateError(error?.message || 'Failed to save historic position');
     } finally {
       setBackdateLoading(false);
+    }
+  };
+
+  const handleForceExit = async () => {
+    setForceExitError('');
+    setForceExitMsg('');
+    setForceExitResult(null);
+
+    const hasTarget = forceExitForm.userId || forceExitForm.mobile.trim() || forceExitForm.username.trim();
+    const hasPositionId = !!forceExitForm.positionId;
+    if (!hasPositionId && !hasTarget) {
+      setForceExitError('Provide Position ID or target user (User ID, Mobile, or Username)');
+      return;
+    }
+    if (!hasPositionId && !forceExitForm.symbol.trim()) {
+      setForceExitError('Symbol is required when Position ID is not provided');
+      return;
+    }
+    if (forceExitForm.exitPrice === '' || Number.isNaN(Number(forceExitForm.exitPrice)) || Number(forceExitForm.exitPrice) <= 0) {
+      setForceExitError('Exit Price is required and must be > 0');
+      return;
+    }
+    if (forceExitForm.quantity !== '' && Number.isNaN(Number(forceExitForm.quantity))) {
+      setForceExitError('Quantity must be numeric when provided');
+      return;
+    }
+
+    setForceExitLoading(true);
+    try {
+      const payload = {
+        exit_price: Number(forceExitForm.exitPrice),
+        product_type: forceExitForm.productType || 'MIS',
+      };
+
+      if (forceExitForm.userId) payload.user_id = Number(forceExitForm.userId);
+      if (forceExitForm.mobile.trim()) payload.mobile = forceExitForm.mobile.trim();
+      if (forceExitForm.username.trim()) payload.username = forceExitForm.username.trim();
+      if (forceExitForm.positionId) payload.position_id = Number(forceExitForm.positionId);
+      if (forceExitForm.symbol.trim()) payload.symbol = forceExitForm.symbol.trim();
+      if (forceExitForm.quantity !== '') payload.quantity = Number(forceExitForm.quantity);
+
+      const res = await apiService.post('/admin/positions/force-exit', payload);
+      setForceExitResult(res || null);
+      setForceExitMsg('✅ Position force-exited successfully');
+    } catch (error) {
+      setForceExitError(error?.message || 'Failed to force-exit position');
+    } finally {
+      setForceExitLoading(false);
     }
   };
 
@@ -820,7 +882,7 @@ const SuperAdmin = () => {
         )}
 
         {activeTab === 'backdate-position' && (
-          <div className="max-w-5xl">
+          <div className="max-w-5xl space-y-6">
             <div className="bg-white rounded-lg shadow">
               <div className="p-6 space-y-4">
                 <h2 className="text-lg font-semibold text-gray-900">Add Historic Position</h2>
@@ -965,6 +1027,131 @@ const SuperAdmin = () => {
                     <div><strong>Quantity:</strong> {backdateResult.quantity}</div>
                     <div><strong>Avg Price:</strong> {backdateResult.avg_price}</div>
                     <div><strong>Created At:</strong> {backdateResult.created_at || '-'}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow">
+              <div className="p-6 space-y-4">
+                <h2 className="text-lg font-semibold text-gray-900">Exit Historic Position</h2>
+                <p className="text-sm text-gray-600">
+                  Force-exit an open legacy position using manual exit price when normal square-off is blocked by symbol mismatch.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Position ID (preferred)</label>
+                    <input
+                      type="number"
+                      value={forceExitForm.positionId}
+                      onChange={(e) => setForceExitForm((s) => ({ ...s, positionId: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. 1024"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">User ID (optional)</label>
+                    <input
+                      type="number"
+                      value={forceExitForm.userId}
+                      onChange={(e) => setForceExitForm((s) => ({ ...s, userId: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. 4"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Mobile (optional)</label>
+                    <input
+                      type="text"
+                      value={forceExitForm.mobile}
+                      onChange={(e) => setForceExitForm((s) => ({ ...s, mobile: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. 9326890165"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Username (optional)</label>
+                    <input
+                      type="text"
+                      value={forceExitForm.username}
+                      onChange={(e) => setForceExitForm((s) => ({ ...s, username: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. anums"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Symbol (if no Position ID)</label>
+                    <input
+                      type="text"
+                      value={forceExitForm.symbol}
+                      onChange={(e) => setForceExitForm((s) => ({ ...s, symbol: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. NIFTY 25000 CE"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Product Type</label>
+                    <select
+                      value={forceExitForm.productType}
+                      onChange={(e) => setForceExitForm((s) => ({ ...s, productType: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                    >
+                      <option value="MIS">MIS</option>
+                      <option value="NORMAL">NORMAL</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Quantity (optional)</label>
+                    <input
+                      type="number"
+                      value={forceExitForm.quantity}
+                      onChange={(e) => setForceExitForm((s) => ({ ...s, quantity: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="Default: full close"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 font-semibold mb-1">Exit Price</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={forceExitForm.exitPrice}
+                      onChange={(e) => setForceExitForm((s) => ({ ...s, exitPrice: e.target.value }))}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g. 184.50"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleForceExit}
+                    disabled={forceExitLoading}
+                    className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  >
+                    {forceExitLoading ? 'Exiting...' : 'Force Exit Position'}
+                  </button>
+                </div>
+
+                {forceExitError && (
+                  <div className="p-3 bg-red-100 border border-red-300 text-red-700 rounded text-sm">{forceExitError}</div>
+                )}
+                {forceExitMsg && (
+                  <div className="p-3 bg-green-100 border border-green-300 text-green-700 rounded text-sm">{forceExitMsg}</div>
+                )}
+                {forceExitResult && (
+                  <div className="p-4 border rounded bg-gray-50 text-sm space-y-1">
+                    <div><strong>Message:</strong> {forceExitResult?.message || 'Position force-exited'}</div>
+                    <div><strong>Position ID:</strong> {forceExitResult?.data?.position?.id || '-'}</div>
+                    <div><strong>User ID:</strong> {forceExitResult?.data?.position?.user_id || '-'}</div>
+                    <div><strong>Symbol:</strong> {forceExitResult?.data?.position?.symbol || '-'}</div>
+                    <div><strong>Quantity:</strong> {forceExitResult?.data?.position?.quantity ?? '-'}</div>
+                    <div><strong>Avg Price:</strong> {forceExitResult?.data?.position?.avg_price ?? '-'}</div>
+                    <div><strong>Status:</strong> {forceExitResult?.data?.position?.status || '-'}</div>
                   </div>
                 )}
               </div>

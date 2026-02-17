@@ -667,6 +667,17 @@ class BackdatePositionRequest(BaseModel):
     merge: bool = True
 
 
+class AdminForceExitRequest(BaseModel):
+    user_id: Optional[int] = None
+    mobile: Optional[str] = None
+    username: Optional[str] = None
+    position_id: Optional[int] = None
+    symbol: Optional[str] = None
+    product_type: Optional[str] = "MIS"
+    quantity: Optional[int] = None
+    exit_price: float = Field(..., gt=0)
+
+
 class LedgerAdjustRequest(BaseModel):
     user_id: int
     credit: float = 0.0
@@ -1834,6 +1845,106 @@ def admin_squareoff(user_id: int, position_id: int, req: SquareOffRequest, user=
     if not pos:
         raise HTTPException(status_code=404, detail="Position not found")
     return close_position(position_id=position_id, req=req, db=db)
+
+
+@router.post("/admin/positions/force-exit")
+def admin_force_exit_position(req: AdminForceExitRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    require_role(user, ["SUPER_ADMIN"])
+
+    target = None
+    if req.user_id is not None:
+        target = db.query(models.UserAccount).filter(models.UserAccount.id == req.user_id).first()
+    elif req.mobile:
+        target = db.query(models.UserAccount).filter(models.UserAccount.mobile == req.mobile).first()
+    elif req.username:
+        target = db.query(models.UserAccount).filter(models.UserAccount.username == req.username).first()
+
+    if req.position_id is not None:
+        pos_query = db.query(models.MockPosition).filter(models.MockPosition.id == req.position_id)
+        if target:
+            pos_query = pos_query.filter(models.MockPosition.user_id == target.id)
+        pos = pos_query.first()
+    else:
+        if not target:
+            raise HTTPException(status_code=400, detail="Provide position_id or target user (user_id/mobile/username)")
+        if not req.symbol:
+            raise HTTPException(status_code=400, detail="Provide symbol when position_id is not provided")
+        symbol_text = (req.symbol or "").strip()
+        product_type = (req.product_type or "MIS").strip().upper()
+        pos = (
+            db.query(models.MockPosition)
+            .filter(
+                models.MockPosition.user_id == target.id,
+                models.MockPosition.symbol == symbol_text,
+                models.MockPosition.product_type == product_type,
+            )
+            .first()
+        )
+
+    if not pos:
+        raise HTTPException(status_code=404, detail="Position not found")
+    if pos.status != "OPEN" or int(pos.quantity or 0) == 0:
+        return {"data": _serialize(pos), "message": "Position already closed"}
+
+    close_qty = req.quantity or abs(int(pos.quantity or 0))
+    close_qty = min(abs(int(pos.quantity or 0)), abs(int(close_qty)))
+    if close_qty <= 0:
+        raise HTTPException(status_code=400, detail="Invalid quantity")
+
+    exit_price = float(req.exit_price)
+    txn = "SELL" if (pos.quantity or 0) > 0 else "BUY"
+
+    order = models.MockOrder(
+        order_ref=generate_order_id(),
+        user_id=pos.user_id,
+        symbol=pos.symbol,
+        exchange_segment=pos.exchange_segment,
+        transaction_type=txn,
+        quantity=close_qty,
+        filled_qty=close_qty,
+        order_type="LIMIT",
+        product_type=pos.product_type,
+        price=exit_price,
+        status="EXECUTED",
+        remarks="FORCED_ADMIN_EXIT",
+        created_at=ist_now(),
+        updated_at=ist_now(),
+    )
+    db.add(order)
+    db.flush()
+
+    trade = models.MockTrade(
+        order_id=order.id,
+        user_id=pos.user_id,
+        price=exit_price,
+        qty=close_qty,
+        created_at=ist_now(),
+    )
+    db.add(trade)
+
+    signed_qty = -close_qty if txn == "SELL" else close_qty
+    _apply_position(
+        db=db,
+        user_id=pos.user_id,
+        symbol=pos.symbol,
+        exchange_segment=pos.exchange_segment,
+        product_type=pos.product_type,
+        qty=signed_qty,
+        price=exit_price,
+    )
+
+    db.commit()
+
+    updated = db.query(models.MockPosition).filter(models.MockPosition.id == pos.id).first()
+    return {
+        "success": True,
+        "message": "Position force-exited",
+        "data": {
+            "position": _serialize(updated) if updated else None,
+            "order": _serialize(order),
+            "trade": _serialize(trade),
+        },
+    }
 
 
 @router.post("/admin/users/{user_id}/restrict")
