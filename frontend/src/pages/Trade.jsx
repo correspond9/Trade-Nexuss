@@ -192,15 +192,15 @@ const Trade = () => {
           {/* Left Panel - Straddle/Options/Watchlist */}
           <div className="lg:w-1/3 w-full">
             {/* Left Tab Navigation */}
-            <div className="flex border border-gray-200 rounded-t-lg overflow-hidden">
+            <div className="flex gap-1 border border-gray-200 rounded-t-lg p-1 bg-gray-100/60">
               {leftTabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setLeftTab(tab.id)}
-                  className={`flex-1 px-2 py-2 text-xs font-medium transition-colors ${
+                  className={`flex-1 px-[1em] py-[0.6em] min-h-[2.4em] leading-tight font-semibold rounded-md transition-colors ${
                     leftTab === tab.id
                       ? 'bg-blue-600 text-white'
-                      : 'bg-white text-gray-700 hover:bg-gray-50 border-l border-gray-200'
+                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
                   }`}
                 >
                   {tab.name}
@@ -292,15 +292,15 @@ const Trade = () => {
           <div className="lg:w-2/3 w-full">
             {/* Right Tab Navigation */}
             <div className="bg-white border border-gray-200 rounded-t-lg overflow-hidden">
-              <div className="flex">
+              <div className="flex gap-1 p-1 bg-gray-100/60">
                 {rightTabs.map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setRightTab(tab.id)}
-                    className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                    className={`flex-1 px-[1em] py-[0.6em] min-h-[2.4em] leading-tight font-semibold rounded-md transition-colors ${
                       rightTab === tab.id
                         ? 'bg-blue-600 text-white'
-                        : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-l border-gray-200'
+                        : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
                     }`}
                   >
                     {tab.name}

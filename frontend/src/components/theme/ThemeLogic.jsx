@@ -633,6 +633,15 @@ export const useThemeLogic = () => {
         box-shadow: none !important;
         border: none !important;
       }
+
+      input[type="radio"],
+      input[type="checkbox"] {
+        box-shadow: none !important;
+      }
+
+      input[type="radio"] {
+        border-radius: 50% !important;
+      }
       
       .sidebar.sidebar, nav.nav, .sidebar-element nav {
         border-radius: var(--nui-sidebar-border-radius, ${componentSettings.sidebar.borderRadius}px) !important;
