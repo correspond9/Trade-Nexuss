@@ -788,6 +788,51 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
+    const method = String(options?.method || 'GET').toUpperCase();
+    const isBrowser = typeof window !== 'undefined' && !!window.location;
+    const isApiSubdomainBase = (() => {
+      try {
+        const base = new URL(this.baseURL, isBrowser ? window.location.origin : undefined);
+        return /(^|\.)api\.tradingnexus\.pro$/i.test(base.hostname || '');
+      } catch (_e) {
+        return false;
+      }
+    })();
+
+    const buildSameOriginFallbackUrl = () => {
+      if (!isBrowser) return null;
+      try {
+        if (typeof endpoint !== 'string') return null;
+
+        if (endpoint.startsWith('/api/v1') || endpoint.startsWith('/api/v2')) {
+          return `${window.location.origin}${endpoint}`;
+        }
+
+        if (endpoint.startsWith('/')) {
+          return `${window.location.origin}/api/v2${endpoint}`;
+        }
+
+        if (endpoint.startsWith('http')) {
+          const parsed = new URL(endpoint);
+          const path = parsed.pathname || '';
+          if (path.startsWith('/api/v1') || path.startsWith('/api/v2')) {
+            return `${window.location.origin}${path}${parsed.search || ''}`;
+          }
+        }
+      } catch (_e) {
+        return null;
+      }
+      return null;
+    };
+
+    const fallbackUrl = buildSameOriginFallbackUrl();
+    const canRetryWithSameOrigin = Boolean(
+      isBrowser &&
+      isApiSubdomainBase &&
+      fallbackUrl &&
+      !options?._skipSameOriginRetry
+    );
+
     const isAbsoluteApiPath =
       typeof endpoint === 'string' &&
       (endpoint.startsWith('/api/v1') || endpoint.startsWith('/api/v2'));
@@ -832,6 +877,23 @@ class ApiService {
         body,
       });
 
+      if (!response.ok && canRetryWithSameOrigin && [502, 503, 504].includes(response.status)) {
+        const retriedResponse = await fetch(fallbackUrl, {
+          ...options,
+          _skipSameOriginRetry: true,
+          headers,
+          body,
+        });
+
+        if (retriedResponse.ok) {
+          const retriedContentType = retriedResponse.headers.get('content-type');
+          if (retriedContentType && retriedContentType.includes('application/json')) {
+            return await retriedResponse.json();
+          }
+          return retriedResponse;
+        }
+      }
+
       // Handle 401 Unauthorized (but do not hijack login endpoint errors)
       if (response.status === 401) {
         const errorData = await response.json().catch(() => ({}));
@@ -861,6 +923,28 @@ class ApiService {
         return response;
       }
     } catch (error) {
+      if (canRetryWithSameOrigin && method !== 'OPTIONS') {
+        try {
+          const retriedResponse = await fetch(fallbackUrl, {
+            ...options,
+            _skipSameOriginRetry: true,
+            headers,
+            body,
+          });
+          if (!retriedResponse.ok) {
+            const retriedErrorData = await retriedResponse.json().catch(() => ({}));
+            throw new Error(retriedErrorData.message || retriedErrorData.detail || `HTTP error! status: ${retriedResponse.status}`);
+          }
+
+          const retriedContentType = retriedResponse.headers.get('content-type');
+          if (retriedContentType && retriedContentType.includes('application/json')) {
+            return await retriedResponse.json();
+          }
+          return retriedResponse;
+        } catch (_fallbackError) {
+          // fall through to original error
+        }
+      }
       console.error(`API Error [${options.method || 'GET'}] ${endpoint}:`, error);
       throw error;
     }
