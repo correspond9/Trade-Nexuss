@@ -164,10 +164,16 @@ const Profile = () => {
       try {
         const response = await apiService.get('/trading/orders', { user_id: user.id });
         const data = response?.data || [];
-        const mapped = data.map((order) => {
+        const mapped = data
+          .filter((order) => {
+            const status = String(order.status || '').toUpperCase();
+            return status === 'EXECUTED' || status === 'PARTIAL';
+          })
+          .map((order) => {
           const createdAt = order.created_at || order.updated_at || new Date().toISOString();
           return {
             id: order.id,
+            createdAt,
             date: new Date(createdAt).toLocaleString('en-IN'),
             symbol: order.symbol || '-',
             side: String(order.transaction_type || 'BUY').toUpperCase(),
@@ -175,7 +181,8 @@ const Profile = () => {
             price: Number(order.price || 0),
             status: String(order.status || 'PENDING').toUpperCase(),
           };
-        });
+        })
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         setTradeRows(mapped);
       } finally {
         setTradeLoading(false);

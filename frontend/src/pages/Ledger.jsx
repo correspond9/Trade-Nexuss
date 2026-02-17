@@ -1,368 +1,201 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
-import { Search, Download, TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, Receipt, FileText, Eye, RefreshCw } from 'lucide-react';
+
+const ALLOWED_ENTRY_TYPES = new Set(['PAYIN', 'PAYOUT', 'TRADE_PNL', 'ADJUST']);
+
+const toDateInputValue = (date) => date.toISOString().split('T')[0];
+
+const formatDate = (rawDate) => {
+  try {
+    return new Date(rawDate).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
+    });
+  } catch (_e) {
+    return '-';
+  }
+};
+
+const parseTxnType = (entryType, remarks = '') => {
+  const text = String(remarks || '').toUpperCase();
+  if (text.includes('UPI')) return 'UPI';
+  if (text.includes('IMPS')) return 'IMPS';
+  if (entryType === 'TRADE_PNL') return 'TRADE';
+  if (entryType === 'ADJUST') return 'ADMIN/S.ADMIN';
+  return entryType;
+};
+
+const parseParticular = (entryType) => {
+  if (entryType === 'PAYIN') return 'payin';
+  if (entryType === 'PAYOUT') return 'payout';
+  if (entryType === 'TRADE_PNL') return 'trade';
+  return 'adjustment';
+};
 
 const Ledger = () => {
   const { user } = useAuth();
-  const [transactions, setTransactions] = useState([]);
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('all');
-  const [dateRange, setDateRange] = useState('30d');
-  const [selectedTransaction, setSelectedTransaction] = useState(null);
-  const [showDetails, setShowDetails] = useState(false);
-  const [summary, setSummary] = useState(null);
 
-  const fetchTransactions = useCallback(async () => {
+  const today = new Date();
+  const defaultFrom = new Date(today.getFullYear(), 0, 1);
+
+  const [fromDate, setFromDate] = useState(toDateInputValue(defaultFrom));
+  const [toDate, setToDate] = useState(toDateInputValue(today));
+  const [userIdFilter, setUserIdFilter] = useState('');
+
+  const fetchLedger = useCallback(async () => {
     setLoading(true);
     try {
-      const params = {};
       const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
-      if (user?.id && !isAdmin) {
+      const params = {};
+      const normalizedUserId = String(userIdFilter || '').trim();
+
+      if (!isAdmin && user?.id) {
         params.user_id = user.id;
+      } else if (normalizedUserId) {
+        params.user_id = Number(normalizedUserId);
       }
+
       const response = await apiService.get('/admin/ledger', params);
-      const data = response?.data || [];
-      let mapped = data.map((entry) => {
-        const createdAt = entry.created_at || new Date().toISOString();
-        const dateObj = new Date(createdAt);
-        const credit = Number(entry.credit || 0);
-        const debit = Number(entry.debit || 0);
-        return {
-          id: entry.id,
-          date: dateObj.toISOString().split('T')[0],
-          time: dateObj.toLocaleTimeString('en-IN'),
-          type: credit > 0 ? 'CREDIT' : 'DEBIT',
-          category: entry.entry_type || 'UNKNOWN',
-          description: entry.remarks || '-',
-          amount: credit > 0 ? credit : -debit,
-          balance: entry.balance || 0,
-          reference: String(entry.id),
-          status: 'COMPLETED',
-          userId: entry.user_id,
-          userName: user?.username || user?.full_name || 'user'
-        };
-      });
+      const source = response?.data || [];
 
-      if (dateRange !== 'all') {
-        const days = parseInt(dateRange.replace('d', ''), 10);
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - days);
-        mapped = mapped.filter(t => new Date(t.date) >= cutoffDate);
-      }
+      const fromBound = fromDate ? new Date(`${fromDate}T00:00:00`) : null;
+      const toBound = toDate ? new Date(`${toDate}T23:59:59`) : null;
 
-      if (filterType !== 'all') {
-        mapped = mapped.filter(t => t.type === filterType);
-      }
+      const mapped = source
+        .filter((entry) => ALLOWED_ENTRY_TYPES.has(String(entry.entry_type || '').toUpperCase()))
+        .filter((entry) => {
+          const createdAt = new Date(entry.created_at || new Date().toISOString());
+          if (Number.isNaN(createdAt.getTime())) {
+            return false;
+          }
+          if (fromBound && createdAt < fromBound) {
+            return false;
+          }
+          if (toBound && createdAt > toBound) {
+            return false;
+          }
+          return true;
+        })
+        .map((entry) => {
+          const entryType = String(entry.entry_type || '').toUpperCase();
+          const remarks = entry.remarks || '-';
+          return {
+            id: entry.id,
+            rawDate: entry.created_at,
+            date: formatDate(entry.created_at),
+            userId: entry.user_id,
+            particular: parseParticular(entryType),
+            type: parseTxnType(entryType, remarks),
+            remarks,
+            credit: Number(entry.credit || 0),
+            debit: Number(entry.debit || 0),
+          };
+        })
+        .sort((a, b) => new Date(b.rawDate) - new Date(a.rawDate));
 
-      setTransactions(mapped);
+      setRows(mapped);
     } catch (error) {
-      console.error('Failed to fetch transactions:', error);
+      console.error('Failed to fetch ledger:', error);
+      setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [dateRange, filterType, user]);
-
-  const fetchSummary = useCallback(async () => {
-    try {
-      const params = {};
-      const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
-      if (user?.id && !isAdmin) {
-        params.user_id = user.id;
-      }
-      const response = await apiService.get('/admin/ledger/summary', params);
-      const data = response?.data || {};
-      setSummary({
-        totalCredits: data.total_credit || 0,
-        totalDebits: data.total_debit || 0,
-        netBalance: (data.total_credit || 0) - (data.total_debit || 0),
-        transactionCount: transactions.length,
-        pendingTransactions: 0,
-        lastUpdated: new Date().toLocaleString('en-IN')
-      });
-    } catch (error) {
-      console.error('Failed to fetch summary:', error);
-    }
-  }, [transactions.length, user]);
+  }, [fromDate, toDate, userIdFilter, user]);
 
   useEffect(() => {
-    fetchTransactions();
-  }, [fetchTransactions]);
-
-  useEffect(() => {
-    fetchSummary();
-  }, [fetchSummary]);
-
-  const filteredTransactions = transactions.filter(transaction =>
-    transaction.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    transaction.reference?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    transaction.userName?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const exportLedger = () => {
-    // Export functionality
-    console.log('Exporting ledger data...');
-  };
-
-  const refreshData = () => {
-    fetchTransactions();
-    fetchSummary();
-  };
-
-  const getStatusBadge = (status) => {
-    const styles = {
-      COMPLETED: 'bg-green-100 text-green-800',
-      PROCESSING: 'bg-yellow-100 text-yellow-800',
-      PENDING: 'bg-blue-100 text-blue-800',
-      FAILED: 'bg-red-100 text-red-800'
-    };
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-bold ${styles[status] || 'bg-gray-100 text-gray-800'}`}>
-        {status}
-      </span>
-    );
-  };
-
-  const getCategoryBadge = (category) => {
-    const styles = {
-      FUND_ADD: 'bg-blue-100 text-blue-800',
-      TRADE: 'bg-purple-100 text-purple-800',
-      CHARGES: 'bg-orange-100 text-orange-800',
-      WITHDRAWAL: 'bg-red-100 text-red-800',
-      PAYOUT: 'bg-green-100 text-green-800',
-      TAX: 'bg-gray-100 text-gray-800',
-      REFUND: 'bg-indigo-100 text-indigo-800'
-    };
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-bold ${styles[category] || 'bg-gray-100 text-gray-800'}`}>
-        {category.replace('_', ' ')}
-      </span>
-    );
-  };
-
-  const SummaryCard = ({ title, value, icon: Icon, color = 'blue', trend }) => (
-    <div className={`bg-white rounded-lg shadow p-6 border-l-4 border-${color}-500`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-600">{title}</p>
-          <p className={`text-2xl font-bold text-${color}-600`}>
-            {typeof value === 'number' 
-              ? `₹${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : value
-            }
-          </p>
-          {trend && (
-            <div className={`flex items-center mt-1 text-sm ${
-              trend > 0 ? 'text-green-600' : 'text-red-600'
-            }`}>
-              {trend > 0 ? <TrendingUp className="w-4 h-4 mr-1" /> : <TrendingDown className="w-4 h-4 mr-1" />}
-              {Math.abs(trend)}%
-            </div>
-          )}
-        </div>
-        <Icon className={`w-8 h-8 text-${color}-400`} />
-      </div>
-    </div>
-  );
+    fetchLedger();
+  }, [fetchLedger]);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex justify-between items-center">
+    <div className="min-h-screen bg-gray-100 p-6 space-y-6">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="px-6 pt-6">
+          <h2 className="text-2xl font-semibold text-gray-900">Ledger Search</h2>
+          <p className="text-sm text-gray-600 mt-1">Fill in the details below to fetch your ledger data.</p>
+        </div>
+
+        <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Ledger</h1>
-            <p className="mt-2 text-gray-600">View transaction history and financial records</p>
-          </div>
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={refreshData}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Refresh
-            </button>
-            <button
-              onClick={exportLedger}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              Export
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Summary Cards */}
-      {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-          <SummaryCard
-            title="Total Credits"
-            value={summary.totalCredits}
-            icon={ArrowUpRight}
-            color="green"
-          />
-          <SummaryCard
-            title="Total Debits"
-            value={summary.totalDebits}
-            icon={ArrowDownRight}
-            color="red"
-          />
-          <SummaryCard
-            title="Net Balance"
-            value={summary.netBalance}
-            icon={DollarSign}
-            color={summary.netBalance >= 0 ? 'green' : 'red'}
-          />
-          <SummaryCard
-            title="Transactions"
-            value={summary.transactionCount}
-            icon={Receipt}
-            color="blue"
-          />
-          <SummaryCard
-            title="Pending"
-            value={summary.pendingTransactions}
-            icon={FileText}
-            color="yellow"
-          />
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex-1 min-w-[200px] relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+            <label className="block text-sm font-medium text-gray-700 mb-2">From Date</label>
             <input
-              type="text"
-              placeholder="Search transactions..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="all">All Types</option>
-            <option value="CREDIT">Credits</option>
-            <option value="DEBIT">Debits</option>
-          </select>
-          
-          <select
-            value={dateRange}
-            onChange={(e) => setDateRange(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="7d">Last 7 Days</option>
-            <option value="30d">Last 30 Days</option>
-            <option value="90d">Last 90 Days</option>
-            <option value="1y">Last Year</option>
-            <option value="all">All Time</option>
-          </select>
-        </div>
-      </div>
 
-      {/* Transactions Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="overflow-x-auto">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">To Date</label>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">User ID</label>
+            <input
+              type="text"
+              value={userIdFilter}
+              onChange={(e) => setUserIdFilter(e.target.value)}
+              placeholder="Enter user id"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="flex items-end">
+            <button
+              onClick={fetchLedger}
+              disabled={loading}
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            >
+              {loading ? 'Loading...' : 'Fetch Ledger'}
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto border-t border-gray-200">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date & Time
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Type
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Category
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Description
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Balance
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UserId</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Particular</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Remarks</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Credit</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Debit</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan="8" className="px-6 py-12 text-center">
-                    <div className="flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-                    </div>
-                  </td>
+                  <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500">Loading ledger...</td>
                 </tr>
-              ) : filteredTransactions.length === 0 ? (
+              ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="px-6 py-12 text-center text-gray-500">
-                    No transactions found
-                  </td>
+                  <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500">No ledger records found</td>
                 </tr>
               ) : (
-                filteredTransactions.map((transaction) => (
-                  <tr key={transaction.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      <div>
-                        <div className="font-medium">{new Date(transaction.date).toLocaleDateString()}</div>
-                        <div className="text-gray-500">{transaction.time}</div>
-                      </div>
+                rows.map((row) => (
+                  <tr key={row.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{row.date}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{row.userId}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{row.particular}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{row.type}</td>
+                    <td className="px-6 py-4 text-sm text-gray-700">{row.remarks}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-green-700">
+                      {row.credit > 0 ? `₹${row.credit.toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}` : '-'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                        transaction.type === 'CREDIT' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                      }`}>
-                        {transaction.type}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {getCategoryBadge(transaction.category)}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      <div>
-                        <div className="font-medium">{transaction.description}</div>
-                        <div className="text-gray-500">Ref: {transaction.reference}</div>
-                      </div>
-                    </td>
-                    <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
-                      transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {transaction.amount >= 0 ? '+' : ''}
-                      ₹{Math.abs(transaction.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      ₹{transaction.balance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {getStatusBadge(transaction.status)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <button
-                        onClick={() => {
-                          setSelectedTransaction(transaction);
-                          setShowDetails(true);
-                        }}
-                        className="text-indigo-600 hover:text-indigo-900 flex items-center gap-1"
-                      >
-                        <Eye className="w-4 h-4" />
-                        View
-                      </button>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-red-700">
+                      {row.debit > 0 ? `₹${row.debit.toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}` : '-'}
                     </td>
                   </tr>
                 ))
@@ -371,98 +204,6 @@ const Ledger = () => {
           </table>
         </div>
       </div>
-
-      {/* Transaction Details Modal */}
-      {showDetails && selectedTransaction && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-xl font-semibold">Transaction Details</h2>
-              <button
-                onClick={() => setShowDetails(false)}
-                className="text-gray-400 hover:text-gray-600 text-2xl font-bold"
-              >
-                ×
-              </button>
-            </div>
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
-              <div className="space-y-6">
-                {/* Transaction Header */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-medium text-gray-900">{selectedTransaction.description}</h3>
-                    <p className="text-gray-500">Reference: {selectedTransaction.reference}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className={`text-2xl font-bold ${
-                      selectedTransaction.amount >= 0 ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {selectedTransaction.amount >= 0 ? '+' : ''}
-                      ₹{Math.abs(selectedTransaction.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                    {getStatusBadge(selectedTransaction.status)}
-                  </div>
-                </div>
-
-                {/* Transaction Details */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Date</p>
-                    <p className="text-gray-900">{new Date(selectedTransaction.date).toLocaleDateString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Time</p>
-                    <p className="text-gray-900">{selectedTransaction.time}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Type</p>
-                    <div className="mt-1">
-                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                        selectedTransaction.type === 'CREDIT' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                      }`}>
-                        {selectedTransaction.type}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Category</p>
-                    <div className="mt-1">
-                      {getCategoryBadge(selectedTransaction.category)}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">User</p>
-                    <p className="text-gray-900">{selectedTransaction.userName}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Balance After</p>
-                    <p className="text-gray-900">₹{selectedTransaction.balance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  </div>
-                </div>
-
-                {/* Additional Information */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h4 className="font-medium text-gray-900 mb-2">Additional Information</h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Transaction ID:</span>
-                      <span className="text-gray-900">#{selectedTransaction.id}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">User ID:</span>
-                      <span className="text-gray-900">{selectedTransaction.userId}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Last Updated:</span>
-                      <span className="text-gray-900">{summary?.lastUpdated || 'N/A'}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

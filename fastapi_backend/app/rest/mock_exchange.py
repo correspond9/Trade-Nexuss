@@ -756,11 +756,19 @@ class PortfolioMarginRequest(BaseModel):
 # ---------- Public Endpoints ----------
 
 @router.get("/trading/orders")
-def list_orders(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+def list_orders(
+    user_id: Optional[int] = None,
+    current_session_only: bool = Query(False),
+    db: Session = Depends(get_db),
+):
     _get_or_create_admin(db)
     query = db.query(models.MockOrder)
     if user_id:
         query = query.filter(models.MockOrder.user_id == user_id)
+    if current_session_only:
+        now_ist = ist_now()
+        ist_day_start = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+        query = query.filter(models.MockOrder.created_at >= ist_day_start)
     orders = query.order_by(models.MockOrder.created_at.desc()).all()
     return {"data": [_serialize(o) for o in orders]}
 
@@ -2011,7 +2019,8 @@ def adjust_ledger(req: LedgerAdjustRequest, caller=Depends(get_current_user), db
 @router.get("/admin/ledger")
 def list_ledger(caller=Depends(get_current_user), user_id: Optional[int] = None, db: Session = Depends(get_db)):
     require_role(caller, ["ADMIN", "SUPER_ADMIN"])
-    query = db.query(models.LedgerEntry)
+    allowed_entry_types = ["PAYIN", "PAYOUT", "TRADE_PNL", "ADJUST"]
+    query = db.query(models.LedgerEntry).filter(models.LedgerEntry.entry_type.in_(allowed_entry_types))
     if user_id:
         # If ADMIN requests a specific user's ledger, enforce visibility rules
         target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
@@ -2032,7 +2041,8 @@ def list_ledger(caller=Depends(get_current_user), user_id: Optional[int] = None,
 @router.get("/admin/ledger/summary")
 def ledger_summary(caller=Depends(get_current_user), user_id: Optional[int] = None, db: Session = Depends(get_db)):
     require_role(caller, ["ADMIN", "SUPER_ADMIN"])
-    query = db.query(models.LedgerEntry)
+    allowed_entry_types = ["PAYIN", "PAYOUT", "TRADE_PNL", "ADJUST"]
+    query = db.query(models.LedgerEntry).filter(models.LedgerEntry.entry_type.in_(allowed_entry_types))
     if user_id:
         target = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
         if not target:

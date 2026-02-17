@@ -288,9 +288,9 @@ const Users = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-100">
       <div className="mx-auto w-full sm:w-11/12 px-1 sm:px-6 lg:px-8 py-6">
-        <div className="bg-white shadow rounded-lg">
+        <div className="bg-white shadow-sm border border-gray-200 rounded-lg">
           {/* DataTable Header */}
           <div className="px-6 py-4 border-b border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
@@ -299,7 +299,7 @@ const Users = () => {
                 <select 
                   value={showEntries}
                   onChange={(e) => setShowEntries(parseInt(e.target.value))}
-                  className="border border-gray-300 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="border border-gray-300 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value={25}>25</option>
                   <option value={50}>50</option>
@@ -316,7 +316,7 @@ const Users = () => {
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="border border-gray-300 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="border border-gray-300 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -325,7 +325,7 @@ const Users = () => {
                 <div className="text-xs text-red-600">{actionError}</div>
                 <button
                   onClick={() => setShowAddUserModal(true)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs disabled:opacity-50"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs disabled:opacity-50"
                   disabled={actionLoading}
                 >
                   Add User
@@ -391,7 +391,7 @@ const Users = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm">{getStatusBadge(user.status)}</td>
                     {showEditColumn && (
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button onClick={() => handleEdit(user)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs">Edit</button>
+                        <button onClick={() => handleEdit(user)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs">Edit</button>
                       </td>
                     )}
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -429,7 +429,7 @@ const Users = () => {
               <div className="flex items-center space-x-2">
                 <button className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50" disabled>First</button>
                 <button className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50" disabled>Previous</button>
-                <button className="px-3 py-1 text-sm bg-indigo-600 text-white rounded">1</button>
+                <button className="px-3 py-1 text-sm bg-blue-600 text-white rounded">1</button>
                 <button className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50" disabled>Next</button>
                 <button className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50" disabled>Last</button>
               </div>
@@ -569,7 +569,7 @@ const Users = () => {
               >
                 Cancel
               </button>
-              <button onClick={handleSaveEdit} className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50" disabled={actionLoading}>Save Changes</button>
+              <button onClick={handleSaveEdit} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50" disabled={actionLoading}>Save Changes</button>
             </div>
           </div>
         </div>
@@ -703,7 +703,7 @@ const Users = () => {
               </button>
               <button
                 onClick={handleCreateUser}
-                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
                 disabled={actionLoading}
               >
                 Create User

@@ -87,6 +87,7 @@ const OrdersTab = () => {
       triggerPrice: order.trigger_price ?? order.triggerPrice ?? 0,
       target: order.target_price ?? order.target ?? 0,
       stopLoss: order.stop_loss_price ?? order.stopLoss ?? 0,
+      createdAt,
       executedQty,
       pendingQty,
       executionPrice,
@@ -99,7 +100,10 @@ const OrdersTab = () => {
   const fetchOrders = useCallback(async () => {
     try {
       const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
-      const params = !isAdmin && user?.id ? { user_id: user.id } : {};
+      const params = {
+        ...(!isAdmin && user?.id ? { user_id: user.id } : {}),
+        current_session_only: true,
+      };
       const response = await apiService.get('/trading/orders', params);
       if (response && response.data) {
         setOrders(response.data.map(mapOrder));
