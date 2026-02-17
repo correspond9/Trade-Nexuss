@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../services/apiService';
 import { TrendingUp, TrendingDown, RefreshCw, Filter } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 const PositionsMIS = () => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [positions, setPositions] = useState([]);
   const [sortBy, setSortBy] = useState('UserId(asc)');
@@ -23,7 +25,7 @@ const PositionsMIS = () => {
     setLoading(true);
     try {
       const [positionsResponse, usersResponse] = await Promise.all([
-        apiService.get('/portfolio/positions'),
+        apiService.get('/portfolio/positions', user?.id ? { user_id: user.id } : {}),
         apiService.get('/admin/users')
       ]);
 

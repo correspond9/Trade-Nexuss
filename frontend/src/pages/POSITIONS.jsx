@@ -9,8 +9,7 @@ const PositionsTab = () => {
 
   const fetchPositions = useCallback(async () => {
     try {
-      const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
-      const params = !isAdmin && user?.id ? { user_id: user.id } : {};
+      const params = user?.id ? { user_id: user.id } : {};
       const positionsResponse = await apiService.get('/portfolio/positions', params);
       if (positionsResponse && positionsResponse.data) {
         const mapped = positionsResponse.data.map((p) => {
