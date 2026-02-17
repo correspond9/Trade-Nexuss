@@ -64,15 +64,8 @@ const SuperAdmin = () => {
       return;
     }
 
-    // One-click daily workflow: after token save, try loading instrument master.
-    // This should never downgrade a successful credential save.
-    if (localSettings.authMode === 'DAILY_TOKEN') {
-      try {
-        await handleLoadInstrumentMaster();
-      } catch (_error) {
-        // handleLoadInstrumentMaster already sets master message
-      }
-    }
+    // Keep credential save isolated from heavy background operations.
+    // Instrument master loading remains available via explicit user action.
   };
 
   const handleLoadInstrumentMaster = async () => {
