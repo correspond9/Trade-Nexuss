@@ -49,8 +49,6 @@ services:
           
   db:
     image: postgres:15-alpine
-    mem_limit: 512m
-    mem_reservation: 256m
     environment:
       - POSTGRES_DB=trading_terminal
       - POSTGRES_USER=postgres
