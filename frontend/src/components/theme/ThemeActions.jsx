@@ -1,8 +1,25 @@
 import React, { useState } from 'react';
 import { Save, RotateCcw, Check } from 'lucide-react';
 
-export const ThemeActions = ({ themeConfig, componentSettings, onNotification }) => {
+export const ThemeActions = ({
+  themeConfig,
+  componentSettings,
+  onNotification,
+  themeName,
+  onThemeNameChange,
+  savedThemes = [],
+  onSaveTheme,
+  onLoadTheme,
+  onDeleteTheme,
+}) => {
+  const [selectedSavedTheme, setSelectedSavedTheme] = useState('');
+
   const saveTheme = () => {
+    if (typeof onSaveTheme === 'function') {
+      onSaveTheme();
+      return;
+    }
+
     const themeData = {
       name: 'Custom Theme',
       config: themeConfig,
@@ -137,10 +154,42 @@ export const ThemeActions = ({ themeConfig, componentSettings, onNotification })
     return { themeConfig: defaultThemeConfig, componentSettings: defaultComponentSettings };
   };
 
+  const handleLoad = () => {
+    if (!selectedSavedTheme) {
+      onNotification('Please select a saved theme first.', 'error');
+      return;
+    }
+    if (typeof onLoadTheme === 'function') {
+      onLoadTheme(selectedSavedTheme);
+    }
+  };
+
+  const handleDelete = () => {
+    if (!selectedSavedTheme) {
+      onNotification('Please select a saved theme first.', 'error');
+      return;
+    }
+    if (typeof onDeleteTheme === 'function') {
+      onDeleteTheme(selectedSavedTheme);
+      setSelectedSavedTheme('');
+    }
+  };
+
   return (
     <div className="bg-white/10 backdrop-blur-xl border border-white/10 rounded-2xl p-4 glass-card">
       <h2 className="text-lg font-semibold mb-3">Actions</h2>
       <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-medium mb-1">Theme Name</label>
+          <input
+            type="text"
+            value={themeName || ''}
+            onChange={(e) => onThemeNameChange && onThemeNameChange(e.target.value)}
+            className="w-full px-3 py-2 rounded border border-gray-300 text-sm"
+            placeholder="e.g. Tailwind Mixed Pro"
+          />
+        </div>
+
         <button
           onClick={saveTheme}
           className="w-full px-4 py-2 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors duration-200 flex items-center justify-center gap-2"
@@ -155,6 +204,35 @@ export const ThemeActions = ({ themeConfig, componentSettings, onNotification })
           <RotateCcw className="w-4 h-4" />
           Reset to Default
         </button>
+
+        <div className="pt-2 border-t border-gray-300/40">
+          <label className="block text-xs font-medium mb-1">Saved Themes</label>
+          <select
+            value={selectedSavedTheme}
+            onChange={(e) => setSelectedSavedTheme(e.target.value)}
+            className="w-full px-3 py-2 rounded border border-gray-300 text-sm mb-2"
+          >
+            <option value="">Select saved theme</option>
+            {savedThemes.map((item) => (
+              <option key={item.name} value={item.name}>{item.name}</option>
+            ))}
+          </select>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={handleLoad}
+              className="px-3 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors duration-200"
+            >
+              Load
+            </button>
+            <button
+              onClick={handleDelete}
+              className="px-3 py-2 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors duration-200"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

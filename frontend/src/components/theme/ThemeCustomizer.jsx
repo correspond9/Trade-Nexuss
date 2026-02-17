@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 // Import all theme components
 import { useThemeLogic } from './ThemeLogic';
@@ -15,6 +15,8 @@ export default function ThemeCustomizer() {
   const [notification, setNotification] = useState(null);
   const [activeTab, setActiveTab] = useState('buttons');
   const [selectedTheme, setSelectedTheme] = useState('Custom Theme');
+  const [themeName, setThemeName] = useState('Custom Theme');
+  const [savedThemes, setSavedThemes] = useState([]);
 
   const {
     themeConfig,
@@ -41,6 +43,15 @@ export default function ThemeCustomizer() {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  useEffect(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('savedThemes') || '[]');
+      setSavedThemes(Array.isArray(parsed) ? parsed : []);
+    } catch (_e) {
+      setSavedThemes([]);
+    }
+  }, []);
+
   const applyTheme = (themeName) => {
     const theme = themes[themeName];
     if (theme) {
@@ -48,6 +59,71 @@ export default function ThemeCustomizer() {
       setSelectedTheme(themeName);
       showNotification(`${themeName} theme applied successfully!`);
     }
+  };
+
+  const persistSavedThemes = (nextSavedThemes) => {
+    localStorage.setItem('savedThemes', JSON.stringify(nextSavedThemes));
+    setSavedThemes(nextSavedThemes);
+  };
+
+  const handleSaveNamedTheme = () => {
+    const normalizedName = (themeName || '').trim();
+    if (!normalizedName) {
+      showNotification('Please enter a theme name before saving.', 'error');
+      return;
+    }
+
+    const themeData = {
+      name: normalizedName,
+      config: themeConfig,
+      componentSettings,
+      timestamp: new Date().toISOString()
+    };
+
+    const existingIndex = savedThemes.findIndex((item) => item?.name === normalizedName);
+    const nextSavedThemes = [...savedThemes];
+    if (existingIndex >= 0) {
+      nextSavedThemes[existingIndex] = themeData;
+    } else {
+      nextSavedThemes.push(themeData);
+    }
+
+    persistSavedThemes(nextSavedThemes);
+    setSelectedTheme(normalizedName);
+    showNotification(`Theme "${normalizedName}" saved successfully!`, 'success');
+  };
+
+  const handleLoadSavedTheme = (nameToLoad) => {
+    const target = savedThemes.find((item) => item?.name === nameToLoad);
+    if (!target) {
+      showNotification('Saved theme not found.', 'error');
+      return;
+    }
+
+    if (target.config) {
+      setThemeConfig(target.config);
+    }
+    if (target.componentSettings) {
+      setComponentSettings(target.componentSettings);
+    }
+    setSelectedTheme(target.name);
+    setThemeName(target.name);
+    showNotification(`Theme "${target.name}" loaded successfully!`, 'success');
+  };
+
+  const handleDeleteSavedTheme = (nameToDelete) => {
+    const normalizedName = (nameToDelete || '').trim();
+    if (!normalizedName) {
+      showNotification('Please select a saved theme to delete.', 'error');
+      return;
+    }
+
+    const nextSavedThemes = savedThemes.filter((item) => item?.name !== normalizedName);
+    persistSavedThemes(nextSavedThemes);
+    if (selectedTheme === normalizedName) {
+      setSelectedTheme('Custom Theme');
+    }
+    showNotification(`Theme "${normalizedName}" deleted.`, 'success');
   };
 
   const renderComponentSettings = () => {
@@ -213,7 +289,13 @@ export default function ThemeCustomizer() {
             <ThemeActions 
               themeConfig={themeConfig} 
               componentSettings={componentSettings} 
-              onNotification={showNotification} 
+              onNotification={showNotification}
+              themeName={themeName}
+              onThemeNameChange={setThemeName}
+              savedThemes={savedThemes}
+              onSaveTheme={handleSaveNamedTheme}
+              onLoadTheme={handleLoadSavedTheme}
+              onDeleteTheme={handleDeleteSavedTheme}
             />
           </div>
         </div>
