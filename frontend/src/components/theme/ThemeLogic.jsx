@@ -1,5 +1,33 @@
 import { useState, useEffect, useRef } from 'react';
 
+const THEME_VAR_KEYS = [
+  '--nui-border-radius',
+  '--nui-shadow-distance',
+  '--nui-shadow-intensity',
+  '--nui-shadow-light-intensity',
+  '--nui-shadow-dark-intensity',
+  '--nui-shadow-blur',
+  '--nui-bg-color',
+  '--nui-shadow-light',
+  '--nui-shadow-dark',
+  '--nui-text-color',
+  '--nui-logo-bg',
+  '--nui-sidebar-color',
+  '--nui-sidebar-opacity',
+  '--nui-glass-card-color',
+  '--nui-glass-card-opacity',
+  '--nui-light-source',
+  '--nui-heading-color',
+  '--nui-body-color',
+  '--nui-button-text-color',
+  '--nui-heading-font-size',
+  '--nui-body-font-size',
+  '--nui-button-font-size',
+  '--nui-button-font-family',
+  '--nui-button-font-weight',
+  '--nui-button-font-style',
+];
+
 export const useThemeLogic = () => {
   const [themeConfig, setThemeConfig] = useState({
     borderRadius: 30,
@@ -110,6 +138,8 @@ export const useThemeLogic = () => {
   });
 
   const styleTagRef = useRef(null);
+  const originalThemeVarsRef = useRef(null);
+  const keepAppliedOnUnmountRef = useRef(false);
 
   const themes = {
     'Default': {
@@ -258,14 +288,30 @@ export const useThemeLogic = () => {
   };
 
   useEffect(() => {
-    const savedConfig = localStorage.getItem('customThemeConfig');
-    const savedComponentSettings = localStorage.getItem('componentSettings');
+    const savedConfig =
+      localStorage.getItem('themeDraftConfig') ||
+      localStorage.getItem('appliedThemeConfig') ||
+      localStorage.getItem('customThemeConfig');
+    const savedComponentSettings =
+      localStorage.getItem('themeDraftComponentSettings') ||
+      localStorage.getItem('appliedComponentSettings') ||
+      localStorage.getItem('componentSettings');
     if (savedConfig) {
       setThemeConfig(JSON.parse(savedConfig));
     }
     if (savedComponentSettings) {
       setComponentSettings(JSON.parse(savedComponentSettings));
     }
+  }, []);
+
+  useEffect(() => {
+    if (originalThemeVarsRef.current) return;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const snapshot = {};
+    THEME_VAR_KEYS.forEach((key) => {
+      snapshot[key] = rootStyle.getPropertyValue(key);
+    });
+    originalThemeVarsRef.current = snapshot;
   }, []);
 
   useEffect(() => {
@@ -486,10 +532,46 @@ export const useThemeLogic = () => {
     document.head.appendChild(styleTag);
     styleTagRef.current = styleTag;
     
-    // Save to localStorage
+    // Save as draft only (preview state)
+    localStorage.setItem('themeDraftConfig', JSON.stringify(themeConfig));
+    localStorage.setItem('themeDraftComponentSettings', JSON.stringify(componentSettings));
+  }, [themeConfig, componentSettings]);
+
+  useEffect(() => {
+    return () => {
+      if (keepAppliedOnUnmountRef.current) {
+        return;
+      }
+
+      try {
+        if (styleTagRef.current) {
+          styleTagRef.current.remove();
+          styleTagRef.current = null;
+        }
+
+        const original = originalThemeVarsRef.current || {};
+        THEME_VAR_KEYS.forEach((key) => {
+          const value = original[key];
+          if (value === undefined || value === null || value === '') {
+            document.documentElement.style.removeProperty(key);
+          } else {
+            document.documentElement.style.setProperty(key, value);
+          }
+        });
+      } catch (_e) {
+        // best effort cleanup
+      }
+    };
+  }, []);
+
+  const applyThemeGlobally = () => {
+    keepAppliedOnUnmountRef.current = true;
+    localStorage.setItem('appliedThemeConfig', JSON.stringify(themeConfig));
+    localStorage.setItem('appliedComponentSettings', JSON.stringify(componentSettings));
     localStorage.setItem('customThemeConfig', JSON.stringify(themeConfig));
     localStorage.setItem('componentSettings', JSON.stringify(componentSettings));
-  }, [themeConfig, componentSettings]);
+    return true;
+  };
 
   return {
     themeConfig,
@@ -497,6 +579,7 @@ export const useThemeLogic = () => {
     componentSettings,
     setComponentSettings,
     themes,
-    styleTagRef
+    styleTagRef,
+    applyThemeGlobally
   };
 };

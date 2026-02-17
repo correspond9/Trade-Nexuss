@@ -23,20 +23,34 @@ export default function ThemeCustomizer() {
     setThemeConfig,
     componentSettings,
     setComponentSettings,
-    themes
+    themes,
+    applyThemeGlobally
   } = useThemeLogic();
 
   const fontOptions = [
-    'Inter', 'Arial', 'Helvetica', 'Times New Roman', 'Georgia',
-    'Courier New', 'Verdana', 'Trebuchet MS', 'Palatino', 'Garamond',
-    'Bookman', 'Comic Sans MS', 'Impact', 'Lucide Console', 'Tahoma',
-    'Bebas Neue', 'Montserrat', 'Poppins', 'Roboto', 'Oswald',
-    'Raleway', 'Playfair Display', 'Merriweather', 'Lato', 'Open Sans',
-    'Nunito', 'Rubik', 'Ubuntu', 'Dancing Script', 'Pacifico',
-    'Bangers', 'Press Start 2P', 'Fira Code', 'JetBrains Mono', 'Space Mono'
+    'Inter, system-ui, sans-serif',
+    'Segoe UI, Tahoma, Geneva, Verdana, sans-serif',
+    'Arial, Helvetica, sans-serif',
+    'Roboto, Arial, sans-serif',
+    'Open Sans, Arial, sans-serif',
+    'Lato, Arial, sans-serif',
+    'Poppins, Arial, sans-serif',
+    'Montserrat, Arial, sans-serif',
+    'Nunito, Arial, sans-serif',
+    'Raleway, Arial, sans-serif',
+    'Merriweather, Georgia, serif',
+    'Playfair Display, Georgia, serif',
+    'Georgia, Times New Roman, serif',
+    'Trebuchet MS, Verdana, sans-serif',
+    'Verdana, Geneva, sans-serif',
+    'Tahoma, Arial, sans-serif',
+    'Courier New, Courier, monospace',
+    'Fira Code, Consolas, monospace',
+    'JetBrains Mono, Consolas, monospace',
+    'Pacifico, cursive'
   ];
 
-  const fontWeightOptions = ['regular', 'bold', 'semibold', 'italic'];
+  const fontWeightOptions = ['300', '400', '500', '600', '700', '800'];
 
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
@@ -124,6 +138,11 @@ export default function ThemeCustomizer() {
       setSelectedTheme('Custom Theme');
     }
     showNotification(`Theme "${normalizedName}" deleted.`, 'success');
+  };
+
+  const handleApplyThemeGlobally = () => {
+    applyThemeGlobally();
+    showNotification('Theme applied to the whole website.', 'success');
   };
 
   const renderComponentSettings = () => {
@@ -296,6 +315,7 @@ export default function ThemeCustomizer() {
               onSaveTheme={handleSaveNamedTheme}
               onLoadTheme={handleLoadSavedTheme}
               onDeleteTheme={handleDeleteSavedTheme}
+              onApplyTheme={handleApplyThemeGlobally}
             />
           </div>
         </div>

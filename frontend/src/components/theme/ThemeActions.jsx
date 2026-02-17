@@ -11,6 +11,7 @@ export const ThemeActions = ({
   onSaveTheme,
   onLoadTheme,
   onDeleteTheme,
+  onApplyTheme,
 }) => {
   const [selectedSavedTheme, setSelectedSavedTheme] = useState('');
 
@@ -196,6 +197,12 @@ export const ThemeActions = ({
         >
           <Save className="w-4 h-4" />
           Save Theme
+        </button>
+        <button
+          onClick={() => typeof onApplyTheme === 'function' && onApplyTheme()}
+          className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors duration-200"
+        >
+          Apply to Whole Website
         </button>
         <button
           onClick={resetTheme}
