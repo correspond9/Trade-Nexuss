@@ -19,6 +19,13 @@ _warmup_lock = asyncio.Lock()
 _last_warmup_by_underlying: Dict[str, float] = {}
 _warmup_cooldown_seconds = 20.0
 
+
+def _parse_iso_date(value: str):
+    try:
+        return datetime.fromisoformat(str(value).strip()[:10]).date()
+    except Exception:
+        return None
+
 # STEP 10: SERVE FRONTEND FROM CACHE
 @router.get("/live")
 async def get_option_chain_live(
@@ -31,6 +38,8 @@ async def get_option_chain_live(
     Response must come ONLY from option_chain_cache
     """
     try:
+        underlying = str(underlying or "").strip().upper()
+        expiry = str(expiry or "").strip()
         logger.info(f"📊 Serving option chain from cache: {underlying} {expiry}")
 
         try:
@@ -43,6 +52,8 @@ async def get_option_chain_live(
         
         # Get from central cache
         option_chain = authoritative_option_chain_service.get_option_chain_from_cache(underlying, expiry)
+        served_expiry = expiry
+        fallback_used = False
         
         if option_chain is None:
             # Guarded on-demand warm-up for cold cache / missing expiry.
@@ -77,6 +88,35 @@ async def get_option_chain_live(
                 except Exception as fallback_error:
                     logger.warning(f"⚠️ Closing-price fallback failed for {underlying} {expiry}: {fallback_error}")
 
+            # If requested expiry is stale/missing, serve nearest available cached expiry instead of 404.
+            if option_chain is None:
+                available_expiries = authoritative_option_chain_service.get_available_expiries(underlying) or []
+                if available_expiries:
+                    requested_date = _parse_iso_date(expiry)
+                    parsed_available = [
+                        (exp, _parse_iso_date(exp))
+                        for exp in available_expiries
+                    ]
+                    parsed_available = [(exp, dt) for exp, dt in parsed_available if dt is not None]
+
+                    if parsed_available:
+                        if requested_date is not None:
+                            future_or_same = [(exp, dt) for exp, dt in parsed_available if dt >= requested_date]
+                            if future_or_same:
+                                served_expiry = min(future_or_same, key=lambda item: item[1])[0]
+                            else:
+                                served_expiry = min(parsed_available, key=lambda item: abs((item[1] - requested_date).days))[0]
+                        else:
+                            served_expiry = parsed_available[0][0]
+
+                        option_chain = authoritative_option_chain_service.get_option_chain_from_cache(underlying, served_expiry)
+                        fallback_used = option_chain is not None and served_expiry != expiry
+
+                        if fallback_used:
+                            logger.info(
+                                f"🔁 Served fallback expiry for {underlying}: requested={expiry}, served={served_expiry}"
+                            )
+
             if option_chain is None:
                 raise HTTPException(
                     status_code=404,
@@ -97,6 +137,9 @@ async def get_option_chain_live(
             "timestamp": datetime.now().isoformat(),
             "cache_stats": authoritative_option_chain_service.get_cache_statistics(),
             "underlying_ltp": underlying_ltp,
+            "requested_expiry": expiry,
+            "served_expiry": served_expiry,
+            "expiry_fallback_used": fallback_used,
         }
         
         logger.info(f"✅ Served option chain for {underlying} {expiry}")
