@@ -1000,7 +1000,21 @@ def on_message_callback(feed, message):
         if not isinstance(payload, dict):
             return None
 
-        for key in ("LTP", "ltp", "Ltp", "last_traded_price", "lastTradedPrice", "last_price", "lastPrice", "last"):
+        for key in (
+            "LTP",
+            "ltp",
+            "Ltp",
+            "last_traded_price",
+            "lastTradedPrice",
+            "last_price",
+            "lastPrice",
+            "last",
+            "traded_price",
+            "trade_price",
+            "close",
+            "Close",
+            "price",
+        ):
             if key in payload and payload[key] is not None:
                 value = payload.get(key)
                 if isinstance(value, str):
@@ -1011,9 +1025,16 @@ def on_message_callback(feed, message):
                 if isinstance(value, (int, float)):
                     return float(value)
 
-        for key in ("data", "payload", "tick"):
+        for key in ("ltpc", "ohlc", "OHLC", "data", "payload", "tick", "quote", "response", "message"):
             nested = payload.get(key)
             if nested is not None:
+                val = _extract_ltp(nested)
+                if val is not None:
+                    return val
+
+        # Last-resort recursive scan through nested dict/list values.
+        for nested in payload.values():
+            if isinstance(nested, (dict, list)):
                 val = _extract_ltp(nested)
                 if val is not None:
                     return val
@@ -1173,8 +1194,16 @@ def on_message_callback(feed, message):
         
         # Extract LTP (Last Traded Price) for underlying
         ltp = _extract_ltp(message)
+        bid, ask = _extract_bid_ask(message)
+        if (ltp is None or ltp <= 0) and (bid is not None or ask is not None):
+            if bid is not None and ask is not None and bid > 0 and ask > 0:
+                ltp = (bid + ask) / 2.0
+            elif bid is not None and bid > 0:
+                ltp = bid
+            elif ask is not None and ask > 0:
+                ltp = ask
 
-        if ltp is None or ltp == 0:
+        if ltp is None or ltp <= 0:
             existing_price = get_price(symbol)
             if existing_price and existing_price > 0:
                 return
@@ -1201,7 +1230,6 @@ def on_message_callback(feed, message):
         # ✨ CRITICAL: Update market state with depth data for non-option instruments
         try:
             from app.market.market_state import state
-            bid, ask = _extract_bid_ask(message)
             depth = _extract_depth(message)
             if depth and (depth.get("bids") or depth.get("asks")):
                 state["depth"][symbol] = depth
