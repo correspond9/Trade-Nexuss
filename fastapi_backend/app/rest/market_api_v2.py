@@ -288,6 +288,17 @@ def underlying_ltp(underlying: str):
                                 exchange_segment=segment_candidate,
                                 security_id=security_id,
                             )
+                            if ltp_value is None:
+                                # Secondary fallback: /marketfeed/quote can provide ohlc.close even when last_price is missing.
+                                sdk_result = sdk_quote_data(
+                                    creds={"client_id": client_id, "access_token": access_token},
+                                    securities=payload,
+                                )
+                                ltp_value = _extract_ltp_from_sdk_quote_result(
+                                    sdk_result=sdk_result,
+                                    exchange_segment=segment_candidate,
+                                    security_id=security_id,
+                                )
                             if ltp_value is not None:
                                 price = float(ltp_value)
                                 update_price(sym, price)
@@ -322,6 +333,16 @@ def underlying_ltp(underlying: str):
                                 exchange_segment="IDX_I",
                                 security_id=index_sec,
                             )
+                            if ltp_value is None:
+                                sdk_result = sdk_quote_data(
+                                    creds={"client_id": client_id, "access_token": access_token},
+                                    securities=payload,
+                                )
+                                ltp_value = _extract_ltp_from_sdk_quote_result(
+                                    sdk_result=sdk_result,
+                                    exchange_segment="IDX_I",
+                                    security_id=index_sec,
+                                )
                             if ltp_value is not None:
                                 price = float(ltp_value)
                                 update_price(sym, price)
