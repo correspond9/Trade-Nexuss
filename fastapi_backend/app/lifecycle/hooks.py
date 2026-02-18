@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 # Global scheduler instance
 _scheduler = None
 _bootstrap_task: Optional[asyncio.Task] = None
+_ONE_TIME_CLEANUP_ACTION = "ONE_TIME_LEGACY_PURGE_V1"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -85,6 +86,100 @@ def purge_previous_day_orders() -> dict:
         if db is not None:
             db.close()
 
+
+def purge_superadmin_previous_day_positions() -> dict:
+    """Delete SUPER_ADMIN positions older than current IST trading day only."""
+    db = None
+    try:
+        from app.storage.db import SessionLocal
+        from app.storage.models import MockPosition
+
+        db = SessionLocal()
+        now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        ist_day_start = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        deleted = (
+            db.query(MockPosition)
+            .filter(
+                MockPosition.user_id == 1,
+                MockPosition.created_at < ist_day_start,
+            )
+            .delete(synchronize_session=False)
+        )
+
+        db.commit()
+        return {
+            "positions_removed": int(deleted or 0),
+            "cutoff": ist_day_start.isoformat(),
+        }
+    except Exception:
+        if db is not None:
+            db.rollback()
+        raise
+    finally:
+        if db is not None:
+            db.close()
+
+
+def run_one_time_legacy_cleanup() -> dict:
+    """
+    Run destructive legacy cleanup exactly once:
+    - purge previous-day order/trade/execution-event rows
+    - purge previous-day SUPER_ADMIN positions only
+    This must never run in daily EOD flow.
+    """
+    db = None
+    try:
+        from app.storage.db import SessionLocal
+        from app.storage.models import SubscriptionLog
+
+        db = SessionLocal()
+        already_done = (
+            db.query(SubscriptionLog.id)
+            .filter(SubscriptionLog.action == _ONE_TIME_CLEANUP_ACTION)
+            .first()
+        )
+        if already_done:
+            return {
+                "already_done": True,
+                "orders_removed": 0,
+                "trades_removed": 0,
+                "execution_events_removed": 0,
+                "superadmin_positions_removed": 0,
+            }
+
+        order_cleanup = purge_previous_day_orders()
+        superadmin_pos_cleanup = purge_superadmin_previous_day_positions()
+
+        log_entry = SubscriptionLog(
+            action=_ONE_TIME_CLEANUP_ACTION,
+            instrument_token="SYSTEM",
+            reason=(
+                "One-time legacy cleanup completed: "
+                f"orders_removed={order_cleanup.get('orders_removed', 0)}, "
+                f"trades_removed={order_cleanup.get('trades_removed', 0)}, "
+                f"events_removed={order_cleanup.get('execution_events_removed', 0)}, "
+                f"superadmin_positions_removed={superadmin_pos_cleanup.get('positions_removed', 0)}"
+            ),
+        )
+        db.add(log_entry)
+        db.commit()
+
+        return {
+            "already_done": False,
+            "orders_removed": int(order_cleanup.get("orders_removed", 0) or 0),
+            "trades_removed": int(order_cleanup.get("trades_removed", 0) or 0),
+            "execution_events_removed": int(order_cleanup.get("execution_events_removed", 0) or 0),
+            "superadmin_positions_removed": int(superadmin_pos_cleanup.get("positions_removed", 0) or 0),
+        }
+    except Exception:
+        if db is not None:
+            db.rollback()
+        raise
+    finally:
+        if db is not None:
+            db.close()
+
 def eod_cleanup():
     """
     End-of-Day (4:00 PM IST) cleanup task
@@ -124,15 +219,6 @@ def eod_cleanup():
             print(f"[EOD-WARN] Watchlist clear failed: {watchlist_result.get('message')}")
         print(f"[EOD] Phase 2 - Cleared watchlist entries: {watchlist_cleared}, Skipped (protected): {watchlist_skipped}")
         
-        # Phase 3: Purge previous-day order-book records
-        order_cleanup = purge_previous_day_orders()
-        print(
-            "[EOD] Phase 3 - Purged old order-book records: "
-            f"orders={order_cleanup.get('orders_removed', 0)}, "
-            f"trades={order_cleanup.get('trades_removed', 0)}, "
-            f"events={order_cleanup.get('execution_events_removed', 0)}"
-        )
-
         # Get stats after cleanup
         stats_after = SUBSCRIPTION_MGR.get_ws_stats()
         print(f"\n[EOD] After cleanup:")
@@ -151,10 +237,7 @@ def eod_cleanup():
                     f"End-of-day cleanup: unsubscribed={tier_a_unsubscribed}, "
                     f"watchlist_cleared={watchlist_cleared}, "
                     f"watchlist_skipped={watchlist_skipped}, "
-                    f"protected_keys={len(protected_keys)}, "
-                    f"orders_removed={order_cleanup.get('orders_removed', 0)}, "
-                    f"trades_removed={order_cleanup.get('trades_removed', 0)}, "
-                    f"events_removed={order_cleanup.get('execution_events_removed', 0)}"
+                    f"protected_keys={len(protected_keys)}"
                 )
             )
             db.add(log_entry)
@@ -492,6 +575,23 @@ async def on_start():
         # Ensure database schema exists before any managers query tables
         from app.storage.migrations import init_db
         await asyncio.to_thread(init_db)
+
+        # One-time legacy destructive cleanup (must not run in daily EOD)
+        try:
+            cleanup_result = await asyncio.to_thread(run_one_time_legacy_cleanup)
+            if cleanup_result.get("already_done"):
+                logger.info("[STARTUP] One-time legacy cleanup already completed")
+            else:
+                logger.warning(
+                    "[STARTUP] One-time legacy cleanup executed "
+                    "(orders_removed=%s trades_removed=%s events_removed=%s superadmin_positions_removed=%s)",
+                    cleanup_result.get("orders_removed", 0),
+                    cleanup_result.get("trades_removed", 0),
+                    cleanup_result.get("execution_events_removed", 0),
+                    cleanup_result.get("superadmin_positions_removed", 0),
+                )
+        except Exception:
+            logger.exception("[STARTUP] One-time legacy cleanup failed")
 
         # Load instrument master
         load_master = _env_bool("STARTUP_LOAD_MASTER", default=not is_production)

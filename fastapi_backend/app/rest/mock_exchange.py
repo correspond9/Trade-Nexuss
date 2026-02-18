@@ -916,7 +916,7 @@ class PortfolioMarginRequest(BaseModel):
 @router.get("/trading/orders")
 def list_orders(
     user_id: Optional[int] = None,
-    current_session_only: bool = Query(False),
+    current_session_only: bool = Query(True),
     db: Session = Depends(get_db),
 ):
     _get_or_create_admin(db)
@@ -1294,12 +1294,17 @@ def list_positions(user_id: Optional[int] = None, db: Session = Depends(get_db))
     if user_id:
         query = query.filter(models.MockPosition.user_id == user_id)
     positions = query.all()
+    now_ist = ist_now()
+    ist_day_start = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
     results = []
     did_auto_settlement = False
     for pos in positions:
+        if int(pos.user_id or 0) == 1 and pos.created_at and pos.created_at < ist_day_start:
+            continue
+
         live_qty = int(pos.quantity or 0)
         expiry_date = _extract_option_expiry_date(pos.symbol)
-        if live_qty != 0 and expiry_date and expiry_date < ist_now().date():
+        if live_qty != 0 and expiry_date and expiry_date < now_ist.date():
             _execute_position_close(
                 db=db,
                 pos=pos,
