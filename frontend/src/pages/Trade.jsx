@@ -21,6 +21,45 @@ const formatExpiry = (dateStr) => {
   return `${day} ${months[date.getMonth()]}`;
 };
 
+const parseExpiryDate = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const dt = new Date(`${raw}T00:00:00`);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
+  const alt = new Date(raw);
+  if (!Number.isNaN(alt.getTime())) {
+    return alt;
+  }
+
+  const compact = raw.toUpperCase().match(/^(\d{1,2})([A-Z]{3})(\d{2}|\d{4})$/);
+  if (compact) {
+    const day = Number(compact[1]);
+    const monthMap = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+    const month = monthMap[compact[2]];
+    const yearNum = Number(compact[3]);
+    const year = yearNum < 100 ? (2000 + yearNum) : yearNum;
+    if (!Number.isFinite(day) || month === undefined || !Number.isFinite(year)) {
+      return null;
+    }
+    const dt = new Date(year, month, day);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
+  return null;
+};
+
+const toIsoDate = (dateObj) => {
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Fetch expiry dates from authoritative options cache
 const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
   try {
@@ -44,21 +83,27 @@ const fetchExpiryDates = async (selectedIndex = 'NIFTY 50') => {
       return { displayExpiries: [], isoExpiries: [] };
     }
 
-    const sorted = expiries.slice().sort();
-    // Select first 2 expiries but ensure they are current and next, not skipping any
-    // If current expiry is in the list, start from it; otherwise start from first
-    const today = new Date().toISOString().split('T')[0];
+    const normalized = Array.from(new Set(
+      expiries
+        .map((exp) => parseExpiryDate(exp))
+        .filter(Boolean)
+        .map((dateObj) => toIsoDate(dateObj))
+    )).sort();
+
+    // Select current and next upcoming expiry only
+    const now = new Date();
+    const today = toIsoDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
     
-    console.log('[TRADE] All expiries (sorted):', sorted);
+    console.log('[TRADE] All expiries (normalized):', normalized);
     console.log('[TRADE] Today:', today);
     
-    let currentIndex = sorted.findIndex(exp => exp >= today);
+    let currentIndex = normalized.findIndex(exp => exp >= today);
     if (currentIndex === -1) {
       console.warn('[TRADE] No future expiries found, using first available');
       currentIndex = 0;
     }
     
-    const selected = sorted.slice(currentIndex, currentIndex + 2);
+    const selected = normalized.slice(currentIndex, currentIndex + 2);
     
     console.log('[TRADE] Selected indices:', currentIndex, 'to', currentIndex + 2);
     console.log('[TRADE] Selected expiries (ISO):', selected);

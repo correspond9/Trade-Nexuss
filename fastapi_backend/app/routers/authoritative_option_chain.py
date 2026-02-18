@@ -40,6 +40,14 @@ def _parse_iso_date(value: str):
     except Exception:
         return None
 
+
+def _today_ist_date():
+    try:
+        from datetime import timedelta
+        return (datetime.utcnow() + timedelta(hours=5, minutes=30)).date()
+    except Exception:
+        return datetime.utcnow().date()
+
 # STEP 10: SERVE FRONTEND FROM CACHE
 @router.get("/live")
 async def get_option_chain_live(
@@ -120,19 +128,21 @@ async def get_option_chain_live(
                 available_expiries = authoritative_option_chain_service.get_available_expiries(underlying) or []
                 if available_expiries:
                     requested_date = _parse_iso_date(expiry)
+                    today = _today_ist_date()
                     parsed_available = [
                         (exp, _parse_iso_date(exp))
                         for exp in available_expiries
                     ]
                     parsed_available = [(exp, dt) for exp, dt in parsed_available if dt is not None]
+                    parsed_available = [(exp, dt) for exp, dt in parsed_available if dt >= today]
 
                     if parsed_available:
-                        if requested_date is not None:
+                        if requested_date is not None and requested_date >= today:
                             future_or_same = [(exp, dt) for exp, dt in parsed_available if dt >= requested_date]
                             if future_or_same:
                                 served_expiry = min(future_or_same, key=lambda item: item[1])[0]
                             else:
-                                served_expiry = min(parsed_available, key=lambda item: abs((item[1] - requested_date).days))[0]
+                                served_expiry = parsed_available[0][0]
                         else:
                             served_expiry = parsed_available[0][0]
 
@@ -213,7 +223,7 @@ async def option_chain_live_ws(
                     "timestamp": datetime.now().isoformat(),
                 })
 
-            sleep_seconds = 1 if _is_underlying_market_open(symbol) else 60
+            sleep_seconds = 1 if _is_underlying_market_open(symbol) else 2
             await asyncio.sleep(sleep_seconds)
     except WebSocketDisconnect:
         logger.info(f"🔌 Option chain WS client disconnected: {symbol} {exp}")

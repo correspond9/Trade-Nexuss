@@ -24,6 +24,7 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
   const [timestamp, setTimestamp] = useState(null);
   const [cacheStats, setCacheStats] = useState(null);
   const [retryCount, setRetryCount] = useState(0); // Add retry counter
+  const [servedExpiry, setServedExpiry] = useState(expiry || null);
   
   // Options with defaults
   const {
@@ -32,11 +33,11 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
   } = options;
 
   const streamUrl = useMemo(() => {
-    if (!underlying || !expiry) {
+    if (!underlying || !servedExpiry) {
       return null;
     }
     const fallbackOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8000';
-    const endpoint = `/api/v2/options/ws/live?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}`;
+    const endpoint = `/api/v2/options/ws/live?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(servedExpiry)}`;
     try {
       const base = new URL(apiService.baseURL, fallbackOrigin);
       const wsProtocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -46,14 +47,14 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       const host = fallbackOrigin.replace(/^https?:\/\//, '');
       return `${wsProtocol}//${host}${endpoint}`;
     }
-  }, [underlying, expiry]);
+  }, [underlying, servedExpiry]);
 
   const { lastMessage, readyState } = useWebSocket(streamUrl);
 
   // Construct API URL
   const apiUrl = useCallback(() => {
-    return `/options/live?underlying=${underlying}&expiry=${expiry}`;
-  }, [underlying, expiry]);
+    return `/options/live?underlying=${underlying}&expiry=${servedExpiry || expiry}`;
+  }, [underlying, expiry, servedExpiry]);
 
   // Clear stale data immediately when selection changes
   useEffect(() => {
@@ -62,6 +63,7 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
     setTimestamp(null);
     setCacheStats(null);
     setRetryCount(0);
+    setServedExpiry(expiry || null);
   }, [underlying, expiry]);
 
   // Fetch function
@@ -76,7 +78,7 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       setError(null);
 
       console.log('[useAuthoritativeOptionChain] Fetching from authoritative API', underlying, expiry);
-      const result = await apiService.get('/options/live', { underlying, expiry });
+      const result = await apiService.get('/options/live', { underlying, expiry: servedExpiry || expiry });
       
       if (!result) {
         throw new Error('CACHE_MISS');
@@ -98,6 +100,9 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       setData(chainData);
       setTimestamp(new Date(result.timestamp));
       setCacheStats(result.cache_stats || {});
+      if (result.served_expiry) {
+        setServedExpiry(result.served_expiry);
+      }
 
       console.log(
         `[useAuthoritativeOptionChain] ✅ Loaded ${chainData?.strikes ? Object.keys(chainData.strikes).length : 0} strikes for ${underlying} ${expiry}`
@@ -143,6 +148,9 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
       setData(chainData);
       setTimestamp(new Date(result.timestamp));
       setCacheStats(result.cache_stats || {});
+      if (result.served_expiry) {
+        setServedExpiry(result.served_expiry);
+      }
       setRetryCount(0);
       setError(null);
       setLoading(false);
@@ -253,6 +261,7 @@ export const useAuthoritativeOptionChain = (underlying, expiry, options = {}) =>
     strikeCount: data?.strikes ? Object.keys(data.strikes).length : 0,
     isReady: !loading && !error && data !== null,
     hasCacheStats: !!cacheStats,
+    servedExpiry,
   };
 };
 

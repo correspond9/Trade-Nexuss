@@ -1121,12 +1121,20 @@ class AuthoritativeOptionChainService:
         symbol = str(underlying or "").strip().upper()
         if not symbol:
             return []
+        today = datetime.utcnow().date()
 
         # 1) Cache path
         cached_expiries = list((self.option_chain_cache.get(symbol) or {}).keys())
         if cached_expiries:
-            selected = self._select_current_next_expiries(symbol, cached_expiries)
-            return selected or sorted(cached_expiries)
+            normalized_cached = sorted({
+                parsed.isoformat()
+                for exp in cached_expiries
+                for parsed in [self._parse_expiry_date(exp)]
+                if parsed and parsed >= today
+            })
+            if normalized_cached:
+                selected = self._select_current_next_expiries(symbol, normalized_cached)
+                return selected or normalized_cached[:2]
 
         expiries: List[str] = []
 
@@ -1162,7 +1170,7 @@ class AuthoritativeOptionChainService:
             parsed.isoformat()
             for exp in expiries
             for parsed in [self._parse_expiry_date(exp)]
-            if parsed
+            if parsed and parsed >= today
         })
         if not normalized:
             return []

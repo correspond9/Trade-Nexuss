@@ -68,7 +68,14 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   const [pendingLtpByKey, setPendingLtpByKey] = useState({});
   const refreshInFlightRef = useRef(false);
 
-  const getItemKey = useCallback((item) => `${item?.exchange || 'NSE'}:${item?.id}`, []);
+  const getInstrumentIdentity = useCallback((item) => {
+    const exchange = String(item?.exchange || 'NSE').toUpperCase();
+    const symbol = String(item?.symbol || '').toUpperCase().replace(/\s+/g, '');
+    const expiry = String(item?.expiry || '').trim();
+    const strike = item?.strike ?? '';
+    const instrumentType = String(item?.instrumentType || '').toUpperCase();
+    return `${exchange}:${symbol}:${expiry}:${strike}:${instrumentType}`;
+  }, []);
   const getDepthKey = useCallback((item) => {
     const exchange = item?.exchange || 'NSE';
     const symbol = item?.symbol || '';
@@ -83,13 +90,24 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       const safeSymbol = String(symbol || '').trim();
       if (!safeSymbol) return null;
       const source = pulse?.prices || {};
+      const upper = safeSymbol.toUpperCase();
+      const compressed = upper.replace(/\s+/g, '');
+      const aliasMap = {
+        NIFTY50: 'NIFTY',
+        'NIFTY 50': 'NIFTY',
+        'NIFTYBANK': 'BANKNIFTY',
+        'BANK NIFTY': 'BANKNIFTY',
+      };
+      const alias = aliasMap[upper] || aliasMap[compressed] || null;
       const candidates = [
         safeSymbol,
-        safeSymbol.toUpperCase(),
+        upper,
         safeSymbol.replace(/\s+/g, ''),
-        safeSymbol.toUpperCase().replace(/\s+/g, ''),
+        compressed,
+        alias,
       ];
       for (const key of candidates) {
+        if (!key) continue;
         const value = source[key];
         const numeric = Number(value);
         if (Number.isFinite(numeric) && numeric > 0) {
@@ -180,9 +198,8 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     }
 
     // Check if instrument already exists in watchlist
-    const exists = currentList.some(item =>
-      item.id === instrument.id && item.exchange === instrument.exchange
-    );
+    const instrumentIdentity = getInstrumentIdentity(instrument);
+    const exists = currentList.some(item => getInstrumentIdentity(item) === instrumentIdentity);
 
     if (exists) {
       setError('Instrument already exists in watchlist');
@@ -190,7 +207,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       return;
     }
 
-    const optimisticKey = getItemKey(instrument);
+    const optimisticKey = instrumentIdentity;
     const optimisticItem = {
       ...instrument,
       _pendingSubscription: true,
@@ -272,7 +289,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       setWatchlists(prev => ({
         ...prev,
         [selectedWatchlist]: (prev[selectedWatchlist] || []).map((item) => {
-          if (getItemKey(item) !== optimisticKey) return item;
+          if (getInstrumentIdentity(item) !== optimisticKey) return item;
           return {
             ...item,
             ltp: ltpUpdate !== null ? ltpUpdate : item.ltp,
@@ -290,14 +307,14 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       console.error('Error adding to watchlist:', err);
       setWatchlists(prev => ({
         ...prev,
-        [selectedWatchlist]: (prev[selectedWatchlist] || []).filter((item) => getItemKey(item) !== optimisticKey)
+        [selectedWatchlist]: (prev[selectedWatchlist] || []).filter((item) => getInstrumentIdentity(item) !== optimisticKey)
       }));
       setError(err.message || 'Failed to add instrument to watchlist');
       setTimeout(() => setError(''), 2000);
     } finally {
       setPendingLtpByKey(prev => ({ ...prev, [optimisticKey]: false }));
     }
-  }, [watchlists, selectedWatchlist, user, fetchFutureQuote, fetchOptionLegLtp, getUnderlyingLtp, getItemKey]);
+  }, [watchlists, selectedWatchlist, user, fetchFutureQuote, fetchOptionLegLtp, getUnderlyingLtp, getInstrumentIdentity]);
 
   // Remove instrument from watchlist
   const removeFromWatchlist = useCallback(async (instrumentId, exchange) => {
@@ -771,11 +788,13 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
         }));
         setWatchlists(prev => {
           const existing = Array.isArray(prev?.[1]) ? prev[1] : [];
-          const existingKeys = new Set(existing.map(getItemKey));
+          const existingKeys = new Set(existing.map(getInstrumentIdentity));
           const merged = [...existing];
           for (const item of mapped) {
-            if (!existingKeys.has(getItemKey(item))) {
+            const identity = getInstrumentIdentity(item);
+            if (!existingKeys.has(identity)) {
               merged.push(item);
+              existingKeys.add(identity);
             }
           }
           return { ...prev, 1: merged };
@@ -785,7 +804,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       }
     };
     load();
-  }, [user, fetchFutureQuote, getUnderlyingLtp, getUnderlyingLtpWithRetry, getPulseLtp, getItemKey]);
+  }, [user, fetchFutureQuote, getUnderlyingLtp, getUnderlyingLtpWithRetry, getPulseLtp, getInstrumentIdentity]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -812,7 +831,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   }, [searchTerm, searchAllExchanges]);
 
   useEffect(() => {
-    if (!marketActive || !pulse?.timestamp) {
+    if (!pulse?.timestamp) {
       return;
     }
 
@@ -841,7 +860,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
       return changed ? next : prev;
     });
-  }, [pulse?.timestamp, marketActive, getPulseLtp]);
+  }, [pulse?.timestamp, getPulseLtp]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -993,7 +1012,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
                 {sortedDisplayData.map((item, index) => {
                   const isOption = item.instrumentType === 'CE' || item.instrumentType === 'PE';
                   const canDepth = isOption || item.instrumentType === 'EQUITY' || item.instrumentType === 'FUT' || item.instrumentType === 'INDEX';
-                  const itemKey = getItemKey(item);
+                  const itemKey = getInstrumentIdentity(item);
                   const depthKey = getDepthKey(item);
                   const isPendingQuote = !!item._pendingSubscription || !!pendingLtpByKey[itemKey];
                   return (
