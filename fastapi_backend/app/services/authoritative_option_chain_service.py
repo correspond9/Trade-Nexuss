@@ -572,7 +572,7 @@ class AuthoritativeOptionChainService:
             return
         await self.rate_limiter.wait(api_type)
 
-    async def _block_rest_calls(self, api_type: str, seconds: int, reason: str) -> None:
+    async def _block_rest_calls(self, api_type: str, seconds: int, reason: str, source: str = "unknown") -> None:
         await self.rate_limiter.block_async(api_type, seconds)
         self.rest_blocked_until[api_type] = datetime.utcnow().timestamp() + seconds
         try:
@@ -580,7 +580,11 @@ class AuthoritativeOptionChainService:
             from app.notifications.notifier import notify
             db = SessionLocal()
             try:
-                notify(db, f"Dhan REST {api_type} blocked for {seconds}s due to {reason}", "WARN")
+                notify(
+                    db,
+                    f"Dhan REST {api_type} blocked for {seconds}s due to {reason} (source={source})",
+                    "WARN",
+                )
             finally:
                 db.close()
         except Exception:
@@ -808,9 +812,9 @@ class AuthoritativeOptionChainService:
             if not quote_result.get("ok"):
                 error_kind = quote_result.get("error_kind")
                 if error_kind == "auth":
-                    await self._block_rest_calls("quote", 900, "AUTH_FAILURE")
+                    await self._block_rest_calls("quote", 900, "AUTH_FAILURE", f"market_data_quote:{underlying}")
                 if error_kind == "rate":
-                    await self._block_rest_calls("quote", 120, "RATE_LIMIT")
+                    await self._block_rest_calls("quote", 120, "RATE_LIMIT", f"market_data_quote:{underlying}")
                 logger.error(
                     "❌ DhanHQ quote SDK error for %s: %s",
                     underlying,
@@ -854,9 +858,9 @@ class AuthoritativeOptionChainService:
             if not expiry_result.get("ok"):
                 error_kind = expiry_result.get("error_kind")
                 if error_kind == "auth":
-                    await self._block_rest_calls("data", 900, "AUTH_FAILURE")
+                    await self._block_rest_calls("data", 900, "AUTH_FAILURE", f"market_data_expiry:{underlying}")
                 if error_kind == "rate":
-                    await self._block_rest_calls("data", 120, "RATE_LIMIT")
+                    await self._block_rest_calls("data", 120, "RATE_LIMIT", f"market_data_expiry:{underlying}")
                 logger.error(
                     "❌ DhanHQ expiry SDK error for %s: %s",
                     underlying,
@@ -1009,9 +1013,9 @@ class AuthoritativeOptionChainService:
                 sdk_result.get("error") or "unknown",
             )
             if sdk_result.get("error_kind") == "auth":
-                await self._block_rest_calls("data", 900, "AUTH_FAILURE")
+                await self._block_rest_calls("data", 900, "AUTH_FAILURE", f"option_chain:{underlying}:{expiry}")
             if sdk_result.get("error_kind") == "rate":
-                await self._block_rest_calls("data", 120, "RATE_LIMIT")
+                await self._block_rest_calls("data", 120, "RATE_LIMIT", f"option_chain:{underlying}:{expiry}")
             return None
                         
         except asyncio.TimeoutError:

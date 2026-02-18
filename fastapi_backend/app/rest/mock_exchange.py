@@ -163,7 +163,8 @@ def _get_ltp(symbol: str, fallback_price: float) -> float:
     prices = get_prices()
     key = (symbol or "").upper().strip()
     parts = key.split()
-    if len(parts) >= 3 and parts[-1] in {"CE", "PE"}:
+    is_option_symbol = len(parts) >= 3 and parts[-1] in {"CE", "PE"}
+    if is_option_symbol:
         try:
             strike_val = float(parts[-2])
             expiry_hint = None
@@ -186,6 +187,17 @@ def _get_ltp(symbol: str, fallback_price: float) -> float:
                         return float(data.ltp)
         except Exception:
             pass
+
+        # Option pricing must never fall back to underlying spot or next-expiry cache entries.
+        expiry_hint = parts[-3] if len(parts) >= 4 and any(ch.isalpha() for ch in parts[-3]) and any(ch.isdigit() for ch in parts[-3]) else None
+        expiry_iso = _normalize_expiry_iso(expiry_hint) if expiry_hint else None
+        if expiry_iso:
+            try:
+                if datetime.strptime(expiry_iso, "%Y-%m-%d").date() < ist_now().date():
+                    return 0.0
+            except Exception:
+                pass
+        return float(fallback_price or 0.0)
 
     key_base = key.split()[0]
     ltp = prices.get(key_base)
@@ -222,6 +234,73 @@ def _normalize_expiry_iso(expiry: Optional[str]) -> Optional[str]:
         except ValueError:
             continue
     return str(expiry).strip() or None
+
+
+def _extract_option_expiry_date(symbol: Optional[str]):
+    parts = (symbol or "").strip().upper().split()
+    if len(parts) < 4 or parts[-1] not in {"CE", "PE"}:
+        return None
+    expiry_token = parts[-3]
+    if not any(ch.isalpha() for ch in expiry_token) or not any(ch.isdigit() for ch in expiry_token):
+        return None
+    expiry_iso = _normalize_expiry_iso(expiry_token)
+    if not expiry_iso:
+        return None
+    try:
+        return datetime.strptime(expiry_iso, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _execute_position_close(
+    db: Session,
+    pos: models.MockPosition,
+    close_qty: int,
+    exit_price: float,
+    remarks: str,
+):
+    txn = "SELL" if int(pos.quantity or 0) > 0 else "BUY"
+
+    order = models.MockOrder(
+        order_ref=generate_order_id(),
+        user_id=pos.user_id,
+        symbol=pos.symbol,
+        exchange_segment=pos.exchange_segment,
+        transaction_type=txn,
+        quantity=close_qty,
+        filled_qty=close_qty,
+        order_type="MARKET",
+        product_type=pos.product_type,
+        price=float(exit_price),
+        status="EXECUTED",
+        remarks=remarks,
+        created_at=ist_now(),
+        updated_at=ist_now(),
+    )
+    db.add(order)
+    db.flush()
+
+    trade = models.MockTrade(
+        order_id=order.id,
+        user_id=pos.user_id,
+        price=float(exit_price),
+        qty=close_qty,
+        created_at=ist_now(),
+    )
+    db.add(trade)
+
+    signed_qty = -close_qty if txn == "SELL" else close_qty
+    _apply_position(
+        db=db,
+        user_id=pos.user_id,
+        symbol=pos.symbol,
+        exchange_segment=pos.exchange_segment,
+        product_type=pos.product_type,
+        qty=signed_qty,
+        price=float(exit_price),
+    )
+
+    return order, trade
 
 
 def _is_mcx_segment(exchange_segment: Optional[str]) -> bool:
@@ -1216,7 +1295,22 @@ def list_positions(user_id: Optional[int] = None, db: Session = Depends(get_db))
         query = query.filter(models.MockPosition.user_id == user_id)
     positions = query.all()
     results = []
+    did_auto_settlement = False
     for pos in positions:
+        live_qty = int(pos.quantity or 0)
+        expiry_date = _extract_option_expiry_date(pos.symbol)
+        if live_qty != 0 and expiry_date and expiry_date < ist_now().date():
+            _execute_position_close(
+                db=db,
+                pos=pos,
+                close_qty=abs(live_qty),
+                exit_price=0.0,
+                remarks="AUTO_EXPIRE_SETTLEMENT",
+            )
+            did_auto_settlement = True
+            db.flush()
+            db.refresh(pos)
+
         ltp = _get_ltp(pos.symbol, pos.avg_price)
         mtm = (ltp - pos.avg_price) * pos.quantity
         normalized_status = "OPEN" if int(pos.quantity or 0) != 0 else "CLOSED"
@@ -1234,6 +1328,8 @@ def list_positions(user_id: Optional[int] = None, db: Session = Depends(get_db))
             "created_at": pos.created_at.isoformat() if pos.created_at else None,
             "updated_at": pos.updated_at.isoformat() if pos.updated_at else None,
         })
+    if did_auto_settlement:
+        db.commit()
     return {"data": results}
 
 
@@ -1283,13 +1379,13 @@ def close_position_by_data(req: SquareOffRequest, db: Session = Depends(get_db))
         position = db.query(models.MockPosition).filter(
             models.MockPosition.id == req.position_id,
             models.MockPosition.user_id == 1,  # SUPER_ADMIN user
-            models.MockPosition.status == "OPEN"
+            models.MockPosition.quantity != 0
         ).first()
     else:
         # Otherwise, find the first open position for SUPER_ADMIN
         position = db.query(models.MockPosition).filter(
             models.MockPosition.user_id == 1,  # SUPER_ADMIN user
-            models.MockPosition.status == "OPEN"
+            models.MockPosition.quantity != 0
         ).first()
     
     if not position:
@@ -1303,38 +1399,27 @@ def close_position(position_id: int, req: SquareOffRequest, db: Session = Depend
     pos = db.query(models.MockPosition).filter(models.MockPosition.id == position_id).first()
     if not pos:
         raise HTTPException(status_code=404, detail="Position not found")
-    if pos.status != "OPEN":
+    live_qty = int(pos.quantity or 0)
+    if live_qty == 0:
         return {"data": _serialize(pos)}
 
-    qty = req.quantity or abs(pos.quantity)
-    qty = min(abs(pos.quantity), qty)
+    qty = req.quantity or abs(live_qty)
+    qty = min(abs(live_qty), qty)
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="Invalid quantity")
+
     ltp = _get_ltp(pos.symbol, pos.avg_price)
 
-    # ✨ ENHANCE: Add fallback for square-off when depth is unavailable
-    snapshot = EXEC_ENGINE._snapshot_for_order(pos.symbol, pos.exchange_segment)
-    if not snapshot.get("best_bid") or not snapshot.get("best_ask"):
-        # Use LTP as fallback when depth data is not available
-        print(f"[SQUAREOFF] Using LTP fallback for {pos.symbol}: {ltp}")
-        snapshot["best_bid"] = ltp * 0.999  # Small spread
-        snapshot["best_ask"] = ltp * 1.001
-
-    order = models.MockOrder(
-        order_ref=generate_order_id(),
-        user_id=pos.user_id,
-        symbol=pos.symbol,
-        exchange_segment=pos.exchange_segment,
-        transaction_type="SELL" if pos.quantity > 0 else "BUY",
-        quantity=qty,
-        order_type="MARKET",
-        product_type=pos.product_type,
-        price=ltp,
-        status="PENDING",
+    order, _trade = _execute_position_close(
+        db=db,
+        pos=pos,
+        close_qty=qty,
+        exit_price=ltp,
+        remarks="USER_POSITION_CLOSE",
     )
-    db.add(order)
-    db.flush()
-    EXEC_ENGINE.process_new_order(db, order)
     db.commit()
-    return {"data": _serialize(order)}
+    updated = db.query(models.MockPosition).filter(models.MockPosition.id == pos.id).first()
+    return {"data": _serialize(order), "position": _serialize(updated) if updated else None}
 
 
 @router.post("/portfolio/positions/{position_id}/squareoff")
@@ -2086,7 +2171,7 @@ def admin_force_exit_position(req: AdminForceExitRequest, user=Depends(get_curre
 
     if not pos:
         raise HTTPException(status_code=404, detail="Position not found")
-    if pos.status != "OPEN" or int(pos.quantity or 0) == 0:
+    if int(pos.quantity or 0) == 0:
         return {"data": _serialize(pos), "message": "Position already closed"}
 
     close_qty = req.quantity or abs(int(pos.quantity or 0))
@@ -2095,45 +2180,12 @@ def admin_force_exit_position(req: AdminForceExitRequest, user=Depends(get_curre
         raise HTTPException(status_code=400, detail="Invalid quantity")
 
     exit_price = float(req.exit_price)
-    txn = "SELL" if (pos.quantity or 0) > 0 else "BUY"
-
-    order = models.MockOrder(
-        order_ref=generate_order_id(),
-        user_id=pos.user_id,
-        symbol=pos.symbol,
-        exchange_segment=pos.exchange_segment,
-        transaction_type=txn,
-        quantity=close_qty,
-        filled_qty=close_qty,
-        order_type="LIMIT",
-        product_type=pos.product_type,
-        price=exit_price,
-        status="EXECUTED",
-        remarks="FORCED_ADMIN_EXIT",
-        created_at=ist_now(),
-        updated_at=ist_now(),
-    )
-    db.add(order)
-    db.flush()
-
-    trade = models.MockTrade(
-        order_id=order.id,
-        user_id=pos.user_id,
-        price=exit_price,
-        qty=close_qty,
-        created_at=ist_now(),
-    )
-    db.add(trade)
-
-    signed_qty = -close_qty if txn == "SELL" else close_qty
-    _apply_position(
+    order, trade = _execute_position_close(
         db=db,
-        user_id=pos.user_id,
-        symbol=pos.symbol,
-        exchange_segment=pos.exchange_segment,
-        product_type=pos.product_type,
-        qty=signed_qty,
-        price=exit_price,
+        pos=pos,
+        close_qty=close_qty,
+        exit_price=exit_price,
+        remarks="FORCED_ADMIN_EXIT",
     )
 
     db.commit()

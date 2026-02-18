@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.market.instrument_master.loader import MASTER
@@ -26,6 +26,64 @@ def get_scheduler():
     if _scheduler is None:
         _scheduler = BackgroundScheduler()
     return _scheduler
+
+
+def purge_previous_day_orders() -> dict:
+    """Delete all order-book data older than current IST trading day."""
+    db = None
+    try:
+        from app.storage.db import SessionLocal
+        from app.storage.models import MockOrder, MockTrade, ExecutionEvent
+
+        db = SessionLocal()
+        now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        ist_day_start = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        old_order_ids = [
+            row[0]
+            for row in db.query(MockOrder.id)
+            .filter(MockOrder.created_at < ist_day_start)
+            .all()
+        ]
+
+        if not old_order_ids:
+            return {
+                "orders_removed": 0,
+                "trades_removed": 0,
+                "execution_events_removed": 0,
+                "cutoff": ist_day_start.isoformat(),
+            }
+
+        execution_events_removed = (
+            db.query(ExecutionEvent)
+            .filter(ExecutionEvent.order_id.in_(old_order_ids))
+            .delete(synchronize_session=False)
+        )
+        trades_removed = (
+            db.query(MockTrade)
+            .filter(MockTrade.order_id.in_(old_order_ids))
+            .delete(synchronize_session=False)
+        )
+        orders_removed = (
+            db.query(MockOrder)
+            .filter(MockOrder.id.in_(old_order_ids))
+            .delete(synchronize_session=False)
+        )
+
+        db.commit()
+        return {
+            "orders_removed": int(orders_removed or 0),
+            "trades_removed": int(trades_removed or 0),
+            "execution_events_removed": int(execution_events_removed or 0),
+            "cutoff": ist_day_start.isoformat(),
+        }
+    except Exception:
+        if db is not None:
+            db.rollback()
+        raise
+    finally:
+        if db is not None:
+            db.close()
 
 def eod_cleanup():
     """
@@ -66,6 +124,15 @@ def eod_cleanup():
             print(f"[EOD-WARN] Watchlist clear failed: {watchlist_result.get('message')}")
         print(f"[EOD] Phase 2 - Cleared watchlist entries: {watchlist_cleared}, Skipped (protected): {watchlist_skipped}")
         
+        # Phase 3: Purge previous-day order-book records
+        order_cleanup = purge_previous_day_orders()
+        print(
+            "[EOD] Phase 3 - Purged old order-book records: "
+            f"orders={order_cleanup.get('orders_removed', 0)}, "
+            f"trades={order_cleanup.get('trades_removed', 0)}, "
+            f"events={order_cleanup.get('execution_events_removed', 0)}"
+        )
+
         # Get stats after cleanup
         stats_after = SUBSCRIPTION_MGR.get_ws_stats()
         print(f"\n[EOD] After cleanup:")
@@ -84,7 +151,10 @@ def eod_cleanup():
                     f"End-of-day cleanup: unsubscribed={tier_a_unsubscribed}, "
                     f"watchlist_cleared={watchlist_cleared}, "
                     f"watchlist_skipped={watchlist_skipped}, "
-                    f"protected_keys={len(protected_keys)}"
+                    f"protected_keys={len(protected_keys)}, "
+                    f"orders_removed={order_cleanup.get('orders_removed', 0)}, "
+                    f"trades_removed={order_cleanup.get('trades_removed', 0)}, "
+                    f"events_removed={order_cleanup.get('execution_events_removed', 0)}"
                 )
             )
             db.add(log_entry)

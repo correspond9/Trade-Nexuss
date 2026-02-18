@@ -66,6 +66,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   const [depthCache, setDepthCache] = useState({});
   const [depthLoading, setDepthLoading] = useState({});
   const [pendingLtpByKey, setPendingLtpByKey] = useState({});
+  const refreshInFlightRef = useRef(false);
 
   const getItemKey = useCallback((item) => `${item?.exchange || 'NSE'}:${item?.id}`, []);
   const getDepthKey = useCallback((item) => {
@@ -77,15 +78,47 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     return `${exchange}:${symbol}:${expiry}:${strike}:${instrumentType}`;
   }, []);
 
-  const getUnderlyingLtp = useCallback(async (symbol) => {
+  const getPulseLtp = useCallback((symbol) => {
     try {
-      const res = await apiService.get(`/market/underlying-ltp/${symbol}`);
+      const safeSymbol = String(symbol || '').trim();
+      if (!safeSymbol) return null;
+      const source = pulse?.prices || {};
+      const candidates = [
+        safeSymbol,
+        safeSymbol.toUpperCase(),
+        safeSymbol.replace(/\s+/g, ''),
+        safeSymbol.toUpperCase().replace(/\s+/g, ''),
+      ];
+      for (const key of candidates) {
+        const value = source[key];
+        const numeric = Number(value);
+        if (Number.isFinite(numeric) && numeric > 0) {
+          return numeric;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, [pulse?.prices]);
+
+  const getUnderlyingLtp = useCallback(async (symbol) => {
+    const liveFromPulse = getPulseLtp(symbol);
+    if (liveFromPulse !== null) {
+      return liveFromPulse;
+    }
+
+    try {
+      const res = await apiService.request(`/market/underlying-ltp/${encodeURIComponent(symbol)}`, {
+        method: 'GET',
+        _skipSameOriginRetry: true,
+      });
       return res?.ltp || res?.data?.ltp || null;
     } catch (err) {
       console.warn('[WATCHLIST] Failed to fetch underlying LTP:', err);
     }
     return null;
-  }, []);
+  }, [getPulseLtp]);
 
   const isIndexSymbol = (symbol) => {
     const indexSet = new Set(['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'MIDCPNIFTY', 'BANKEX']);
@@ -123,7 +156,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const getUnderlyingLtpWithRetry = useCallback(async (symbol, attempts = 6, delayMs = 400) => {
+  const getUnderlyingLtpWithRetry = useCallback(async (symbol, attempts = 2, delayMs = 150) => {
     for (let index = 0; index < attempts; index++) {
       const ltp = await getUnderlyingLtp(symbol);
       if (ltp !== null && ltp !== undefined && Number.isFinite(Number(ltp)) && Number(ltp) > 0) {
@@ -537,8 +570,14 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   }, []);
 
   const handleRefresh = useCallback(async () => {
-    const currentList = watchlists[selectedWatchlist] || [];
-    const optionChainCache = {};
+    if (refreshInFlightRef.current) {
+      return;
+    }
+    refreshInFlightRef.current = true;
+
+    try {
+      const currentList = watchlists[selectedWatchlist] || [];
+      const optionChainCache = {};
 
     const getOptionChain = async (symbol, expiry) => {
       const cacheKey = `${symbol}_${expiry}`;
@@ -556,7 +595,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       }
     };
 
-    const updatedList = await Promise.all(currentList.map(async (item) => {
+      const updatedList = await Promise.all(currentList.map(async (item) => {
       if (item.instrumentType === 'FUT' && item.expiry) {
         const fut = await fetchFutureQuote(item.symbol, item.expiry, item.exchange || 'NSE');
         if (fut) {
@@ -581,6 +620,14 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
           };
         }
       } else {
+        const pulseLtp = getPulseLtp(item.symbol);
+        if (pulseLtp !== null) {
+          return {
+            ...item,
+            ltp: pulseLtp,
+          };
+        }
+
         const ltp = await getUnderlyingLtp(item.symbol);
         if (ltp !== null && ltp !== undefined) {
           return {
@@ -591,11 +638,14 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       }
       return item;
     }));
-    setWatchlists(prev => ({
-      ...prev,
-      [selectedWatchlist]: updatedList
-    }));
-  }, [watchlists, selectedWatchlist, fetchFutureQuote, getUnderlyingLtp]);
+      setWatchlists(prev => ({
+        ...prev,
+        [selectedWatchlist]: updatedList
+      }));
+    } finally {
+      refreshInFlightRef.current = false;
+    }
+  }, [watchlists, selectedWatchlist, fetchFutureQuote, getUnderlyingLtp, getPulseLtp]);
 
   const searchAllExchanges = useCallback(async (searchText) => {
     if (!searchText || searchText.length < 2) {
@@ -652,6 +702,19 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     const load = async () => {
       try {
         if (!user?.id) return;
+
+        const localKey = `watchlists:${user.id}`;
+        const stored = localStorage.getItem(localKey);
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (parsed && typeof parsed === 'object') {
+              setWatchlists(prev => ({ ...prev, ...parsed }));
+            }
+          } catch {
+          }
+        }
+
         const data = await apiService.get(`/watchlist/${user.id}`).catch(() => null);
         if (!data) return;
         const entries = data.watchlist || data.data || [];
@@ -688,7 +751,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
             }
           } else {
             if (instrument.instrumentType === 'EQUITY') {
-              const liveLtp = await getUnderlyingLtpWithRetry(instrument.symbol);
+              const liveLtp = getPulseLtp(instrument.symbol) ?? await getUnderlyingLtpWithRetry(instrument.symbol);
               if (liveLtp !== null && liveLtp !== undefined) {
                 instrument.ltp = Number(liveLtp) || 0;
               }
@@ -697,7 +760,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
               if (Number.isFinite(ltp) && ltp > 0) {
                 instrument.ltp = ltp;
               } else {
-                const liveLtp = await getUnderlyingLtp(instrument.symbol);
+                const liveLtp = getPulseLtp(instrument.symbol) ?? await getUnderlyingLtp(instrument.symbol);
                 if (liveLtp !== null && liveLtp !== undefined) {
                   instrument.ltp = Number(liveLtp) || 0;
                 }
@@ -706,13 +769,33 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
           }
           return instrument;
         }));
-        setWatchlists(prev => ({ ...prev, 1: mapped }));
+        setWatchlists(prev => {
+          const existing = Array.isArray(prev?.[1]) ? prev[1] : [];
+          const existingKeys = new Set(existing.map(getItemKey));
+          const merged = [...existing];
+          for (const item of mapped) {
+            if (!existingKeys.has(getItemKey(item))) {
+              merged.push(item);
+            }
+          }
+          return { ...prev, 1: merged };
+        });
       } catch (err) {
         console.warn('Failed to load persisted watchlist:', err);
       }
     };
     load();
-  }, [user, fetchFutureQuote, getUnderlyingLtp, getUnderlyingLtpWithRetry]);
+  }, [user, fetchFutureQuote, getUnderlyingLtp, getUnderlyingLtpWithRetry, getPulseLtp, getItemKey]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+    try {
+      localStorage.setItem(`watchlists:${user.id}`, JSON.stringify(watchlists));
+    } catch {
+    }
+  }, [watchlists, user?.id]);
 
   // Handle search with debouncing
   useEffect(() => {
@@ -729,12 +812,36 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
   }, [searchTerm, searchAllExchanges]);
 
   useEffect(() => {
-    const currentList = watchlists[selectedWatchlist] || [];
-    if (!marketActive || !pulse?.timestamp || !currentList.length) {
+    if (!marketActive || !pulse?.timestamp) {
       return;
     }
-    handleRefresh();
-  }, [pulse?.timestamp, marketActive, watchlists, selectedWatchlist, handleRefresh]);
+
+    setWatchlists(prev => {
+      const next = { ...prev };
+      let changed = false;
+
+      for (const key of Object.keys(next)) {
+        const list = Array.isArray(next[key]) ? next[key] : [];
+        const updated = list.map((item) => {
+          if (item.instrumentType === 'FUT' || item.instrumentType === 'CE' || item.instrumentType === 'PE') {
+            return item;
+          }
+          const pulseLtp = getPulseLtp(item.symbol);
+          if (pulseLtp === null || pulseLtp === item.ltp) {
+            return item;
+          }
+          changed = true;
+          return {
+            ...item,
+            ltp: pulseLtp,
+          };
+        });
+        next[key] = updated;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [pulse?.timestamp, marketActive, getPulseLtp]);
 
   useEffect(() => {
     const handler = (e) => {

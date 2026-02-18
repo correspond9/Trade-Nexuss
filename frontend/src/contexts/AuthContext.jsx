@@ -140,17 +140,24 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // Logout function
-  const logout = useCallback(async () => {
-    try {
-      // Call logout endpoint if available
-      if (token) {
-        await apiService.post('/auth/logout');
-      }
-    } catch (err) {
-      console.error('Logout error:', err);
-    } finally {
-      // Clear local state regardless of API call success
-      clearAuth();
+  const logout = useCallback(() => {
+    const tokenToRevoke = token;
+
+    // Clear local state immediately so UI logout is instant
+    clearAuth();
+
+    // Revoke server session in the background with a tight timeout
+    if (tokenToRevoke) {
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Logout timeout')), 1200);
+      });
+
+      Promise.race([
+        apiService.post('/auth/logout'),
+        timeoutPromise,
+      ]).catch((err) => {
+        console.error('Logout background revoke error:', err);
+      });
     }
   }, [token, clearAuth]);
 
