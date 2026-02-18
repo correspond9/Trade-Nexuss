@@ -799,7 +799,12 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
             security_targets[sec_id_str] = {
                 "exchange": exchange,
                 "symbol": symbol,
-                "mode": FEED_MODE_QUOTE if opt_type in ("CE", "PE") else FEED_MODE_TICKER,
+                # Equities require QUOTE mode for reliable LTP updates in production.
+                "mode": (
+                    FEED_MODE_QUOTE
+                    if opt_type in ("CE", "PE") or (not opt_type and not sub_info.get("expiry") and sub_info.get("strike") is None)
+                    else FEED_MODE_TICKER
+                ),
             }
             
             # Build subscription map for option chains
@@ -941,7 +946,7 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
             security_targets[str(security_id)] = {
                 "exchange": exchange,
                 "symbol": symbol,
-                "mode": FEED_MODE_TICKER,
+                "mode": FEED_MODE_QUOTE,
             }
             watchlist_equity_ids.add(str(security_id))
     except Exception as e:
