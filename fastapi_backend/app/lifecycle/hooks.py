@@ -482,6 +482,14 @@ async def load_tier_b_chains():
         total_subscribed = 0
         total_failed = 0
 
+        # Cleanup: legacy EQUITY_* tokens are not valid Dhan WebSocket tokens.
+        try:
+            removed, failed = await asyncio.to_thread(purge_tier_b_equity_subscriptions)
+            if removed or failed:
+                print(f"\n[CLEANUP] Purged legacy Tier-B EQUITY_* tokens: removed={removed} failed={failed}")
+        except Exception:
+            pass
+
         # Always-on Tier-B equities should subscribe first (fast), before heavy option-chain preload.
         print("\n[EQUITIES] Loading Tier-B always-on equities...")
         eq_subscribed, eq_failed = await asyncio.to_thread(ensure_tier_b_equity_subscriptions)

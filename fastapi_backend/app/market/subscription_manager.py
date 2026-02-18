@@ -275,6 +275,7 @@ class SubscriptionManager:
         self.subscriptions = {}  # token -> {tier, symbol, expiry, strike, option_type, subscribed_at, ws_id, active}
         self.tier_a_lru = []  # List of (token, subscribed_at) for LRU eviction
         self.ws_usage = {i: 0 for i in range(1, 6)}  # ws_1 to ws_5 instrument counts
+        self.token_alias = {}  # requested_token -> actual_token (e.g., EQUITY_RELIANCE -> 2885)
         self.lock = threading.RLock()
         self.db = SessionLocal()
         self._db_loaded = False
@@ -306,6 +307,7 @@ class SubscriptionManager:
             (success: bool, message: str, ws_id: int)
         """
         with self.lock:
+            requested_token = str(token)
             try:
                 from app.market.security_ids import mcx_watch_symbols
                 if not REGISTRY.loaded:
@@ -329,17 +331,29 @@ class SubscriptionManager:
                     return (False, "NOT_ALLOWED", None)
             except Exception:
                 pass
-            if token in self.subscriptions:
-                return (True, f"Already subscribed: {token}", self.subscriptions[token]["ws_id"])
 
+            # Resolve metadata first; for non-option instruments, Dhan websocket expects numeric security_id as token.
             metadata = _resolve_security_metadata(symbol, expiry, strike, option_type)
+            actual_token = requested_token
+            try:
+                security_id = metadata.get("security_id")
+                if security_id is not None and str(security_id).strip() != "" and not option_type:
+                    actual_token = str(security_id).strip()
+            except Exception:
+                actual_token = requested_token
+
+            if actual_token != requested_token:
+                self.token_alias[requested_token] = actual_token
+
+            if actual_token in self.subscriptions:
+                return (True, f"Already subscribed: {actual_token}", self.subscriptions[actual_token]["ws_id"])
             canonical = canonical_symbol(symbol)
             exchange_name = _exchange_name_from_meta(metadata.get("exchange"), metadata.get("segment"))
             segment_name = (metadata.get("segment") or exchange_name).upper()
 
             orchestrator = get_orchestrator()
             ok, reason, ws_id = orchestrator.subscribe(
-                token=str(token),
+                token=str(actual_token),
                 exchange=exchange_name,
                 segment=segment_name,
                 symbol=canonical or symbol,
@@ -351,7 +365,7 @@ class SubscriptionManager:
                 evicted = self._evict_lru_tier_a()
                 if evicted:
                     ok, reason, ws_id = orchestrator.subscribe(
-                        token=str(token),
+                        token=str(actual_token),
                         exchange=exchange_name,
                         segment=segment_name,
                         symbol=canonical or symbol,
@@ -366,14 +380,14 @@ class SubscriptionManager:
             try:
                 from app.market.ws_manager import get_ws_manager
                 ws_mgr = get_ws_manager()
-                ws_mgr.add_instrument(str(token), ws_id)
+                ws_mgr.add_instrument(str(actual_token), ws_id)
             except Exception:
                 pass
 
             self.ws_usage[ws_id] = self.ws_usage.get(ws_id, 0) + 1
 
             # Store subscription
-            self.subscriptions[token] = {
+            self.subscriptions[actual_token] = {
                 "symbol": symbol,
                 "symbol_canonical": canonical or symbol,
                 "expiry": expiry,
@@ -390,10 +404,10 @@ class SubscriptionManager:
             
             # Track LRU for Tier A
             if tier == "TIER_A":
-                self.tier_a_lru.append((token, datetime.utcnow()))
+                self.tier_a_lru.append((actual_token, datetime.utcnow()))
             
             # Log to DB
-            self._log_subscription("SUBSCRIBE", token, f"Added to {tier}")
+            self._log_subscription("SUBSCRIBE", actual_token, f"Added to {tier}")
 
             # Push dynamic watchlist changes to live feed immediately (don't wait periodic sync).
             try:
@@ -407,13 +421,15 @@ class SubscriptionManager:
     def unsubscribe(self, token: str, reason: str = "User") -> Tuple[bool, str]:
         """Unsubscribe an instrument"""
         with self.lock:
-            if token not in self.subscriptions:
-                return (False, f"Not subscribed: {token}")
-            
-            sub = self.subscriptions[token]
+            requested_token = str(token)
+            actual_token = self.token_alias.get(requested_token, requested_token)
+            if actual_token not in self.subscriptions:
+                return (False, f"Not subscribed: {actual_token}")
+
+            sub = self.subscriptions[actual_token]
             ws_id = sub["ws_id"]
             orchestrator = get_orchestrator()
-            orchestrator.unsubscribe(str(token))
+            orchestrator.unsubscribe(str(actual_token))
             if ws_id in self.ws_usage:
                 self.ws_usage[ws_id] = max(self.ws_usage[ws_id] - 1, 0)
             
@@ -421,17 +437,17 @@ class SubscriptionManager:
             try:
                 from app.market.ws_manager import get_ws_manager
                 ws_mgr = get_ws_manager()
-                ws_mgr.remove_instrument(str(token))
+                ws_mgr.remove_instrument(str(actual_token))
             except Exception:
                 pass
 
-            del self.subscriptions[token]
+            del self.subscriptions[actual_token]
             
             # Remove from LRU if present
-            self.tier_a_lru = [(t, ts) for t, ts in self.tier_a_lru if t != token]
+            self.tier_a_lru = [(t, ts) for t, ts in self.tier_a_lru if t != actual_token]
             
             # Log to DB
-            self._log_subscription("UNSUBSCRIBE", token, reason)
+            self._log_subscription("UNSUBSCRIBE", actual_token, reason)
 
             # Push dynamic watchlist changes to live feed immediately.
             try:
@@ -440,7 +456,7 @@ class SubscriptionManager:
             except Exception:
                 pass
             
-            return (True, f"Unsubscribed: {token}")
+            return (True, f"Unsubscribed: {actual_token}")
     
     def get_subscription(self, token: str) -> Optional[Dict]:
         """Get subscription details"""
