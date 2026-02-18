@@ -806,6 +806,45 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
     except Exception as e:
         print(f"[ERROR] Failed to add default index targets: {e}")
 
+    # Ensure persisted watchlist equities are always included even if subscription state was not rebuilt.
+    # This prevents empty equity feed targets after restarts/redeploys and keeps LTPs live for watchlist rows.
+    try:
+        db = SessionLocal()
+        try:
+            equity_rows = (
+                db.query(Watchlist)
+                .filter(Watchlist.instrument_type == "EQUITY")
+                .all()
+            )
+        finally:
+            db.close()
+
+        for row in equity_rows:
+            symbol = (getattr(row, "symbol", None) or "").strip().upper()
+            if not symbol:
+                continue
+
+            resolved = _resolve_security_metadata(
+                symbol=symbol,
+                expiry=None,
+                strike=None,
+                option_type=None,
+            )
+            security_id = resolved.get("security_id")
+            exchange = resolved.get("exchange")
+            if not security_id:
+                continue
+            if exchange is None:
+                exchange = EXCHANGE_CODE_NSE
+
+            security_targets[str(security_id)] = {
+                "exchange": exchange,
+                "symbol": symbol,
+                "mode": FEED_MODE_TICKER,
+            }
+    except Exception as e:
+        print(f"[WARN] Failed to include watchlist equities in feed targets: {e}")
+
     if not security_targets:
         # Absolute fallback to ensure feed never starves
         security_targets = {
