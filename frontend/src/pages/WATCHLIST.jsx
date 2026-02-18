@@ -76,6 +76,19 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
     const instrumentType = String(item?.instrumentType || '').toUpperCase();
     return `${exchange}:${symbol}:${expiry}:${strike}:${instrumentType}`;
   }, []);
+  const dedupeWatchlistItems = useCallback((items) => {
+    const seen = new Set();
+    const deduped = [];
+    for (const item of (Array.isArray(items) ? items : [])) {
+      const identity = getInstrumentIdentity(item);
+      if (!identity || seen.has(identity)) {
+        continue;
+      }
+      seen.add(identity);
+      deduped.push(item);
+    }
+    return deduped;
+  }, [getInstrumentIdentity]);
   const getDepthKey = useCallback((item) => {
     const exchange = item?.exchange || 'NSE';
     const symbol = item?.symbol || '';
@@ -726,7 +739,22 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
           try {
             const parsed = JSON.parse(stored);
             if (parsed && typeof parsed === 'object') {
-              setWatchlists(prev => ({ ...prev, ...parsed }));
+              const sanitized = {};
+              let hasDuplicates = false;
+              Object.entries(parsed).forEach(([listKey, listItems]) => {
+                const deduped = dedupeWatchlistItems(listItems);
+                sanitized[listKey] = deduped;
+                if (Array.isArray(listItems) && deduped.length !== listItems.length) {
+                  hasDuplicates = true;
+                }
+              });
+
+              setWatchlists(prev => ({ ...prev, ...sanitized }));
+
+              if (hasDuplicates) {
+                localStorage.setItem(localKey, JSON.stringify({ ...sanitized }));
+                console.log('🧹 Removed duplicate instruments from persisted watchlists');
+              }
             }
           } catch {
           }
@@ -804,7 +832,7 @@ const WatchlistComponent = ({ handleOpenOrderModal }) => {
       }
     };
     load();
-  }, [user, fetchFutureQuote, getUnderlyingLtp, getUnderlyingLtpWithRetry, getPulseLtp, getInstrumentIdentity]);
+  }, [user, fetchFutureQuote, getUnderlyingLtp, getUnderlyingLtpWithRetry, getPulseLtp, getInstrumentIdentity, dedupeWatchlistItems]);
 
   useEffect(() => {
     if (!user?.id) {

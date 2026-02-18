@@ -158,7 +158,7 @@ def _resolve_security_metadata(
                     continue
 
                 inst_type = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
-                if inst_type not in {"ES", "ETF"}:
+                if inst_type not in {"ES", "ETF", "EQUITY", "EQ"}:
                     continue
 
                 security_id = row.get("SECURITY_ID") or row.get("SecurityId")
@@ -170,6 +170,46 @@ def _resolve_security_metadata(
                     "security_id": str(security_id).strip(),
                     "exchange": exchange,
                     "segment": row.get("SEGMENT") or "NSE_EQ",
+                    "symbol": canonical,
+                }
+        except Exception:
+            pass
+
+        # Secondary fallback: broad scan across symbol/underlying rows when NSE equity slice misses symbol.
+        try:
+            candidate_rows = []
+            candidate_rows.extend(REGISTRY.get_by_symbol(symbol_upper) or [])
+            candidate_rows.extend(REGISTRY.get_by_symbol(canonical) or [])
+            candidate_rows.extend(REGISTRY.by_underlying.get(symbol_upper, []) or [])
+            candidate_rows.extend(REGISTRY.by_underlying.get(canonical, []) or [])
+
+            for row in candidate_rows:
+                security_id = row.get("SECURITY_ID") or row.get("SecurityId")
+                if not security_id:
+                    continue
+
+                row_option = (row.get("OPTION_TYPE") or "").strip().upper()
+                if row_option in {"CE", "PE"}:
+                    continue
+
+                row_exchange = (row.get("EXCH_ID") or "").strip().upper()
+                segment = (row.get("SEGMENT") or "").strip().upper()
+                inst_type = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
+
+                # Prefer cash-equity rows when available.
+                if segment and segment != "E" and inst_type not in {"ES", "ETF", "EQUITY", "EQ"}:
+                    continue
+
+                exchange = _determine_exchange(row.get("EXCH_ID"), canonical)
+                if row_exchange == "BSE":
+                    exchange = _EXCHANGE_CODE_MAP.get("BSE_EQ", 8)
+                elif row_exchange == "NSE":
+                    exchange = _EXCHANGE_CODE_MAP.get("NSE_EQ", 1)
+
+                return {
+                    "security_id": str(security_id).strip(),
+                    "exchange": exchange,
+                    "segment": row.get("SEGMENT") or ("BSE_EQ" if row_exchange == "BSE" else "NSE_EQ"),
                     "symbol": canonical,
                 }
         except Exception:
