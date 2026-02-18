@@ -12,7 +12,7 @@ import os
 import threading
 import time
 from app.market_orchestrator import get_orchestrator
-from app.services.dhan_sdk_bridge import sdk_quote_data
+from app.services.dhan_sdk_bridge import sdk_ltp_data, sdk_quote_data
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -279,7 +279,7 @@ def underlying_ltp(underlying: str):
                     for segment_candidate in segment_candidates:
                         payload = {segment_candidate: [int(str(security_id))]}
                         try:
-                            sdk_result = sdk_quote_data(
+                            sdk_result = sdk_ltp_data(
                                 creds={"client_id": client_id, "access_token": access_token},
                                 securities=payload,
                             )
@@ -313,7 +313,7 @@ def underlying_ltp(underlying: str):
 
                         if access_token and client_id:
                             payload = {"IDX_I": [int(str(index_sec))]}
-                            sdk_result = sdk_quote_data(
+                            sdk_result = sdk_ltp_data(
                                 creds={"client_id": client_id, "access_token": access_token},
                                 securities=payload,
                             )

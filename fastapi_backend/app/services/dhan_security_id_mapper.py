@@ -32,6 +32,7 @@ class DhanSecurityIdMapper:
     def __init__(self):
         self.security_id_cache: Dict[str, int] = {}
         self.csv_data: Dict[str, Dict] = {}
+        self.equity_security: Dict[str, Dict[str, object]] = {}
         self.lot_size_by_underlying: Dict[str, int] = {}
         self.last_updated = None
         self._load_lock = threading.Lock()
@@ -40,7 +41,7 @@ class DhanSecurityIdMapper:
         """Load security IDs from official DhanHQ CSV"""
         with self._load_lock:
             try:
-                if self.last_updated and self.security_id_cache and self.csv_data:
+                if self.last_updated and self.security_id_cache and self.csv_data and self.equity_security:
                     return True
 
                 logger.info("Loading DhanHQ security IDs from official CSV...")
@@ -54,6 +55,7 @@ class DhanSecurityIdMapper:
 
                 local_security_id_cache: Dict[str, int] = {}
                 local_csv_data: Dict[str, Dict] = {}
+                local_equity_security: Dict[str, Dict[str, object]] = {}
                 local_lot_size_by_underlying: Dict[str, int] = dict(self.lot_size_by_underlying)
 
                 for row in csv_reader:
@@ -76,6 +78,40 @@ class DhanSecurityIdMapper:
                     except Exception:
                         pass
 
+                    symbol_upper = symbol.strip().upper() if symbol else ""
+                    instrument_upper = instrument_type.upper()
+                    exchange_upper = exchange.upper()
+                    segment_upper = segment.upper()
+
+                    # Equity/ETF mapping (NSE_EQ/BSE_EQ) from official CSV.
+                    # We only map cash-equity rows (SEGMENT='E') with no option fields.
+                    if (
+                        symbol_upper
+                        and security_id
+                        and segment_upper == "E"
+                        and not option_type
+                        and not strike
+                        and (not expiry)
+                        and instrument_upper in {"ES", "ETF", "EQUITY", "EQ"}
+                    ):
+                        try:
+                            security_id_int = int(security_id)
+                        except (ValueError, TypeError):
+                            security_id_int = None
+
+                        if security_id_int:
+                            exchange_segment = "BSE_EQ" if exchange_upper == "BSE" else "NSE_EQ"
+                            existing = local_equity_security.get(symbol_upper)
+                            # Prefer NSE over BSE when both exist.
+                            if not existing or (existing.get("exchange_segment") == "BSE_EQ" and exchange_segment == "NSE_EQ"):
+                                local_equity_security[symbol_upper] = {
+                                    "security_id": security_id_int,
+                                    "exchange_segment": exchange_segment,
+                                    "exchange": exchange_upper,
+                                    "segment": segment_upper,
+                                }
+
+                    # Options mapping (OPTIDX only) for strike subscriptions.
                     if 'OPTIDX' not in instrument_type:
                         continue
 
@@ -96,8 +132,6 @@ class DhanSecurityIdMapper:
                     token_key = f"{option_type}_{symbol}_{strike_float}_{expiry_formatted}"
                     local_security_id_cache[token_key] = security_id_int
 
-                    instrument_upper = instrument_type.upper()
-                    exchange_upper = exchange.upper()
                     if "OPT" in instrument_upper:
                         if "BSE" in exchange_upper:
                             segment = "BSE_FNO"
@@ -116,6 +150,7 @@ class DhanSecurityIdMapper:
 
                 self.security_id_cache = local_security_id_cache
                 self.csv_data = local_csv_data
+                self.equity_security = local_equity_security
                 self.lot_size_by_underlying = local_lot_size_by_underlying
                 self.last_updated = datetime.now()
 
@@ -127,6 +162,7 @@ class DhanSecurityIdMapper:
                 logger.info(f"   • NIFTY options: {nifty_count:,}")
                 logger.info(f"   • BANKNIFTY options: {banknifty_count:,}")
                 logger.info(f"   • SENSEX options: {sensex_count:,}")
+                logger.info(f"   • Equities mapped: {len(self.equity_security):,}")
                 if self.lot_size_by_underlying:
                     logger.info(f"   • Lot sizes mapped: {len(self.lot_size_by_underlying)} underlyings")
 
@@ -166,6 +202,12 @@ class DhanSecurityIdMapper:
     def get_security_id(self, token: str) -> Optional[int]:
         """Get real DhanHQ security ID for a token"""
         return self.security_id_cache.get(token)
+
+    def get_equity_security(self, symbol: str) -> Optional[Dict[str, object]]:
+        """Get cash-equity security metadata for a symbol (from official CSV)."""
+        if not symbol:
+            return None
+        return self.equity_security.get(symbol.strip().upper())
     
     def get_option_data(self, token: str) -> Optional[Dict]:
         """Get full option data for a token"""
@@ -198,7 +240,8 @@ class DhanSecurityIdMapper:
                 'NIFTY': len([k for k in self.security_id_cache.keys() if 'NIFTY' in k]),
                 'BANKNIFTY': len([k for k in self.security_id_cache.keys() if 'BANKNIFTY' in k]),
                 'SENSEX': len([k for k in self.security_id_cache.keys() if 'SENSEX' in k]),
-            }
+            },
+            'equities_mapped': len(self.equity_security),
         }
 
 # Global instance

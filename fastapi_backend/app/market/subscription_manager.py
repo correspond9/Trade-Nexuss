@@ -175,6 +175,24 @@ def _resolve_security_metadata(
         except Exception:
             pass
 
+        # Official CSV fallback (downloaded from Dhan) for cash equities.
+        try:
+            from app.services.dhan_security_id_mapper import dhan_security_mapper
+
+            # Best-effort: mapper is loaded by live feed / startup; don't force network here.
+            meta = dhan_security_mapper.get_equity_security(canonical)
+            if meta and meta.get("security_id"):
+                exchange_segment = str(meta.get("exchange_segment") or "NSE_EQ").upper()
+                exchange = _EXCHANGE_CODE_MAP.get("BSE") if exchange_segment == "BSE_EQ" else _EXCHANGE_CODE_MAP.get("NSE")
+                return {
+                    "security_id": str(int(meta.get("security_id"))),
+                    "exchange": exchange,
+                    "segment": exchange_segment,
+                    "symbol": canonical,
+                }
+        except Exception:
+            pass
+
         # Secondary fallback: broad scan across symbol/underlying rows when NSE equity slice misses symbol.
         try:
             candidate_rows = []

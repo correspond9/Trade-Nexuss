@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import requests
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,6 +87,36 @@ def sdk_quote_data(creds: Dict[str, str], securities: Dict[str, Any]) -> Dict[st
         client = _client_from_creds(creds)
         response = client.quote_data(securities)
         return _parse_sdk_response(response)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "data": None,
+            "error_kind": "other",
+            "error": str(exc),
+        }
+
+
+def sdk_ltp_data(creds: Dict[str, str], securities: Dict[str, Any]) -> Dict[str, Any]:
+    """Call DhanHQ Market Quote LTP endpoint (/v2/marketfeed/ltp).
+
+    Docs: https://dhanhq.co/docs/v2/market-quote/#ticker-data
+    """
+    try:
+        client_id = str(creds.get("client_id") or "").strip()
+        access_token = str(creds.get("access_token") or "").strip()
+        if not client_id or not access_token:
+            raise ValueError("Missing Dhan credentials")
+
+        url = "https://api.dhan.co/v2/marketfeed/ltp"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "access-token": access_token,
+            "client-id": client_id,
+        }
+        response = requests.post(url, headers=headers, json=securities or {}, timeout=15)
+        response.raise_for_status()
+        return _parse_sdk_response(response.json())
     except Exception as exc:
         return {
             "ok": False,
