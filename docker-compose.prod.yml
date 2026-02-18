@@ -23,12 +23,14 @@ services:
       - ENVIRONMENT=production
       - DEBUG=false
       - STARTUP_LOAD_MASTER=false
-      - STARTUP_LOAD_TIER_B=false
+      - STARTUP_LOAD_TIER_B=true
       - STARTUP_START_STREAMS=true
+      - PURGE_TIER_B_EQUITY_ON_STARTUP=false
+      - ENABLE_TIER_B_ETF=false
       - DISABLE_DHAN_WS=false
       - DISABLE_MARKET_STREAMS=false
     env_file:
-      - .env.production
+      - .env
     depends_on:
       - db
       - redis
