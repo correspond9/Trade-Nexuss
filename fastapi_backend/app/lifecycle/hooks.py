@@ -482,6 +482,21 @@ async def load_tier_b_chains():
         total_subscribed = 0
         total_failed = 0
 
+        # Always-on Tier-B equities should subscribe first (fast), before heavy option-chain preload.
+        print("\n[EQUITIES] Loading Tier-B always-on equities...")
+        eq_subscribed, eq_failed = await asyncio.to_thread(ensure_tier_b_equity_subscriptions)
+        total_subscribed += int(eq_subscribed)
+        total_failed += int(eq_failed)
+        print(f"  ✓ Tier-B equities subscribed: {eq_subscribed} | failed: {eq_failed}")
+
+        # Optional Tier-B ETFs (if enabled by env).
+        print("\n[ETFs] Loading Tier-B ETFs (if enabled)...")
+        etf_expected = len(get_tier_b_etf_symbols() or set())
+        etf_subscribed, etf_failed = await asyncio.to_thread(ensure_tier_b_etf_subscriptions)
+        total_subscribed += int(etf_subscribed)
+        total_failed += int(etf_failed)
+        print(f"  ✓ Tier-B ETFs expected: {etf_expected}, subscribed: {etf_subscribed} | failed: {etf_failed}")
+
         # ✨ NEW: Load option chains from authoritative service
         print("\n[INDEX OPTIONS] Loading from option chain service...")
         try:
@@ -581,21 +596,6 @@ async def load_tier_b_chains():
                                 total_subscribed += 1
                             else:
                                 total_failed += 1
-
-        # Load always-on Tier-B equities (separate from ETF list).
-        print("\n[EQUITIES] Loading Tier-B always-on equities...")
-        eq_subscribed, eq_failed = await asyncio.to_thread(ensure_tier_b_equity_subscriptions)
-        total_subscribed += int(eq_subscribed)
-        total_failed += int(eq_failed)
-        print(f"  ✓ Tier-B equities subscribed: {eq_subscribed} | failed: {eq_failed}")
-
-        # Load optional Tier-B ETFs (if enabled by env).
-        print("\n[ETFs] Loading Tier-B ETFs (if enabled)...")
-        etf_expected = len(get_tier_b_etf_symbols() or set())
-        etf_subscribed, etf_failed = await asyncio.to_thread(ensure_tier_b_etf_subscriptions)
-        total_subscribed += int(etf_subscribed)
-        total_failed += int(etf_failed)
-        print(f"  ✓ Tier-B ETFs expected: {etf_expected}, subscribed: {etf_subscribed} | failed: {etf_failed}")
 
         # Print summary
         stats = SUBSCRIPTION_MGR.get_ws_stats()
