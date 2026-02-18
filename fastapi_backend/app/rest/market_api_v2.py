@@ -98,6 +98,77 @@ def normalize_expiry(expiry: Optional[str]) -> Optional[date]:
         return None
 
 
+def _extract_segment_payload(quote_data: object, exchange_segment: str):
+    if not isinstance(quote_data, dict):
+        return None
+
+    segment_data = quote_data.get(exchange_segment)
+    if isinstance(segment_data, dict):
+        return segment_data
+
+    nested = quote_data.get("data")
+    if isinstance(nested, dict):
+        nested_segment = nested.get(exchange_segment)
+        if isinstance(nested_segment, dict):
+            return nested_segment
+
+    return None
+
+
+def _extract_ltp_from_quote_payload(sec_payload: object) -> Optional[float]:
+    if isinstance(sec_payload, list):
+        sec_payload = sec_payload[0] if sec_payload else None
+
+    if not isinstance(sec_payload, dict):
+        return None
+
+    ltp = sec_payload.get("ltp") or sec_payload.get("LTP")
+    if ltp is None:
+        ohlc = sec_payload.get("ohlc") or sec_payload.get("OHLC")
+        if isinstance(ohlc, dict):
+            ltp = (
+                ohlc.get("close")
+                or ohlc.get("ltp")
+                or ohlc.get("last_price")
+                or ohlc.get("prev_close")
+            )
+
+    if ltp is None:
+        ltp = (
+            sec_payload.get("close")
+            or sec_payload.get("last_price")
+            or sec_payload.get("prev_close")
+        )
+
+    try:
+        value = float(ltp)
+        if value > 0:
+            return value
+    except Exception:
+        return None
+    return None
+
+
+def _extract_ltp_from_sdk_quote_result(sdk_result: dict, exchange_segment: str, security_id: object) -> Optional[float]:
+    if not isinstance(sdk_result, dict) or not sdk_result.get("ok"):
+        return None
+
+    body = sdk_result.get("data") or {}
+    segment_data = _extract_segment_payload(body, exchange_segment)
+    if not isinstance(segment_data, dict):
+        return None
+
+    sec_key = str(security_id)
+    sec_payload = segment_data.get(sec_key)
+    if sec_payload is None:
+        try:
+            sec_payload = segment_data.get(int(sec_key))
+        except Exception:
+            sec_payload = None
+
+    return _extract_ltp_from_quote_payload(sec_payload)
+
+
 # =====================================
 # SECTION 2 — HEALTH CHECK ROUTE
 # =====================================
@@ -124,6 +195,11 @@ def underlying_ltp(underlying: str):
         from app.market.live_prices import get_price, update_price
         sym = (underlying or "").upper()
         price = get_price(sym)
+        try:
+            if price is not None and float(price) <= 0:
+                price = None
+        except Exception:
+            price = None
 
         if price is None:
             # Fallback: on-demand Dhan quote snapshot for NSE/BSE equities and ETFs.
@@ -194,31 +270,30 @@ def underlying_ltp(underlying: str):
                     db.close()
 
                 if access_token and client_id:
-                    payload = {exchange_segment: [int(str(security_id))]}
-                    try:
-                        sdk_result = sdk_quote_data(
-                            creds={"client_id": client_id, "access_token": access_token},
-                            securities=payload,
-                        )
-                        if sdk_result.get("ok"):
-                            body = sdk_result.get("data") or {}
-                            seg_data = (body.get("data") or {}).get(exchange_segment) or {}
-                            sec_key = str(security_id)
-                            sec_payload = seg_data.get(sec_key) or seg_data.get(int(security_id))
-                            if isinstance(sec_payload, list) and sec_payload:
-                                sec_payload = sec_payload[0]
+                    segment_candidates = [exchange_segment]
+                    if exchange_segment == "NSE_EQ":
+                        segment_candidates.append("BSE_EQ")
+                    elif exchange_segment == "BSE_EQ":
+                        segment_candidates.append("NSE_EQ")
 
-                            if isinstance(sec_payload, dict):
-                                ltp = sec_payload.get("ltp") or sec_payload.get("LTP")
-                                if ltp is None:
-                                    ohlc = sec_payload.get("ohlc") or sec_payload.get("OHLC")
-                                    if isinstance(ohlc, dict):
-                                        ltp = ohlc.get("close") or ohlc.get("prev_close")
-                                if ltp is not None:
-                                    price = float(ltp)
-                                    update_price(sym, price)
-                    except Exception:
-                        pass
+                    for segment_candidate in segment_candidates:
+                        payload = {segment_candidate: [int(str(security_id))]}
+                        try:
+                            sdk_result = sdk_quote_data(
+                                creds={"client_id": client_id, "access_token": access_token},
+                                securities=payload,
+                            )
+                            ltp_value = _extract_ltp_from_sdk_quote_result(
+                                sdk_result=sdk_result,
+                                exchange_segment=segment_candidate,
+                                security_id=security_id,
+                            )
+                            if ltp_value is not None:
+                                price = float(ltp_value)
+                                update_price(sym, price)
+                                break
+                        except Exception:
+                            continue
 
             # Index fallback (NIFTY/BANKNIFTY/SENSEX) via static security map.
             if price is None:
@@ -242,20 +317,14 @@ def underlying_ltp(underlying: str):
                                 creds={"client_id": client_id, "access_token": access_token},
                                 securities=payload,
                             )
-                            if sdk_result.get("ok"):
-                                body = sdk_result.get("data") or {}
-                                sec_payload = ((body.get("data") or {}).get("IDX_I") or {}).get(str(index_sec))
-                                if isinstance(sec_payload, list) and sec_payload:
-                                    sec_payload = sec_payload[0]
-                                if isinstance(sec_payload, dict):
-                                    ltp = sec_payload.get("ltp") or sec_payload.get("LTP")
-                                    if ltp is None:
-                                        ohlc = sec_payload.get("ohlc") or sec_payload.get("OHLC")
-                                        if isinstance(ohlc, dict):
-                                            ltp = ohlc.get("close") or ohlc.get("prev_close")
-                                    if ltp is not None:
-                                        price = float(ltp)
-                                        update_price(sym, price)
+                            ltp_value = _extract_ltp_from_sdk_quote_result(
+                                sdk_result=sdk_result,
+                                exchange_segment="IDX_I",
+                                security_id=index_sec,
+                            )
+                            if ltp_value is not None:
+                                price = float(ltp_value)
+                                update_price(sym, price)
                 except Exception:
                     pass
 
