@@ -142,7 +142,7 @@ def underlying_ltp(underlying: str):
                     if row_symbol != sym:
                         continue
                     inst_type = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
-                    if inst_type not in {"ES", "ETF"}:
+                    if inst_type not in {"ES", "ETF", "EQUITY", "EQ"}:
                         continue
                     security_id = row.get("SECURITY_ID") or row.get("SecurityId")
                     exch = (row.get("EXCH_ID") or "NSE").strip().upper()
@@ -152,6 +152,37 @@ def underlying_ltp(underlying: str):
             except Exception:
                 security_id = None
                 exchange_segment = None
+
+            # Secondary fallback: resolve from broader registry pools (handles symbols missing in NSE equity slice).
+            if not (security_id and exchange_segment):
+                try:
+                    candidate_rows = []
+                    candidate_rows.extend(REGISTRY.get_by_symbol(sym) or [])
+                    candidate_rows.extend(REGISTRY.by_underlying.get(sym, []) or [])
+
+                    for row in candidate_rows:
+                        sec = row.get("SECURITY_ID") or row.get("SecurityId")
+                        if not sec:
+                            continue
+                        exch = (row.get("EXCH_ID") or "").strip().upper()
+                        segment = (row.get("SEGMENT") or "").strip().upper()
+                        inst_type = (row.get("INSTRUMENT_TYPE") or "").strip().upper()
+
+                        mapped = None
+                        if exch == "NSE":
+                            mapped = "NSE_EQ" if segment == "E" or inst_type in {"EQUITY", "ES", "ETF", "EQ"} else "NSE_FNO"
+                        elif exch == "BSE":
+                            mapped = "BSE_EQ" if segment == "E" or inst_type in {"EQUITY", "ES", "ETF", "EQ"} else "BSE_FNO"
+                        elif exch == "MCX":
+                            mapped = "MCX_COMM"
+
+                        if mapped:
+                            security_id = sec
+                            exchange_segment = mapped
+                            break
+                except Exception:
+                    security_id = None
+                    exchange_segment = None
 
             if security_id and exchange_segment:
                 db = SessionLocal()

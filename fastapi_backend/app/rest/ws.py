@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.market.live_prices import get_prices, get_dashboard_symbols
+from app.ems.exchange_clock import is_market_open
 
 router = APIRouter()
 
@@ -9,9 +10,26 @@ router = APIRouter()
 def _serialize_prices():
     """Build the REST/WS payload for the dashboard."""
     price_snapshot = get_prices()
-    payload = {symbol: float(price_snapshot.get(symbol) or 0.0) for symbol in get_dashboard_symbols()}
+    payload = {}
+    for symbol, raw_value in price_snapshot.items():
+        try:
+            payload[str(symbol).upper()] = float(raw_value or 0.0)
+        except (TypeError, ValueError):
+            payload[str(symbol).upper()] = 0.0
+
+    for symbol in get_dashboard_symbols():
+        payload.setdefault(symbol, 0.0)
+
+    market_open_any = False
+    try:
+        market_open_any = is_market_open("NSE") or is_market_open("BSE") or is_market_open("MCX")
+    except Exception:
+        market_open_any = False
+
+    has_live_data = any(float(value or 0.0) > 0 for value in payload.values())
+
     payload["timestamp"] = datetime.utcnow().isoformat()
-    payload["status"] = "active" if any(payload[symbol] for symbol in get_dashboard_symbols()) else "waiting_for_data"
+    payload["status"] = "active" if (market_open_any or has_live_data) else "waiting_for_data"
     return payload
 
 @router.get("/prices")
