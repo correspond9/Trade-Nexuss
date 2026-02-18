@@ -40,12 +40,15 @@ class WebSocketManager:
             }
     
     def get_next_ws(self) -> int:
-        """Return the least-loaded WS connection ID (1-5)"""
+        """Return the least-loaded active WS connection ID (fallback to any if none active)."""
         with self.lock:
-            ws_id = min(
-                range(1, self.max_connections + 1),
-                key=lambda w: len(self.connections[w]["instruments"])
-            )
+            active_ws = [
+                ws_id
+                for ws_id in range(1, self.max_connections + 1)
+                if self.connections[ws_id]["active"]
+            ]
+            candidate_ws = active_ws or list(range(1, self.max_connections + 1))
+            ws_id = min(candidate_ws, key=lambda w: len(self.connections[w]["instruments"]))
             return ws_id
     
     def can_accommodate(self, count: int = 1) -> bool:
@@ -72,13 +75,26 @@ class WebSocketManager:
             if current >= self.max_total:
                 return (False, None)
             
-            # Assign to specified WS or find least-loaded
+            # Assign to specified WS or find least-loaded active WS.
             if ws_id is None:
                 ws_id = self.get_next_ws()
+            else:
+                # If caller forced an inactive WS while active ones exist, reroute.
+                if (not self.connections[ws_id]["active"]) and any(
+                    self.connections[w]["active"] for w in range(1, self.max_connections + 1)
+                ):
+                    ws_id = self.get_next_ws()
             
-            # Check if this specific WS can accommodate
+            # Check if this specific WS can accommodate; fallback to another candidate if needed.
             if len(self.connections[ws_id]["instruments"]) >= self.max_per_connection:
-                return (False, None)
+                fallback_candidates = [
+                    w for w in range(1, self.max_connections + 1)
+                    if len(self.connections[w]["instruments"]) < self.max_per_connection
+                    and (self.connections[w]["active"] or not any(self.connections[x]["active"] for x in range(1, self.max_connections + 1)))
+                ]
+                if not fallback_candidates:
+                    return (False, None)
+                ws_id = min(fallback_candidates, key=lambda w: len(self.connections[w]["instruments"]))
             
             # Add instrument
             self.connections[ws_id]["instruments"].add(token)
