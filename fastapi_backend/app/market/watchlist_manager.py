@@ -41,14 +41,31 @@ class WatchlistManager:
         return expiry_text
 
     def _get_live_ltp(self, symbol: Optional[str]) -> Optional[float]:
+        symbol_upper = (symbol or "").upper()
         try:
             from app.market.live_prices import get_price
-            value = get_price((symbol or "").upper())
-            if value is None:
-                return None
-            return float(value)
+            value = get_price(symbol_upper)
+            if value is not None:
+                value_float = float(value)
+                if value_float > 0:
+                    return value_float
         except Exception:
-            return None
+            pass
+
+        # Cache miss / stale zero fallback: resolve via robust underlying-LTP path.
+        try:
+            from app.rest.market_api_v2 import underlying_ltp
+
+            payload = underlying_ltp(symbol_upper)
+            ltp = payload.get("ltp") if isinstance(payload, dict) else None
+            if ltp is not None:
+                ltp_float = float(ltp)
+                if ltp_float > 0:
+                    return ltp_float
+        except Exception:
+            pass
+
+        return None
     
     def add_to_watchlist(
         self,
