@@ -62,6 +62,7 @@ _LAST_TICK_CACHE: Dict[str, str] = {}
 _LAST_DEPTH_CACHE: Dict[str, str] = {}
 _LAST_ALERT_EMITTED: Dict[str, datetime] = {}
 _ALERT_LOCK = threading.Lock()
+_CRITICAL_INDEX_SYMBOLS = {"NIFTY", "BANKNIFTY", "SENSEX", "BANKEX", "FINNIFTY", "MIDCPNIFTY"}
 logger = logging.getLogger("trading_nexus.dhan.live_feed")
 
 
@@ -119,6 +120,63 @@ def _emit_admin_alert(message: str, level: str = "WARN", key: Optional[str] = No
                 db.close()
         except Exception:
             pass
+
+
+def _apply_feed_target_limit(
+    targets: Dict[str, Dict[str, object]],
+    critical_ids: Optional[set] = None,
+) -> Dict[str, Dict[str, object]]:
+    """Hard-cap feed targets to reduce Dhan 429 risk while preserving critical symbols."""
+    try:
+        max_targets = int(os.getenv("LIVE_FEED_MAX_TARGETS", "300"))
+    except Exception:
+        max_targets = 300
+
+    max_targets = max(50, max_targets)
+    if len(targets) <= max_targets:
+        return targets
+
+    critical_ids = critical_ids or set()
+    priority = []
+    regular = []
+
+    for sec_id, meta in targets.items():
+        symbol = str(meta.get("symbol") or "").upper().strip()
+        if sec_id in critical_ids or symbol in _CRITICAL_INDEX_SYMBOLS:
+            priority.append((sec_id, meta))
+        else:
+            regular.append((sec_id, meta))
+
+    kept_items = []
+    for item in priority:
+        if len(kept_items) >= max_targets:
+            break
+        kept_items.append(item)
+
+    if len(kept_items) < max_targets:
+        for item in regular:
+            if len(kept_items) >= max_targets:
+                break
+            kept_items.append(item)
+
+    trimmed_count = len(targets) - len(kept_items)
+    trimmed_targets = {sec_id: meta for sec_id, meta in kept_items}
+
+    logger.warning(
+        "[LIVE_FEED] Target limit applied: requested=%s kept=%s trimmed=%s max=%s",
+        len(targets),
+        len(trimmed_targets),
+        trimmed_count,
+        max_targets,
+    )
+    _emit_admin_alert(
+        message=f"Live feed target cap applied: kept {len(trimmed_targets)} of {len(targets)} targets (trimmed {trimmed_count}).",
+        level="WARN",
+        key="livefeed:target_cap",
+        min_interval_seconds=600,
+    )
+
+    return trimmed_targets
 def _ensure_rest_client(creds) -> Optional[DhanHQClient]:
     """Create/reuse a DhanHQ REST client for quote/close lookups."""
     global _REST_CLIENT
@@ -847,6 +905,8 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
     except Exception as e:
         print(f"[ERROR] Failed to add default index targets: {e}")
 
+    watchlist_equity_ids = set()
+
     # Ensure persisted watchlist equities are always included even if subscription state was not rebuilt.
     # This prevents empty equity feed targets after restarts/redeploys and keeps LTPs live for watchlist rows.
     try:
@@ -883,8 +943,14 @@ def _get_security_ids_from_watchlist() -> Dict[str, Dict[str, object]]:
                 "symbol": symbol,
                 "mode": FEED_MODE_TICKER,
             }
+            watchlist_equity_ids.add(str(security_id))
     except Exception as e:
         print(f"[WARN] Failed to include watchlist equities in feed targets: {e}")
+
+    security_targets = _apply_feed_target_limit(
+        security_targets,
+        critical_ids=watchlist_equity_ids,
+    )
 
     if not security_targets:
         # Absolute fallback to ensure feed never starves
