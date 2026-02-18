@@ -60,6 +60,8 @@ _REST_CLIENT: Optional[DhanHQClient] = None
 _LAST_CLOSE_CACHE: Dict[str, Dict[str, object]] = {}
 _LAST_TICK_CACHE: Dict[str, str] = {}
 _LAST_DEPTH_CACHE: Dict[str, str] = {}
+_LAST_ALERT_EMITTED: Dict[str, datetime] = {}
+_ALERT_LOCK = threading.Lock()
 logger = logging.getLogger("trading_nexus.dhan.live_feed")
 
 
@@ -90,6 +92,33 @@ def _resolve_feed_mode(meta: Optional[Dict[str, object]]) -> int:
     if meta.get("expiry") and meta.get("strike") is not None:
         return FEED_MODE_QUOTE
     return FEED_MODE_TICKER
+
+
+def _emit_admin_alert(message: str, level: str = "WARN", key: Optional[str] = None, min_interval_seconds: int = 300) -> None:
+    """Persist important live-feed events to Admin Alerts with basic throttling."""
+    alert_key = str(key or message)
+    now = datetime.now()
+
+    with _ALERT_LOCK:
+        last = _LAST_ALERT_EMITTED.get(alert_key)
+        if last and (now - last).total_seconds() < max(1, int(min_interval_seconds)):
+            return
+        _LAST_ALERT_EMITTED[alert_key] = now
+
+    db = None
+    try:
+        from app.notifications.notifier import notify
+
+        db = SessionLocal()
+        notify(db, message=message, level=level)
+    except Exception as exc:
+        logger.warning("Failed to emit admin alert '%s': %s", message, exc)
+    finally:
+        try:
+            if db:
+                db.close()
+        except Exception:
+            pass
 def _ensure_rest_client(creds) -> Optional[DhanHQClient]:
     """Create/reuse a DhanHQ REST client for quote/close lookups."""
     global _REST_CLIENT
@@ -185,6 +214,12 @@ def _trigger_cooldown(reason: str) -> None:
     _consecutive_failures = _max_consecutive_failures
     _backoff_delay = _max_backoff_delay
     print(f"[COOLDOWN] Triggered due to {reason}. Cooling down for {_cooldown_period}s")
+    _emit_admin_alert(
+        message=f"Market data cooldown triggered ({reason}). Retry after {_cooldown_period}s.",
+        level="ERROR",
+        key=f"cooldown:{reason}",
+        min_interval_seconds=max(300, _cooldown_period // 2),
+    )
 
 
 def reset_cooldown() -> None:
@@ -192,6 +227,12 @@ def reset_cooldown() -> None:
     _last_cooldown_start = None
     _consecutive_failures = 0
     _backoff_delay = 5
+    _emit_admin_alert(
+        message="Market data cooldown cleared. Reconnect attempts resumed.",
+        level="INFO",
+        key="cooldown:reset",
+        min_interval_seconds=120,
+    )
 
 
 def get_live_feed_status() -> Dict[str, object]:
@@ -1252,6 +1293,12 @@ def start_live_feed():
                 token = (getattr(creds, "auth_token", None) or getattr(creds, "daily_token", None)) if creds else None
                 if not creds or not creds.client_id or not token:
                     print("[WARN] No Dhan credentials - waiting...")
+                    _emit_admin_alert(
+                        message="Dhan credentials missing or invalid; live feed waiting for valid credentials.",
+                        level="WARN",
+                        key="livefeed:missing_credentials",
+                        min_interval_seconds=600,
+                    )
                     _record_connection_attempt(success=False)
                     time.sleep(10)
                     continue
@@ -1260,6 +1307,12 @@ def start_live_feed():
                 initial_targets = _get_security_ids_from_watchlist()
                 if not initial_targets:
                     print("[WARN] No securities to subscribe to")
+                    _emit_admin_alert(
+                        message="Live feed found no eligible securities to subscribe.",
+                        level="WARN",
+                        key="livefeed:no_targets",
+                        min_interval_seconds=600,
+                    )
                     _record_connection_attempt(success=False)
                     time.sleep(10)
                     continue
@@ -1314,6 +1367,12 @@ def start_live_feed():
                 _record_connection_attempt(success=True)
                 
                 print("[OK] Connecting to DhanHQ WebSocket...")
+                _emit_admin_alert(
+                    message=f"Dhan WebSocket connected with {len(instruments)} subscriptions.",
+                    level="INFO",
+                    key="livefeed:connected",
+                    min_interval_seconds=300,
+                )
 
                 # Mark WebSocket connection as active in orchestrator
                 orchestrator.on_connected(1, _market_feed)  # Use WS-1 for the main feed
@@ -1333,6 +1392,12 @@ def start_live_feed():
                     _market_feed.run_forever()
                 except Exception as e:
                     print(f"[ERROR] _market_feed.run_forever() crashed: {e}")
+                    _emit_admin_alert(
+                        message=f"Dhan WebSocket runtime error: {e}",
+                        level="ERROR",
+                        key=f"livefeed:run_forever:{str(e)[:80]}",
+                        min_interval_seconds=180,
+                    )
                     # If it's an authorization failure, trigger cooldown
                     if "401" in str(e) or "Unauthorized" in str(e) or "Access Token" in str(e):
                          _trigger_cooldown("Authorization Failed")
@@ -1361,6 +1426,12 @@ def start_live_feed():
                     except Exception as e:
                         print(f"[ERROR] Data fetch error: {e}")
                         print("[WARN] WebSocket connection lost, will reconnect with backoff...")
+                        _emit_admin_alert(
+                            message=f"Dhan WebSocket data loop error: {e}",
+                            level="ERROR",
+                            key=f"livefeed:data_loop:{str(e)[:80]}",
+                            min_interval_seconds=180,
+                        )
                         try:
                             from app.market.ws_manager import get_ws_manager
                             ws_mgr = get_ws_manager()
@@ -1374,6 +1445,12 @@ def start_live_feed():
             except ConnectionError as e:
                 print(f"[ERROR] DhanHQ connection error: {e}")
                 print("[WARN] Connection rejected - likely due to rate limiting or credentials issue")
+                _emit_admin_alert(
+                    message=f"Dhan WebSocket connection error: {e}",
+                    level="ERROR",
+                    key=f"livefeed:connection_error:{str(e)[:80]}",
+                    min_interval_seconds=180,
+                )
                 if "429" in str(e):
                     _trigger_cooldown("HTTP_429")
                 try:
@@ -1386,6 +1463,12 @@ def start_live_feed():
                 time.sleep(5)
             except Exception as e:
                 print(f"[ERROR] Dhan feed crashed: {e}")
+                _emit_admin_alert(
+                    message=f"Dhan feed crashed: {e}",
+                    level="ERROR",
+                    key=f"livefeed:crashed:{str(e)[:80]}",
+                    min_interval_seconds=180,
+                )
                 if "429" in str(e):
                     _trigger_cooldown("HTTP_429")
                 try:
