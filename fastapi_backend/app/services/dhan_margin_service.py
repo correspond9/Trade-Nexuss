@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import aiohttp
 
 from app.services.dhan_rate_limiter import DhanRateLimiter
-from app.services.dhan_sdk_bridge import sdk_margin_calculator_async
+from app.services.dhan_sdk_bridge import sdk_margin_calculator_async, sdk_get_fund_limits_async
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +247,35 @@ class DhanMarginService:
         }
 
         return await self._post("/v2/margincalculator/multi", payload)
+
+    async def get_fund_limits(self) -> Optional[Dict[str, Any]]:
+        creds = await self._fetch_credentials()
+        if not creds:
+            return None
+
+        if await self.rate_limiter.is_blocked_async("data"):
+            return None
+        await self.rate_limiter.wait("data")
+
+        cache_key = self._cache_key({"client": creds.get("client_id")}, "sdk:/v2/fundlimit")
+        cached = self._cache_get(cache_key)
+        if cached:
+            return cached
+
+        sdk_result = await sdk_get_fund_limits_async(creds)
+        if not sdk_result.get("ok"):
+            if sdk_result.get("error_kind") == "auth":
+                await self.rate_limiter.block_async("data", 900)
+            if sdk_result.get("error_kind") == "rate":
+                await self.rate_limiter.block_async("data", 120)
+            logger.warning("Dhan fund limits SDK error: %s", sdk_result.get("error"))
+            return None
+
+        data = sdk_result.get("data")
+        if isinstance(data, dict):
+            self._cache_set(cache_key, data)
+            return data
+        return None
 
 
 dhan_margin_service = DhanMarginService()

@@ -43,6 +43,12 @@ const PositionsUserwise = () => {
       const mapped = Array.from(grouped.entries()).map(([userId, entry]) => {
         const user = entry.user || {};
         const fund = Number(user.wallet_balance || 0);
+        const marginAllotted = Number(
+          user.margin_allotted ?? (fund * Number(user.margin_multiplier || 5))
+        );
+        const marginUsed = Number(
+          user.margin_used ?? Math.max(0, marginAllotted - Number(user.margin_available || 0))
+        );
         const positionsList = entry.positions.map((pos) => {
           const quantity = Number(pos.quantity ?? pos.qty ?? 0);
           const avgPrice = Number(pos.avg_price ?? pos.avgEntry ?? 0);
@@ -76,6 +82,8 @@ const PositionsUserwise = () => {
           trialBy: fund,
           trialAfter: fund + profit,
           fund: fund,
+          marginAllotted,
+          marginUsed,
           pandl: profit,
           pandlPercentage: pandlPercentage,
           positions: positionsList
@@ -332,6 +340,22 @@ const PositionsUserwise = () => {
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     <div className="flex items-center space-x-1">
+                      <span>Margin Allotted</span>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center space-x-1">
+                      <span>Current Margin Usage</span>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center space-x-1">
                       <span>PandL</span>
                       <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -373,6 +397,12 @@ const PositionsUserwise = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {formatCurrency(user.fund)}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {formatCurrency(user.marginAllotted)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {formatCurrency(user.marginUsed)}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <div className={`font-medium ${user.pandl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {formatCurrency(user.pandl)}
@@ -401,7 +431,7 @@ const PositionsUserwise = () => {
                     {/* Expanded Positions */}
                     {expandedUsers.has(user.userId) && (
                       <tr>
-                        <td colSpan="9" className="px-0 py-0 bg-gray-50">
+                        <td colSpan="11" className="px-0 py-0 bg-gray-50">
                           <div className="px-6 py-4">
                             <div className="flex items-center justify-between mb-3 gap-2">
                               <div className="text-sm font-medium text-gray-900">

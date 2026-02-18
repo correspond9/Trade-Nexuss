@@ -200,3 +200,21 @@ async def sdk_margin_calculator_async(
         price,
         trigger_price,
     )
+
+
+def sdk_get_fund_limits(creds: Dict[str, str]) -> Dict[str, Any]:
+    try:
+        client = _client_from_creds(creds)
+        response = client.get_fund_limits()
+        return _parse_sdk_response(response)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "data": None,
+            "error_kind": "other",
+            "error": str(exc),
+        }
+
+
+async def sdk_get_fund_limits_async(creds: Dict[str, str]) -> Dict[str, Any]:
+    return await asyncio.to_thread(sdk_get_fund_limits, creds)

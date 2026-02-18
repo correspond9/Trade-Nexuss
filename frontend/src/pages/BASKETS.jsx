@@ -6,21 +6,26 @@ import { useAuth } from '../contexts/AuthContext';
 const BasketsTab = () => {
   const { user } = useAuth();
   const [baskets, setBaskets] = useState([]);
+  const [availableMargin, setAvailableMargin] = useState(0);
   const fetchData = useCallback(async () => {
     try {
-      // Fetch baskets and user data in parallel
+      // Fetch baskets and margin account in parallel
       const params = user?.id ? { user_id: user.id } : {};
-      const [basketsResponse] = await Promise.all([
-        apiService.get('/trading/basket-orders', params)
+      const [basketsResponse, marginResponse] = await Promise.all([
+        apiService.get('/trading/basket-orders', params),
+        apiService.get('/margin/account', params),
       ]);
       
       if (basketsResponse && basketsResponse.data) {
         setBaskets(basketsResponse.data);
       }
+      const serverAvailableMargin = Number(marginResponse?.data?.available_margin ?? 0);
+      setAvailableMargin(Number.isFinite(serverAvailableMargin) ? serverAvailableMargin : 0);
       
     } catch (err) {
       console.error('Error fetching baskets data:', err);
-      setError('Failed to load baskets');
+      setBaskets([]);
+      setAvailableMargin(0);
     }
   }, [user]);
 
@@ -208,6 +213,7 @@ const BasketsTab = () => {
   const tdRight = { ...tdStyle, textAlign: "right" };
 
   const sideBadge = (side) => {
+    const normalizedSide = String(side || '').toUpperCase();
     const base = {
       padding: "4px 10px",
       borderRadius: "999px",
@@ -217,10 +223,10 @@ const BasketsTab = () => {
       display: "inline-block",
     };
     const bg =
-      side === "BUY"
+      normalizedSide === "BUY"
         ? "linear-gradient(90deg, #3b82f6, #2563eb)"
         : "linear-gradient(90deg, #fb923c, #f97316)";
-    return <span style={{ ...base, backgroundImage: bg }}>{side}</span>;
+    return <span style={{ ...base, backgroundImage: bg }}>{normalizedSide || '-'}</span>;
   };
 
   const deleteLegButton = {
@@ -232,8 +238,10 @@ const BasketsTab = () => {
     fontSize: "14px",
   };
 
-  const formatMoney = (v) =>
-    "₹" + v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  const formatMoney = (v) => {
+    const num = Number(v || 0);
+    return "₹" + num.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  };
 
   // ---------- render ----------
   return (
@@ -265,10 +273,11 @@ const BasketsTab = () => {
       </div>
       <div style={mainCardStyle}>
         {baskets.map((basket) => {
-          const walletBalance = Number(user?.wallet_balance || user?.walletBalance || 0);
+          const requiredMargin = Number(basket.requiredMargin || 0);
+          const basketAvailable = Number(basket.availableMargin || availableMargin || 0);
           const canExecute =
-            basket.requiredMargin <= walletBalance &&
-            basket.requiredMargin > 0;
+            requiredMargin <= basketAvailable &&
+            requiredMargin > 0;
 
           return (
             <div key={basket.id} style={basketWrapperStyle}>
@@ -279,11 +288,11 @@ const BasketsTab = () => {
                   <div style={marginInfoStyle}>
                     Required Margin:{" "}
                     <span style={marginValueStyle}>
-                      {formatMoney(basket.requiredMargin)}
+                      {formatMoney(requiredMargin)}
                     </span>{" "}
-                    | Wallet:{" "}
+                    | Available Margin:{" "}
                     <span style={marginValueStyle}>
-                      {formatMoney(walletBalance)}
+                      {formatMoney(basketAvailable)}
                     </span>
                   </div>
                   <button
@@ -324,13 +333,13 @@ const BasketsTab = () => {
                   ) : (
                     basket.legs.map((leg) => (
                       <tr key={leg.id} style={rowStyle}>
-                        <td style={tdStyle}>{sideBadge(leg.side)}</td>
+                        <td style={tdStyle}>{sideBadge(leg.side || leg.transaction_type)}</td>
                         <td style={tdStyle}>{leg.symbol}</td>
-                        <td style={tdStyle}>{leg.productType}</td>
+                        <td style={tdStyle}>{leg.productType || leg.product_type || '-'}</td>
                         <td style={tdRight}>
-                          {leg.qty.toLocaleString("en-IN")}
+                          {Number(leg.qty || leg.quantity || 0).toLocaleString("en-IN")}
                         </td>
-                        <td style={tdRight}>{leg.price.toFixed(2)}</td>
+                        <td style={tdRight}>{Number(leg.price || 0).toFixed(2)}</td>
                         <td style={tdRight}>
                           <button
                             style={deleteLegButton}

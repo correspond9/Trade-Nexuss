@@ -965,8 +965,16 @@ const OrderModal = ({ isOpen, onClose, orderData, orderType = 'BUY' }) => {
               {/* Margin */}
               <div>
                 <div className="text-xs font-medium text-gray-700">
-                  Margin: {margin == null ? '—' : `₹${margin.toFixed(2)}`}
+                  Required Margin: {margin == null ? '—' : `₹${margin.toFixed(2)}`}
                 </div>
+                <div className="text-xs text-gray-600 mt-1">
+                  Available Margin: {availableMargin == null ? '—' : `₹${availableMargin.toFixed(2)}`}
+                </div>
+                {margin != null && availableMargin != null && margin > availableMargin && (
+                  <div className="text-xs text-red-600 mt-1">
+                    Margin Shortfall: ₹{(margin - availableMargin).toFixed(2)}
+                  </div>
+                )}
                 {marginError && (
                   <div className="text-xs text-red-600 mt-1">
                     {marginError}

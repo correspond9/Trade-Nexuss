@@ -132,6 +132,16 @@ def _get_or_create_admin(db: Session) -> models.UserAccount:
     db.commit()
     db.refresh(admin)
 
+    opening_entry = models.LedgerEntry(
+        user_id=admin.id,
+        entry_type="OPENING",
+        credit=float(admin.wallet_balance or 0.0),
+        debit=0.0,
+        balance=float(admin.wallet_balance or 0.0),
+        remarks="Opening balance",
+    )
+    db.add(opening_entry)
+
     margin = models.MarginAccount(user_id=admin.id, available_margin=admin.wallet_balance, used_margin=0.0)
     db.add(margin)
     db.commit()
@@ -398,6 +408,43 @@ def _apply_margin_multiplier(required: float, user: models.UserAccount, product_
     return required / multiplier
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _extract_available_margin_from_fund_limits(payload: Optional[dict]) -> Optional[float]:
+    if not isinstance(payload, dict):
+        return None
+
+    keys = (
+        "availabelBalance",
+        "availableBalance",
+        "withdrawableBalance",
+        "sodLimit",
+    )
+    for key in keys:
+        if key in payload and payload.get(key) is not None:
+            val = _safe_float(payload.get(key), default=-1.0)
+            if val >= 0:
+                return val
+    return None
+
+
+async def _resolve_available_margin(user_id: int, local_margin: Optional[models.MarginAccount]) -> float:
+    local_available = _safe_float(getattr(local_margin, "available_margin", 0.0), 0.0)
+    try:
+        fund_limits = await dhan_margin_service.get_fund_limits()
+        extracted = _extract_available_margin_from_fund_limits(fund_limits)
+        if extracted is not None:
+            return extracted
+    except Exception:
+        pass
+    return local_available
+
+
 def _segment_allowed(user: models.UserAccount, exchange_segment: str) -> bool:
     allowed = {s.strip().upper() for s in (user.allowed_segments or "").split(",") if s.strip()}
     if not allowed:
@@ -407,7 +454,14 @@ def _segment_allowed(user: models.UserAccount, exchange_segment: str) -> bool:
 
 
 def _update_ledger(db: Session, user: models.UserAccount, credit: float, debit: float, entry_type: str, remarks: str):
-    balance = (user.wallet_balance or 0.0) + credit - debit
+    last_entry = (
+        db.query(models.LedgerEntry)
+        .filter(models.LedgerEntry.user_id == user.id)
+        .order_by(models.LedgerEntry.created_at.desc(), models.LedgerEntry.id.desc())
+        .first()
+    )
+    base_balance = (last_entry.balance if last_entry and last_entry.balance is not None else (user.wallet_balance or 0.0))
+    balance = base_balance + credit - debit
     user.wallet_balance = balance
     user.updated_at = ist_now()
     entry = models.LedgerEntry(
@@ -1289,20 +1343,72 @@ def squareoff_position(position_id: int, req: SquareOffRequest, db: Session = De
 
 
 @router.get("/trading/basket-orders")
-def list_baskets(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+async def list_baskets(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     _get_or_create_admin(db)
     query = db.query(models.MockBasket)
     if user_id:
         query = query.filter(models.MockBasket.user_id == user_id)
     baskets = query.all()
+
+    user_cache = {}
+    margin_cache = {}
+    available_margin_cache = {}
+
+    def _get_user_and_margin(uid: int):
+        if uid not in user_cache:
+            basket_user = db.query(models.UserAccount).filter(models.UserAccount.id == uid).first()
+            if not basket_user:
+                basket_user = _get_or_create_admin(db)
+            user_cache[uid] = basket_user
+            margin_cache[uid] = _get_or_create_margin(db, basket_user.id)
+        return user_cache[uid], margin_cache[uid]
+
     result = []
     for b in baskets:
+        basket_user, user_margin = _get_user_and_margin(b.user_id)
+        if b.user_id not in available_margin_cache:
+            available_margin_cache[b.user_id] = await _resolve_available_margin(b.user_id, user_margin)
+        effective_available_margin = available_margin_cache[b.user_id]
         legs = db.query(models.MockBasketLeg).filter(models.MockBasketLeg.basket_id == b.id).all()
+        serialized_legs = [_serialize(l) for l in legs]
+
+        required_margin = 0.0
+        if legs:
+            scripts = []
+            for leg in legs:
+                leg_price = float(leg.price or 0.0)
+                if leg_price <= 0 and leg.symbol:
+                    leg_price = _get_ltp(leg.symbol, leg_price)
+                scripts.append(
+                    MarginScript(
+                        exchange_segment=leg.exchange_segment or "NSE_EQ",
+                        transaction_type=leg.transaction_type or "BUY",
+                        quantity=max(1, int(leg.quantity or 1)),
+                        product_type=leg.product_type or "MIS",
+                        security_id=str(leg.security_id or leg.symbol or ""),
+                        price=leg_price,
+                        symbol=leg.symbol,
+                    )
+                )
+
+            if scripts:
+                dhan_margin = await _dhan_margin_for_scripts(basket_user.id, scripts)
+                if dhan_margin and dhan_margin.get("margin") is not None:
+                    product_types = {str(s.product_type or "MIS").upper() for s in scripts}
+                    product_type = "MIS" if product_types == {"MIS"} else None
+                    required_margin = _apply_margin_multiplier(
+                        float(dhan_margin.get("margin") or 0.0),
+                        basket_user,
+                        product_type,
+                    )
+
         result.append({
             "id": b.id,
             "name": b.name,
             "status": b.status,
-            "legs": [_serialize(l) for l in legs],
+            "requiredMargin": max(0.0, float(required_margin or 0.0)),
+            "availableMargin": float(effective_available_margin),
+            "legs": serialized_legs,
         })
     return {"data": result}
 
@@ -1509,9 +1615,10 @@ async def calculate_margin(req: MarginRequest, db: Session = Depends(get_db)):
     
     if dhan_margin:
         required = _apply_margin_multiplier(float(dhan_margin.get("margin") or 0.0), user, req.product_type)
+        effective_available_margin = await _resolve_available_margin(user.id, margin)
         return {
             "margin": required,
-            "availableMargin": margin.available_margin,
+            "availableMargin": effective_available_margin,
             "source": dhan_margin.get("source") or "DHAN_API",
             "raw": dhan_margin.get("raw"),
         }
@@ -1519,7 +1626,7 @@ async def calculate_margin(req: MarginRequest, db: Session = Depends(get_db)):
     # Dhan API failed - no fallback to local calculation
     return {
         "margin": None,
-        "availableMargin": margin.available_margin,
+        "availableMargin": await _resolve_available_margin(user.id, margin),
         "source": "DHAN_API_FAILED",
     }
 
@@ -1543,9 +1650,10 @@ async def calculate_margin_multi(req: MultiMarginRequest, db: Session = Depends(
         product_types = {str(s.product_type or "MIS").upper() for s in req.scripts}
         product_type = "MIS" if product_types == {"MIS"} else None
         required = _apply_margin_multiplier(float(dhan_margin.get("margin") or 0.0), user, product_type)
+        effective_available_margin = await _resolve_available_margin(user.id, margin)
         return {
             "margin": required,
-            "availableMargin": margin.available_margin,
+            "availableMargin": effective_available_margin,
             "source": dhan_margin.get("source") or "DHAN_API",
             "raw": dhan_margin.get("raw"),
         }
@@ -1553,18 +1661,23 @@ async def calculate_margin_multi(req: MultiMarginRequest, db: Session = Depends(
     # Dhan API failed - no fallback to local calculation
     return {
         "margin": None,
-        "availableMargin": margin.available_margin,
+        "availableMargin": await _resolve_available_margin(user.id, margin),
         "source": "DHAN_API_FAILED",
     }
 
 
 @router.get("/margin/account")
-def margin_account(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+async def margin_account(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     user = db.query(models.UserAccount).filter(models.UserAccount.id == (user_id or 1)).first()
     if not user:
         user = _get_or_create_admin(db)
     margin = _get_or_create_margin(db, user.id)
-    return {"data": _serialize(margin)}
+    local_available = _safe_float(margin.available_margin, 0.0)
+    effective_available = await _resolve_available_margin(user.id, margin)
+    payload = _serialize(margin)
+    payload["available_margin"] = float(effective_available)
+    payload["source"] = "DHAN_FUNDLIMIT" if abs(effective_available - local_available) > 1e-9 else "LOCAL_MARGIN_ACCOUNT"
+    return {"data": payload}
 
 
 @router.post("/margin/portfolio")
@@ -1573,6 +1686,7 @@ async def portfolio_margin(req: PortfolioMarginRequest, db: Session = Depends(ge
     if not user:
         user = _get_or_create_admin(db)
     margin = _get_or_create_margin(db, user.id)
+    effective_available_margin = await _resolve_available_margin(user.id, margin)
 
     # Convert portfolio positions to Dhan API format
     fno_positions = fetch_fno_positions(user.id)
@@ -1608,7 +1722,7 @@ async def portfolio_margin(req: PortfolioMarginRequest, db: Session = Depends(ge
     if not portfolio_scripts:
         return {
             "margin": 0.0,
-            "availableMargin": margin.available_margin,
+            "availableMargin": effective_available_margin,
             "source": "DHAN_API_EMPTY_PORTFOLIO",
             "span": {"total_margin": 0.0},
             "mcx": {"total_margin": 0.0},
@@ -1625,7 +1739,7 @@ async def portfolio_margin(req: PortfolioMarginRequest, db: Session = Depends(ge
         if margin_result and "margin" in margin_result:
             return {
                 "margin": float(margin_result["margin"]),
-                "availableMargin": margin.available_margin,
+                "availableMargin": effective_available_margin,
                 "source": "DHAN_API_PORTFOLIO",
                 "span": {"total_margin": float(margin_result.get("margin", 0.0))},
                 "mcx": {"total_margin": 0.0},  # Dhan API returns combined margin
@@ -1637,7 +1751,7 @@ async def portfolio_margin(req: PortfolioMarginRequest, db: Session = Depends(ge
     # Dhan API failed - no fallback to local calculation
     return {
         "margin": None,
-        "availableMargin": margin.available_margin,
+        "availableMargin": effective_available_margin,
         "source": "DHAN_API_PORTFOLIO_FAILED",
         "span": {"total_margin": 0.0},
         "mcx": {"total_margin": 0.0},
@@ -1692,7 +1806,19 @@ def list_users(user=Depends(get_current_user), db: Session = Depends(get_db)):
     else:
         # ADMIN: hide SUPER_ADMIN accounts
         users = db.query(models.UserAccount).filter(models.UserAccount.role != "SUPER_ADMIN").all()
-    return {"data": [_serialize(u) for u in users]}
+    payload = []
+    for u in users:
+        item = _serialize(u)
+        margin = _get_or_create_margin(db, u.id)
+        allotted = _safe_float(u.wallet_balance, 0.0) * _normalize_margin_multiplier(u.margin_multiplier)
+        available = _safe_float(margin.available_margin, 0.0)
+        used_stored = _safe_float(margin.used_margin, 0.0)
+        used = used_stored if used_stored > 0 else max(0.0, allotted - available)
+        item["margin_allotted"] = allotted
+        item["margin_available"] = available
+        item["margin_used"] = used
+        payload.append(item)
+    return {"data": payload}
 
 
 @router.post("/admin/users")
@@ -1728,6 +1854,17 @@ def create_user(req: UserRequest, user=Depends(get_current_user), db: Session = 
     db.add(user)
     db.commit()
     db.refresh(user)
+    opening_balance = float(user.wallet_balance or 0.0)
+    db.add(
+        models.LedgerEntry(
+            user_id=user.id,
+            entry_type="OPENING",
+            credit=opening_balance,
+            debit=0.0,
+            balance=opening_balance,
+            remarks="Opening balance",
+        )
+    )
     margin = models.MarginAccount(
         user_id=user.id,
         available_margin=(user.wallet_balance or 0.0) * _normalize_margin_multiplier(user.margin_multiplier),
@@ -1751,7 +1888,12 @@ def update_user(user_id: int, req: UserUpdateRequest, user=Depends(get_current_u
         if target.role == "ADMIN" and target.id != user.id:
             raise HTTPException(status_code=403, detail="Insufficient permissions to modify other ADMIN accounts")
     margin = _get_or_create_margin(db, target.id)
-    previous_wallet = target.wallet_balance or 0.0
+    if req.wallet_balance is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Direct wallet balance edits are disabled. Use ledger adjustments (credit/debit) instead.",
+        )
+
     previous_multiplier = _normalize_margin_multiplier(target.margin_multiplier)
     if req.username is not None:
         target.username = req.username
@@ -1766,8 +1908,6 @@ def update_user(user_id: int, req: UserUpdateRequest, user=Depends(get_current_u
         target.status = req.status
     if req.allowed_segments is not None:
         target.allowed_segments = req.allowed_segments
-    if req.wallet_balance is not None:
-        target.wallet_balance = req.wallet_balance
     if req.margin_multiplier is not None:
         target.margin_multiplier = _normalize_margin_multiplier(req.margin_multiplier)
     if req.brokerage_plan_id is not None:
@@ -1777,19 +1917,12 @@ def update_user(user_id: int, req: UserUpdateRequest, user=Depends(get_current_u
         target.password_salt = salt
         target.password_hash = digest
         target.require_password_reset = True
-    if req.wallet_balance is not None or req.margin_multiplier is not None:
+    if req.margin_multiplier is not None:
         updated_multiplier = _normalize_margin_multiplier(target.margin_multiplier)
-        if req.margin_multiplier is not None:
-            margin.available_margin = max(
-                0.0,
-                (target.wallet_balance or 0.0) * updated_multiplier - (margin.used_margin or 0.0)
-            )
-        elif req.wallet_balance is not None:
-            delta_wallet = (target.wallet_balance or 0.0) - previous_wallet
-            margin.available_margin = max(
-                0.0,
-                margin.available_margin + (delta_wallet * previous_multiplier)
-            )
+        margin.available_margin = max(
+            0.0,
+            (target.wallet_balance or 0.0) * updated_multiplier - (margin.used_margin or 0.0)
+        )
         margin.updated_at = ist_now()
     target.updated_at = ist_now()
     db.commit()

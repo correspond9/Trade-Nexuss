@@ -300,6 +300,30 @@ class ExecutionEngine:
         )
         db.add(event)
 
+    def _record_ledger(self, db: Session, user: models.UserAccount, *, credit: float, debit: float, remarks: str) -> None:
+        last_entry = (
+            db.query(models.LedgerEntry)
+            .filter(models.LedgerEntry.user_id == user.id)
+            .order_by(models.LedgerEntry.created_at.desc(), models.LedgerEntry.id.desc())
+            .first()
+        )
+        base_balance = (
+            last_entry.balance
+            if last_entry and last_entry.balance is not None
+            else (user.wallet_balance or 0.0)
+        )
+        next_balance = float(base_balance) + float(credit or 0.0) - float(debit or 0.0)
+        user.wallet_balance = next_balance
+        entry = models.LedgerEntry(
+            user_id=user.id,
+            entry_type="TRADE_PNL",
+            credit=float(credit or 0.0),
+            debit=float(debit or 0.0),
+            balance=next_balance,
+            remarks=remarks,
+        )
+        db.add(entry)
+
     def _apply_fill(self, db: Session, order: models.MockOrder, fill_price: float, fill_qty: int) -> None:
         previous_filled_qty = int(order.filled_qty or 0)
         new_filled_qty = previous_filled_qty + int(fill_qty)
@@ -362,12 +386,21 @@ class ExecutionEngine:
         margin.updated_at = ist_now()
 
         if order.transaction_type == "BUY":
-            user.wallet_balance = (user.wallet_balance or 0.0) - (turnover + brokerage)
-            entry = models.LedgerEntry(user_id=user.id, entry_type="TRADE_PNL", credit=0.0, debit=turnover + brokerage, balance=user.wallet_balance, remarks="Order filled BUY")
+            self._record_ledger(
+                db,
+                user,
+                credit=0.0,
+                debit=turnover + brokerage,
+                remarks="Order filled BUY",
+            )
         else:
-            user.wallet_balance = (user.wallet_balance or 0.0) + (turnover - brokerage)
-            entry = models.LedgerEntry(user_id=user.id, entry_type="TRADE_PNL", credit=turnover - brokerage, debit=0.0, balance=user.wallet_balance, remarks="Order filled SELL")
-        db.add(entry)
+            self._record_ledger(
+                db,
+                user,
+                credit=turnover - brokerage,
+                debit=0.0,
+                remarks="Order filled SELL",
+            )
 
         position = (
             db.query(models.MockPosition)

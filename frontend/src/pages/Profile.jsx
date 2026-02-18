@@ -132,10 +132,46 @@ const Profile = () => {
       try {
         const response = await apiService.get('/admin/ledger', { user_id: user.id });
         const data = response?.data || [];
-        const mapped = data.map((entry) => {
+        const openingBalance = Number(user?.wallet_balance || 0);
+
+        const normalized = data.map((entry) => {
           const createdAt = entry.created_at || new Date().toISOString();
           const dateObj = new Date(createdAt);
           const credit = Number(entry.credit || 0);
+          const debit = Number(entry.debit || 0);
+          return {
+            id: entry.id,
+            createdAt,
+            dateObj,
+            credit,
+            debit,
+            entry,
+          };
+        });
+
+        const ascending = [...normalized].sort((a, b) => {
+          const tA = new Date(a.createdAt).getTime() || 0;
+          const tB = new Date(b.createdAt).getTime() || 0;
+          if (tA !== tB) return tA - tB;
+          return Number(a.id || 0) - Number(b.id || 0);
+        });
+
+        let runningBalance = openingBalance;
+        const runningById = new Map();
+        ascending.forEach((row) => {
+          runningBalance += row.credit - row.debit;
+          runningById.set(row.id, runningBalance);
+        });
+
+        const mapped = [...normalized]
+          .sort((a, b) => {
+            const tA = new Date(a.createdAt).getTime() || 0;
+            const tB = new Date(b.createdAt).getTime() || 0;
+            if (tA !== tB) return tB - tA;
+            return Number(b.id || 0) - Number(a.id || 0);
+          })
+          .map((row) => {
+            const { entry, dateObj, credit } = row;
           const debit = Number(entry.debit || 0);
           return {
             id: entry.id,
@@ -144,7 +180,7 @@ const Profile = () => {
             category: entry.entry_type || 'UNKNOWN',
             description: entry.remarks || '-',
             amount: credit > 0 ? credit : -debit,
-            balance: entry.balance || 0,
+            balance: Number(runningById.get(entry.id) || openingBalance),
           };
         });
         setLedgerRows(mapped);
@@ -443,6 +479,9 @@ const Profile = () => {
         {activeTab === 'ledger' && (
           <div className="p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Ledger</h2>
+            <div className="mb-3 text-sm text-gray-700">
+              Opening Balance: <span className="font-semibold">{Number(user?.wallet_balance || 0).toFixed(2)}</span>
+            </div>
             {ledgerLoading ? (
               <div className="text-sm text-gray-500">Loading ledger...</div>
             ) : (
