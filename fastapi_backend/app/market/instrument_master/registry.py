@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 from datetime import datetime
+import threading
 
 MASTER_PATH = Path(__file__).parent / "api-scrip-master-detailed.csv"
 
@@ -26,72 +27,85 @@ class InstrumentRegistry:
         self.strike_steps = {}  # symbol -> strike_step (float)
         self.mcx_nearest_cache = {}  # symbol -> nearest MCX future cache
         self.loaded = False
+        self._load_lock = threading.Lock()
         
     def load(self):
         """Load and index the instrument master CSV"""
         if self.loaded:
             return
-        
-        with open(MASTER_PATH, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            
-            for row in reader:
-                self.instruments.append(row)
-                
-                symbol = row.get("SYMBOL_NAME", "").strip()
-                expiry = row.get("SM_EXPIRY_DATE", "").strip()
-                segment = row.get("SEGMENT", "").strip()
-                instrument_type = row.get("INSTRUMENT_TYPE", "").strip()
-                strike_price = row.get("STRIKE_PRICE", "").strip()
-                underlying = row.get("UNDERLYING_SYMBOL", "").strip().upper()
-                
-                # Index by symbol
-                if symbol:
-                    self.by_symbol[symbol].append(row)
-                
-                # Index by (symbol, expiry)
-                if symbol and expiry:
-                    self.by_symbol_expiry[(symbol, expiry)].append(row)
 
-                # Index by underlying symbol
-                if underlying:
-                    self.by_underlying[underlying].append(row)
-                    if expiry:
-                        self.by_underlying_expiry[(underlying, expiry)].append(row)
-                
-                # Index by segment
-                if segment:
-                    self.by_segment[segment].append(row)
-                
-                # Track F&O stocks
-                if instrument_type in ("FUTSTK", "OPTSTK"):
-                    base_symbol = row.get("UNDERLYING_SYMBOL", symbol).strip()
-                    self.f_o_stocks.add(base_symbol)
-                
-                # Cache strike steps (from first occurrence of each symbol)
-                if symbol and strike_price:
-                    try:
-                        step = float(strike_price)
-                        if step > 0 and symbol not in self.strike_steps:
-                            self.strike_steps[symbol] = step
-                    except (ValueError, TypeError):
-                        pass
-        
-        self.loaded = True
-        print(f"[OK] Instrument Registry loaded: {len(self.instruments)} records")
-        print(f"[OK] F&O eligible stocks: {len(self.f_o_stocks)}")
-        print(f"[OK] Unique symbols: {len(self.by_symbol)}")
+        with self._load_lock:
+            if self.loaded:
+                return
+
+            with open(MASTER_PATH, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+
+                for row in reader:
+                    self.instruments.append(row)
+
+                    symbol = row.get("SYMBOL_NAME", "").strip()
+                    expiry = row.get("SM_EXPIRY_DATE", "").strip()
+                    segment = row.get("SEGMENT", "").strip()
+                    instrument_type = row.get("INSTRUMENT_TYPE", "").strip()
+                    strike_price = row.get("STRIKE_PRICE", "").strip()
+                    underlying = row.get("UNDERLYING_SYMBOL", "").strip().upper()
+
+                    # Index by symbol
+                    if symbol:
+                        self.by_symbol[symbol].append(row)
+
+                    # Index by (symbol, expiry)
+                    if symbol and expiry:
+                        self.by_symbol_expiry[(symbol, expiry)].append(row)
+
+                    # Index by underlying symbol
+                    if underlying:
+                        self.by_underlying[underlying].append(row)
+                        if expiry:
+                            self.by_underlying_expiry[(underlying, expiry)].append(row)
+
+                    # Index by segment
+                    if segment:
+                        self.by_segment[segment].append(row)
+
+                    # Track F&O stocks
+                    if instrument_type in ("FUTSTK", "OPTSTK"):
+                        base_symbol = row.get("UNDERLYING_SYMBOL", symbol).strip()
+                        self.f_o_stocks.add(base_symbol)
+
+                    # Cache strike steps (from first occurrence of each symbol)
+                    if symbol and strike_price:
+                        try:
+                            step = float(strike_price)
+                            if step > 0 and symbol not in self.strike_steps:
+                                self.strike_steps[symbol] = step
+                        except (ValueError, TypeError):
+                            pass
+
+            self.loaded = True
+            print(f"[OK] Instrument Registry loaded: {len(self.instruments)} records")
+            print(f"[OK] F&O eligible stocks: {len(self.f_o_stocks)}")
+            print(f"[OK] Unique symbols: {len(self.by_symbol)}")
+
+    def ensure_loaded(self) -> None:
+        """Load the instrument master lazily when needed."""
+        if not self.loaded:
+            self.load()
     
     def get_by_symbol(self, symbol: str) -> List[Dict]:
         """Get all instruments for a symbol across all expiries"""
+        self.ensure_loaded()
         return self.by_symbol.get(symbol, [])
     
     def get_by_symbol_expiry(self, symbol: str, expiry: str) -> List[Dict]:
         """Get instruments for a specific symbol+expiry"""
+        self.ensure_loaded()
         return self.by_symbol_expiry.get((symbol, expiry), [])
     
     def get_strike_step(self, symbol: str) -> float:
         """Get the strike step for a symbol (or default to 1.0)"""
+        self.ensure_loaded()
         if not symbol:
             return 1.0
         step = self.strike_steps.get(symbol)
@@ -122,6 +136,7 @@ class InstrumentRegistry:
     
     def get_expiries_for_symbol(self, symbol: str) -> List[str]:
         """Get all unique expiries for a symbol"""
+        self.ensure_loaded()
         expiries = set()
         for record in self.by_symbol.get(symbol, []):
             expiry = record.get("SM_EXPIRY_DATE", "").strip()
@@ -131,6 +146,7 @@ class InstrumentRegistry:
 
     def get_expiries_for_underlying(self, symbol: str) -> List[str]:
         """Get all unique expiries for an underlying symbol (options/futures)."""
+        self.ensure_loaded()
         if not symbol:
             return []
         expiry_map = {}
@@ -145,10 +161,12 @@ class InstrumentRegistry:
     
     def is_f_o_eligible(self, symbol: str) -> bool:
         """Check if stock has F&O contracts"""
+        self.ensure_loaded()
         return symbol in self.f_o_stocks
     
     def get_equity_stocks_nse(self, limit: int = 2000) -> List[Dict]:
         """Get top N NSE equity stocks (SEGMENT='E')"""
+        self.ensure_loaded()
         nse_equity = [
             r for r in self.by_segment.get("E", [])
             if r.get("EXCH_ID", "").strip() == "NSE"
@@ -167,6 +185,7 @@ class InstrumentRegistry:
         Returns: (strikes_list, atm_strike)
         where strikes_list is the ATM + symmetric strikes around it
         """
+        self.ensure_loaded()
         strike_step = self.get_strike_step(symbol)
         
         # Calculate ATM
