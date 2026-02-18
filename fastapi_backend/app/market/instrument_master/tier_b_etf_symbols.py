@@ -12,8 +12,8 @@ ETF_SOURCE_FILE = "MW-ETF-16-Feb-2026.csv"
 
 @lru_cache(maxsize=1)
 def get_tier_b_etf_symbols() -> Set[str]:
-    """Load Tier-B ETF symbols (disabled by default; equities are Tier-A watchlist-only)."""
-    enabled = (os.getenv("ENABLE_TIER_B_EQUITY") or "").strip().lower() in {"1", "true", "yes", "on"}
+    """Load Tier-B ETF symbols (optional; controlled independently from Tier-B equities)."""
+    enabled = (os.getenv("ENABLE_TIER_B_ETF") or "").strip().lower() in {"1", "true", "yes", "on"}
     if not enabled:
         return set()
 

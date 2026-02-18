@@ -481,7 +481,7 @@ def etf_tier_b_status():
 
         if not expected:
             status = "disabled"
-            message = "Tier-B equity feed disabled (equities are Tier-A watchlist-only)"
+            message = "Tier-B ETF feed disabled"
         elif not subscribed_etfs:
             status = "offline"
             message = "No Tier-B ETF subscriptions active"

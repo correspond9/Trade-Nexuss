@@ -348,8 +348,83 @@ def _find_next_expiry(symbol: str, exchange_id: Optional[int] = None) -> Optiona
 
 
 def ensure_tier_b_etf_subscriptions() -> tuple[int, int]:
-    """Tier-B equity preload disabled. Equity symbols are Tier-A watchlist-only."""
-    return 0, 0
+    """Ensure Tier-B ETF symbols are subscribed (separate from Tier-B equities)."""
+    try:
+        from app.market.subscription_manager import SUBSCRIPTION_MGR
+        from app.market.instrument_master.tier_b_etf_symbols import get_tier_b_etf_symbols
+
+        symbols = sorted(get_tier_b_etf_symbols() or set())
+        if not symbols:
+            return 0, 0
+
+        active_tier_b = SUBSCRIPTION_MGR.list_active_subscriptions(tier="TIER_B")
+        existing_tokens = {str(row.get("token") or "") for row in active_tier_b}
+
+        subscribed = 0
+        failed = 0
+        for symbol in symbols:
+            token = f"ETF_{symbol.upper()}"
+            if token in existing_tokens:
+                continue
+
+            ok, _msg, _ws_id = SUBSCRIPTION_MGR.subscribe(
+                token=token,
+                symbol=symbol,
+                expiry=None,
+                strike=None,
+                option_type=None,
+                tier="TIER_B",
+            )
+            if ok:
+                subscribed += 1
+            else:
+                failed += 1
+
+        if subscribed:
+            SUBSCRIPTION_MGR.sync_to_db()
+        return subscribed, failed
+    except Exception:
+        return 0, 0
+
+
+def ensure_tier_b_equity_subscriptions() -> tuple[int, int]:
+    """Ensure Tier-B EQUITY symbols are subscribed (always-on equities)."""
+    try:
+        from app.market.subscription_manager import SUBSCRIPTION_MGR
+        from app.market.instrument_master.tier_a_equity_symbols import get_tier_a_equity_symbols
+
+        symbols = sorted(get_tier_a_equity_symbols() or set())
+        if not symbols:
+            return 0, 0
+
+        active_tier_b = SUBSCRIPTION_MGR.list_active_subscriptions(tier="TIER_B")
+        existing_tokens = {str(row.get("token") or "") for row in active_tier_b}
+
+        subscribed = 0
+        failed = 0
+        for symbol in symbols:
+            token = f"EQUITY_{symbol.upper()}"
+            if token in existing_tokens:
+                continue
+
+            ok, _msg, _ws_id = SUBSCRIPTION_MGR.subscribe(
+                token=token,
+                symbol=symbol,
+                expiry=None,
+                strike=None,
+                option_type=None,
+                tier="TIER_B",
+            )
+            if ok:
+                subscribed += 1
+            else:
+                failed += 1
+
+        if subscribed:
+            SUBSCRIPTION_MGR.sync_to_db()
+        return subscribed, failed
+    except Exception:
+        return 0, 0
 
 
 def purge_tier_b_equity_subscriptions() -> tuple[int, int]:
@@ -507,7 +582,20 @@ async def load_tier_b_chains():
                             else:
                                 total_failed += 1
 
-        # Tier-B equity preload intentionally disabled.
+        # Load always-on Tier-B equities (separate from ETF list).
+        print("\n[EQUITIES] Loading Tier-B always-on equities...")
+        eq_subscribed, eq_failed = await asyncio.to_thread(ensure_tier_b_equity_subscriptions)
+        total_subscribed += int(eq_subscribed)
+        total_failed += int(eq_failed)
+        print(f"  ✓ Tier-B equities subscribed: {eq_subscribed} | failed: {eq_failed}")
+
+        # Load optional Tier-B ETFs (if enabled by env).
+        print("\n[ETFs] Loading Tier-B ETFs (if enabled)...")
+        etf_expected = len(get_tier_b_etf_symbols() or set())
+        etf_subscribed, etf_failed = await asyncio.to_thread(ensure_tier_b_etf_subscriptions)
+        total_subscribed += int(etf_subscribed)
+        total_failed += int(etf_failed)
+        print(f"  ✓ Tier-B ETFs expected: {etf_expected}, subscribed: {etf_subscribed} | failed: {etf_failed}")
 
         # Print summary
         stats = SUBSCRIPTION_MGR.get_ws_stats()
@@ -615,9 +703,13 @@ async def on_start():
         await asyncio.to_thread(SUBSCRIPTION_MGR._load_from_database)
         logger.info("[STARTUP] Subscriptions loaded from database")
 
-        # Ensure legacy Tier-B equity subscriptions are removed at startup.
-        eq_removed, eq_failed = await asyncio.to_thread(purge_tier_b_equity_subscriptions)
-        logger.info("[STARTUP] Tier-B EQUITY purge complete (removed=%s, failed=%s)", eq_removed, eq_failed)
+        # Optional migration toggle: purge legacy Tier-B EQUITY subscriptions only if explicitly requested.
+        purge_tier_b_equity = _env_bool("PURGE_TIER_B_EQUITY_ON_STARTUP", default=False)
+        if purge_tier_b_equity:
+            eq_removed, eq_failed = await asyncio.to_thread(purge_tier_b_equity_subscriptions)
+            logger.warning("[STARTUP] Tier-B EQUITY purge enabled (removed=%s, failed=%s)", eq_removed, eq_failed)
+        else:
+            logger.info("[STARTUP] Tier-B EQUITY purge skipped (PURGE_TIER_B_EQUITY_ON_STARTUP=false)")
 
         load_tier_b = _env_bool("STARTUP_LOAD_TIER_B", default=not is_production)
         if load_tier_b:
