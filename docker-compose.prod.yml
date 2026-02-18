@@ -27,6 +27,7 @@ services:
       - STARTUP_START_STREAMS=true
       - PURGE_TIER_B_EQUITY_ON_STARTUP=false
       - ENABLE_TIER_B_ETF=false
+      - TIER_B_EQUITY_SYMBOLS=RELIANCE,NYKAA
       - DISABLE_DHAN_WS=false
       - DISABLE_MARKET_STREAMS=false
     env_file:

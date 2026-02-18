@@ -316,6 +316,14 @@ class SubscriptionManager:
                     allowed_equities = get_tier_a_equity_symbols()
                 except Exception:
                     allowed_equities = set()
+
+                # Tier-B equities are controlled via a small allowlist (env), not the ETF list.
+                try:
+                    raw_tb = (os.getenv("TIER_B_EQUITY_SYMBOLS") or "").strip()
+                    tb_equities = {s.strip().upper() for s in raw_tb.split(",") if s.strip()}
+                    allowed_equities |= tb_equities
+                except Exception:
+                    pass
                 allowed_symbols = set(REGISTRY.f_o_stocks) | allowed_indices | set(mcx_watch_symbols().keys()) | allowed_equities
                 if canonical_symbol(symbol) not in allowed_symbols:
                     return (False, "NOT_ALLOWED", None)

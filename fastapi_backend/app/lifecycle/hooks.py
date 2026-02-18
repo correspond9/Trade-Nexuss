@@ -388,12 +388,12 @@ def ensure_tier_b_etf_subscriptions() -> tuple[int, int]:
 
 
 def ensure_tier_b_equity_subscriptions() -> tuple[int, int]:
-    """Ensure Tier-B EQUITY symbols are subscribed (always-on equities)."""
+    """Ensure Tier-B EQUITY symbols are subscribed (small always-on equity allowlist)."""
     try:
         from app.market.subscription_manager import SUBSCRIPTION_MGR
-        from app.market.instrument_master.tier_a_equity_symbols import get_tier_a_equity_symbols
 
-        symbols = sorted(get_tier_a_equity_symbols() or set())
+        raw = (os.getenv("TIER_B_EQUITY_SYMBOLS") or "RELIANCE").strip()
+        symbols = sorted({s.strip().upper() for s in raw.split(",") if s.strip()})
         if not symbols:
             return 0, 0
 
