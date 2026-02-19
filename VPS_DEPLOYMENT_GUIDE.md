@@ -1,5 +1,12 @@
 # 🚀 VPS Deployment Guide - Broking Terminal V2
 
+## ✅ Simple Change Workflow (GitHub + Coolify)
+
+This arrangement works well:
+1. Share change requests in plain language.
+2. Implement and review code changes on GitHub.
+3. Redeploy manually from your Hostinger Coolify panel.
+
 ## Quick Setup (5 minutes)
 
 ### Prerequisites

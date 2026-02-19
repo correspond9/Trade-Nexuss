@@ -30,7 +30,9 @@ const Users = () => {
   const [actionError, setActionError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(user?.role);
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const showEditColumn = isAdmin;
+  const showHistoricColumn = isSuperAdmin;
   const showRemoveColumn = isAdmin;
   const [brokeragePlans, setBrokeragePlans] = useState([]);
 
@@ -251,6 +253,62 @@ const Users = () => {
     }
   };
 
+  const handleAddHistoricPosition = async (targetUser) => {
+    if (!isSuperAdmin || !targetUser) return;
+
+    const symbol = window.prompt('Symbol (e.g. NIFTY 50):');
+    if (symbol === null) return;
+    const quantityInput = window.prompt('Quantity:');
+    if (quantityInput === null) return;
+    const avgPriceInput = window.prompt('Average price:');
+    if (avgPriceInput === null) return;
+    const productType = (window.prompt('Product type (default MIS):') ?? 'MIS').trim() || 'MIS';
+    const exchangeSegment = (window.prompt('Exchange segment (default NSE_EQ):') ?? 'NSE_EQ').trim() || 'NSE_EQ';
+    const createdAt = window.prompt('Created at (optional ISO datetime, leave blank for now):') || '';
+
+    const quantity = Number(quantityInput);
+    const avgPrice = Number(avgPriceInput);
+    if (!symbol.trim()) {
+      setActionError('Symbol is required');
+      setTimeout(() => setActionError(null), 5000);
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity === 0) {
+      setActionError('Quantity must be a non-zero number (positive or negative)');
+      setTimeout(() => setActionError(null), 5000);
+      return;
+    }
+    if (!Number.isFinite(avgPrice) || avgPrice <= 0) {
+      setActionError('Average price must be a positive number');
+      setTimeout(() => setActionError(null), 5000);
+      return;
+    }
+
+    setActionError(null);
+    setActionLoading(true);
+    try {
+      const payload = {
+        user_id: targetUser.id,
+        symbol: symbol.trim(),
+        quantity,
+        avg_price: avgPrice,
+        product_type: productType,
+        exchange_segment: exchangeSegment,
+        merge: true
+      };
+      if (createdAt.trim()) {
+        payload.created_at = createdAt.trim();
+      }
+      await apiService.post('/admin/positions/backdate', payload);
+      alert(`Historic position added for ${targetUser.username || targetUser.id}`);
+    } catch (error) {
+      setActionError(error?.message || 'Failed to add historic position');
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const getStatusBadge = (status) => {
     const config = {
       ACTIVE: { bg: 'bg-green-100', text: 'text-green-800', icon: CheckCircle },
@@ -275,6 +333,7 @@ const Users = () => {
   );
 
   const paginatedUsers = filteredUsers.slice(0, showEntries);
+  const totalColumns = 10 + (showEditColumn ? 1 : 0) + 1 + (showHistoricColumn ? 1 : 0) + (showRemoveColumn ? 1 : 0);
 
   if (!isAdmin) {
     return (
@@ -353,6 +412,9 @@ const Users = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
                   )}
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
+                  {showHistoricColumn && (
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
+                  )}
                   {showRemoveColumn && (
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
                   )}
@@ -372,6 +434,7 @@ const Users = () => {
                   <td className="px-6 py-2"><input type="text" className="w-full border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Search" /></td>
                   {showEditColumn && <td className="px-6 py-2"></td>}
                   <td className="px-6 py-2"></td>
+                  {showHistoricColumn && <td className="px-6 py-2"></td>}
                   <td className="px-6 py-2"></td>
                   {showRemoveColumn && <td className="px-6 py-2"></td>}
                 </tr>
@@ -397,6 +460,17 @@ const Users = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <button onClick={() => handleAddFunds(user)} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-xs">Add Funds</button>
                     </td>
+                    {showHistoricColumn && (
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <button
+                          onClick={() => handleAddHistoricPosition(user)}
+                          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs disabled:opacity-50"
+                          disabled={actionLoading}
+                        >
+                          Add Historic Position
+                        </button>
+                      </td>
+                    )}
                     {showRemoveColumn && (
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <button
@@ -413,7 +487,7 @@ const Users = () => {
                 
                 {paginatedUsers.length === 0 && (
                   <tr>
-                    <td colSpan={showEditColumn || showRemoveColumn ? 13 : 11} className="px-6 py-4 text-center text-sm text-gray-500">No matching records found</td>
+                    <td colSpan={totalColumns} className="px-6 py-4 text-center text-sm text-gray-500">No matching records found</td>
                   </tr>
                 )}
               </tbody>
