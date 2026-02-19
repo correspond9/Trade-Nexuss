@@ -12,6 +12,14 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+def _ensure_dhan_enabled(purpose: str) -> None:
+    try:
+        from app.market.dhan_connection_guard import ensure_enabled
+        ensure_enabled(purpose)
+    except Exception as exc:
+        raise RuntimeError(str(exc))
+
+
 def _ensure_local_sdk_on_path() -> None:
     try:
         root = Path(__file__).resolve().parents[3]
@@ -84,6 +92,7 @@ def _client_from_creds(creds: Dict[str, str]):
 
 def sdk_quote_data(creds: Dict[str, str], securities: Dict[str, Any]) -> Dict[str, Any]:
     try:
+        _ensure_dhan_enabled("Dhan REST")
         client = _client_from_creds(creds)
         response = client.quote_data(securities)
         return _parse_sdk_response(response)
@@ -91,7 +100,7 @@ def sdk_quote_data(creds: Dict[str, str], securities: Dict[str, Any]) -> Dict[st
         return {
             "ok": False,
             "data": None,
-            "error_kind": "other",
+            "error_kind": "disabled" if "blocked" in str(exc).lower() else "other",
             "error": str(exc),
         }
 
@@ -102,6 +111,7 @@ def sdk_ltp_data(creds: Dict[str, str], securities: Dict[str, Any]) -> Dict[str,
     Docs: https://dhanhq.co/docs/v2/market-quote/#ticker-data
     """
     try:
+        _ensure_dhan_enabled("Dhan REST")
         client_id = str(creds.get("client_id") or "").strip()
         access_token = str(creds.get("access_token") or "").strip()
         if not client_id or not access_token:
@@ -121,13 +131,14 @@ def sdk_ltp_data(creds: Dict[str, str], securities: Dict[str, Any]) -> Dict[str,
         return {
             "ok": False,
             "data": None,
-            "error_kind": "other",
+            "error_kind": "disabled" if "blocked" in str(exc).lower() else "other",
             "error": str(exc),
         }
 
 
 def sdk_expiry_list(creds: Dict[str, str], under_security_id: int, under_exchange_segment: str) -> Dict[str, Any]:
     try:
+        _ensure_dhan_enabled("Dhan REST")
         client = _client_from_creds(creds)
         response = client.expiry_list(int(under_security_id), str(under_exchange_segment))
         return _parse_sdk_response(response)
@@ -135,7 +146,7 @@ def sdk_expiry_list(creds: Dict[str, str], under_security_id: int, under_exchang
         return {
             "ok": False,
             "data": None,
-            "error_kind": "other",
+            "error_kind": "disabled" if "blocked" in str(exc).lower() else "other",
             "error": str(exc),
         }
 
@@ -147,6 +158,7 @@ def sdk_option_chain(
     expiry: str,
 ) -> Dict[str, Any]:
     try:
+        _ensure_dhan_enabled("Dhan REST")
         client = _client_from_creds(creds)
         response = client.option_chain(int(under_security_id), str(under_exchange_segment), str(expiry))
         return _parse_sdk_response(response)
@@ -154,7 +166,7 @@ def sdk_option_chain(
         return {
             "ok": False,
             "data": None,
-            "error_kind": "other",
+            "error_kind": "disabled" if "blocked" in str(exc).lower() else "other",
             "error": str(exc),
         }
 
@@ -170,6 +182,7 @@ def sdk_margin_calculator(
     trigger_price: float = 0,
 ) -> Dict[str, Any]:
     try:
+        _ensure_dhan_enabled("Dhan REST")
         client = _client_from_creds(creds)
         response = client.margin_calculator(
             security_id=str(security_id),
@@ -185,9 +198,16 @@ def sdk_margin_calculator(
         return {
             "ok": False,
             "data": None,
-            "error_kind": "other",
+            "error_kind": "disabled" if "blocked" in str(exc).lower() else "other",
             "error": str(exc),
         }
+
+
+def clear_sdk_client_cache() -> None:
+    try:
+        _get_client.cache_clear()
+    except Exception:
+        pass
 
 
 async def sdk_quote_data_async(creds: Dict[str, str], securities: Dict[str, Any]) -> Dict[str, Any]:

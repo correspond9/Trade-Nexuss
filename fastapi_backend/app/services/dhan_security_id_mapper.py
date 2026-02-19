@@ -46,6 +46,14 @@ class DhanSecurityIdMapper:
 
                 logger.info("Loading DhanHQ security IDs from official CSV...")
 
+                # Emergency admin disconnect: do not hit any Dhan-hosted endpoints.
+                try:
+                    from app.market.dhan_connection_guard import ensure_enabled
+                    ensure_enabled("Dhan REST")
+                except Exception as exc:
+                    logger.warning("Dhan security master download blocked: %s", exc)
+                    return False
+
                 url = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
                 response = requests.get(url, timeout=30)
                 response.raise_for_status()

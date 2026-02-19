@@ -1,5 +1,5 @@
 // Unified SuperAdmin Component - Settings + Monitoring in One View
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiService } from '../services/apiService';
 import { Settings, Eye } from 'lucide-react';
@@ -66,6 +66,48 @@ const SuperAdmin = () => {
   const [forceExitMsg, setForceExitMsg] = useState('');
   const [forceExitResult, setForceExitResult] = useState(null);
   const [instrumentSuggestions, setInstrumentSuggestions] = useState([]);
+
+  // Emergency Dhan connection toggle
+  const [dhanConnStatus, setDhanConnStatus] = useState(null);
+  const [dhanConnLoading, setDhanConnLoading] = useState(false);
+  const [dhanConnBusy, setDhanConnBusy] = useState(false);
+  const [dhanConnError, setDhanConnError] = useState('');
+  const [dhanConnReason, setDhanConnReason] = useState('');
+
+  const fetchDhanConnStatus = useCallback(async () => {
+    setDhanConnLoading(true);
+    setDhanConnError('');
+    try {
+      const res = await apiService.get('/admin/dhan-connection/status');
+      setDhanConnStatus(res?.data || null);
+    } catch (e) {
+      setDhanConnError(e?.message || 'Failed to load Dhan connection status');
+    } finally {
+      setDhanConnLoading(false);
+    }
+  }, []);
+
+  const setDhanConnEnabled = useCallback(async (enabled) => {
+    setDhanConnBusy(true);
+    setDhanConnError('');
+    try {
+      const payload = enabled
+        ? { enabled: true }
+        : { enabled: false, reason: (dhanConnReason || '').trim() || undefined };
+      const res = await apiService.post('/admin/dhan-connection', payload);
+      setDhanConnStatus(res?.data || null);
+      if (enabled) setDhanConnReason('');
+    } catch (e) {
+      setDhanConnError(e?.message || 'Failed to update Dhan connection state');
+    } finally {
+      setDhanConnBusy(false);
+    }
+  }, [dhanConnReason]);
+
+  useEffect(() => {
+    if (activeTab !== 'settings') return;
+    fetchDhanConnStatus();
+  }, [activeTab, fetchDhanConnStatus]);
 
   // Handle save with error handling
   const handleSave = async () => {
@@ -818,6 +860,95 @@ const SuperAdmin = () => {
                 <div className="flex items-center mb-6">
                   <Eye className="w-5 h-5 text-green-600 mr-2" />
                   <h2 className="text-lg font-semibold text-gray-900">System Monitoring</h2>
+                </div>
+
+                {/* Emergency Connect/Disconnect */}
+                <div className="mb-6 border rounded-lg p-4 bg-gray-50">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">Emergency Dhan Connect / Disconnect</div>
+                      <div className="text-xs text-gray-600 mt-1">
+                        Disconnect closes Dhan WebSocket and blocks ALL Dhan REST calls until manually re-enabled.
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="px-3 py-2 text-xs rounded border bg-white hover:bg-gray-100"
+                        onClick={fetchDhanConnStatus}
+                        disabled={dhanConnLoading || dhanConnBusy}
+                        title="Refresh status"
+                      >
+                        {dhanConnLoading ? 'Refreshing…' : 'Refresh'}
+                      </button>
+
+                      {dhanConnStatus?.effective_enabled ? (
+                        <button
+                          className="px-3 py-2 text-xs rounded bg-red-600 text-white hover:bg-red-700"
+                          onClick={() => setDhanConnEnabled(false)}
+                          disabled={dhanConnBusy}
+                          title="Emergency disconnect"
+                        >
+                          {dhanConnBusy ? 'Disconnecting…' : 'Disconnect'}
+                        </button>
+                      ) : (
+                        <button
+                          className="px-3 py-2 text-xs rounded bg-green-600 text-white hover:bg-green-700"
+                          onClick={() => setDhanConnEnabled(true)}
+                          disabled={dhanConnBusy || dhanConnStatus?.env_forced_disabled}
+                          title={dhanConnStatus?.env_forced_disabled ? 'Disabled by env flag (DISABLE_DHAN_WS/BACKEND_OFFLINE/DISABLE_MARKET_STREAMS)' : 'Connect'}
+                        >
+                          {dhanConnBusy ? 'Connecting…' : 'Connect'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 text-xs">
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <span className={`px-2 py-1 rounded ${dhanConnStatus?.effective_enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {dhanConnStatus?.effective_enabled ? 'ENABLED' : 'DISABLED'}
+                      </span>
+                      {dhanConnStatus?.env_forced_disabled && (
+                        <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-900">
+                          Env forced disabled
+                        </span>
+                      )}
+                      {dhanConnStatus?.manual_enabled === false && (
+                        <span className="px-2 py-1 rounded bg-gray-200 text-gray-900">
+                          Manual disconnect
+                        </span>
+                      )}
+                      {dhanConnStatus?.manual_updated_at && (
+                        <span className="text-gray-600">Updated: {dhanConnStatus.manual_updated_at}</span>
+                      )}
+                      {dhanConnStatus?.manual_updated_by && (
+                        <span className="text-gray-600">By: {dhanConnStatus.manual_updated_by}</span>
+                      )}
+                    </div>
+
+                    {!dhanConnStatus?.effective_enabled && (
+                      <div className="mt-3">
+                        <label className="block text-[11px] text-gray-600 font-semibold mb-1">Reason (optional)</label>
+                        <input
+                          type="text"
+                          value={dhanConnReason}
+                          onChange={(e) => setDhanConnReason(e.target.value)}
+                          className="w-full border rounded px-3 py-2 text-xs"
+                          placeholder="e.g. Emergency: avoid ban / market closed / debugging"
+                          disabled={dhanConnBusy}
+                        />
+                        {dhanConnStatus?.manual_reason && (
+                          <div className="text-[11px] text-gray-600 mt-1">Last reason: {dhanConnStatus.manual_reason}</div>
+                        )}
+                      </div>
+                    )}
+
+                    {dhanConnError && (
+                      <div className="mt-3 p-2 rounded bg-red-100 text-red-800 border border-red-200">
+                        {dhanConnError}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 
                 {/* System Monitoring Component */}

@@ -1363,6 +1363,20 @@ def start_live_feed():
     - Tier A: User watchlist items (dynamic - changes as users add/remove)
     """
     global _started, _market_feed
+
+    # Hard safety switch: never attempt outbound Dhan connections when streams are disabled.
+    flag = (os.getenv("DISABLE_DHAN_WS") or os.getenv("BACKEND_OFFLINE") or os.getenv("DISABLE_MARKET_STREAMS") or "").strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        print("[INFO] Live feed start skipped (streams disabled via env flag)")
+        return
+
+    # Runtime admin kill-switch.
+    try:
+        from app.market.dhan_connection_guard import ensure_enabled
+        ensure_enabled("Dhan WebSocket")
+    except Exception:
+        print("[INFO] Live feed start skipped (manually disconnected via admin switch)")
+        return
     
     with _started_lock:
         if _started:
@@ -1372,6 +1386,7 @@ def start_live_feed():
         _started = True
     
     def run_feed():
+        global _market_feed
         # Ensure an event loop exists in this thread (required by dhanhq)
         try:
             asyncio.get_running_loop()
@@ -1383,6 +1398,26 @@ def start_live_feed():
         
         while True:
             try:
+                # Emergency admin disconnect: keep WS closed and do not attempt reconnect.
+                try:
+                    from app.market.dhan_connection_guard import is_enabled
+                    if not is_enabled():
+                        if _market_feed:
+                            try:
+                                _market_feed.close_connection()
+                            except Exception:
+                                pass
+                        try:
+                            from app.market.ws_manager import get_ws_manager
+                            get_ws_manager().disconnect(1, error="manually_disconnected")
+                        except Exception:
+                            pass
+                        time.sleep(2)
+                        continue
+                except Exception:
+                    # If guard import fails for any reason, do not block connectivity.
+                    pass
+
                 # ========== RATE LIMITING: CHECK IF WE CAN ATTEMPT CONNECTION ==========
                 if not _should_attempt_connection():
                     time.sleep(5)  # Check again in 5 seconds

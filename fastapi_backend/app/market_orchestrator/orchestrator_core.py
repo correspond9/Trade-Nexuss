@@ -128,6 +128,15 @@ class MarketDataOrchestrator:
         if flag in ("1", "true", "yes", "on"):
             return
 
+        # Runtime admin kill-switch.
+        try:
+            from app.market.dhan_connection_guard import is_enabled
+            if not is_enabled():
+                return
+        except Exception:
+            # If guard is unavailable for any reason, don't block stream startup.
+            pass
+
         commodities_enabled = (os.getenv("ENABLE_COMMODITIES") or "").strip().lower() in ("1", "true", "yes", "on")
 
         self.start_equity_stream()

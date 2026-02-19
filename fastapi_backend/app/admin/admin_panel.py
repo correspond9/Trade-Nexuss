@@ -28,6 +28,11 @@ class UserAuthCheckIn(BaseModel):
     password: str | None = None
 
 
+class DhanConnectionToggleIn(BaseModel):
+    enabled: bool
+    reason: str | None = None
+
+
 async def _load_master_background():
     _load_master_state["running"] = True
     _load_master_state["last_error"] = None
@@ -152,6 +157,56 @@ def user_auth_check(payload: UserAuthCheckIn, user=Depends(get_current_user), db
             "password_match": password_match,
         },
     }
+
+
+@router.get("/dhan-connection/status")
+def dhan_connection_status(user=Depends(get_current_user)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+    from app.market.dhan_connection_guard import get_status
+
+    return {"status": "ok", "data": get_status()}
+
+
+@router.post("/dhan-connection")
+def dhan_connection_toggle(payload: DhanConnectionToggleIn, user=Depends(get_current_user)):
+    require_role(user, ["ADMIN", "SUPER_ADMIN"])
+
+    actor = getattr(user, "username", None) or "admin"
+
+    if payload.enabled is False:
+        from app.market.dhan_connection_guard import disable
+
+        status = disable(reason=payload.reason, actor=actor)
+
+        # Close active websocket feed and prevent reconnect (guard handles the latter).
+        try:
+            from app.dhan.live_feed import stop_live_feed
+            stop_live_feed()
+        except Exception:
+            pass
+
+        # Drop cached SDK clients so no stale tokens linger.
+        try:
+            from app.services.dhan_sdk_bridge import clear_sdk_client_cache
+            clear_sdk_client_cache()
+        except Exception:
+            pass
+
+        return {"status": "ok", "data": status}
+
+    from app.market.dhan_connection_guard import enable
+
+    status = enable(actor=actor)
+
+    # Resume connection attempts (if env doesn't force-disable).
+    try:
+        from app.dhan.live_feed import reset_cooldown, start_live_feed
+        reset_cooldown()
+        start_live_feed()
+    except Exception:
+        pass
+
+    return {"status": "ok", "data": status}
 
 @router.post("/suspend/{username}")
 def suspend_user(username: str, user=Depends(get_current_user), db: Session = Depends(get_db)):

@@ -710,6 +710,13 @@ class AuthoritativeOptionChainService:
         """Fetch F&O instrument lot sizes from DhanHQ API with proper rate limiting"""
         try:
             logger.info("🔄 Fetching F&O lot sizes from DhanHQ API...")
+
+            # Emergency admin disconnect: never hit Dhan REST while disabled.
+            try:
+                from app.market.dhan_connection_guard import ensure_enabled
+                ensure_enabled("Dhan REST")
+            except Exception:
+                return False
             
             # Check if cache needs refresh (24 hours TTL)
             now = datetime.now()

@@ -113,6 +113,11 @@ class DhanMarginService:
         return segment_map.get(normalized) if normalized is not None else None
 
     async def _post(self, endpoint: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        try:
+            from app.market.dhan_connection_guard import ensure_enabled
+            ensure_enabled("Dhan REST")
+        except Exception:
+            return None
         if await self.rate_limiter.is_blocked_async("data"):
             return None
         await self.rate_limiter.wait("data")
